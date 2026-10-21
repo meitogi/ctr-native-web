@@ -159,3 +159,51 @@ test('addressKey : FNV-1a 64 split into unsigned halves', () => {
   assert.deepEqual(addressKey('a'), [0x8601ec8c, 0xaf63dc4c]);
   assert.deepEqual(addressKey(''), [0x84222325, 0xcbf29ce4]);
 });
+
+test('guest : a link opened before the game asks keeps what the host sent, behind CONNECTED', async () => {
+  const fake = fakeNetwork();
+  const hostNet = createOnlineNet();
+  hostNet.host(fake.hostRoom('A'));
+  const net = createOnlineNet();
+  net.guest(fake.guestRoom('B'));
+  net.preconnect(); // the page, as soon as the room is open
+  await tick();
+  const [{ peer }] = drain(hostNet);
+  hostNet.send(peer, bytes(0x00, 16), 1); // SG_ROOMS, before the game picked Private Room
+  await tick();
+  assert.equal(net.connect(), 0);
+  assert.deepEqual(drain(net), [
+    { peer: -1, event: EVENT.CONNECTED },
+    { peer: -1, event: EVENT.DATA, bytes: bytes(0x00, 16) },
+  ]);
+  assert.equal(fake.connects, 1);
+});
+
+test('guest : reset drops the attempt in flight ; its link, when it comes, is closed', async () => {
+  const fake = fakeNetwork();
+  const hostNet = createOnlineNet();
+  hostNet.host(fake.hostRoom('A'));
+  const net = createOnlineNet();
+  net.guest(fake.guestRoom('B', { connectDelayMs: 20 }));
+  net.preconnect();
+  net.reset();
+  await tick(40);
+  assert.equal(net.hostLink, null);
+  assert.deepEqual(drain(net), []);
+  assert.deepEqual(drain(hostNet).map((e) => e.event), [EVENT.CONNECTED, EVENT.DISCONNECTED], 'the host saw it come and go');
+});
+
+test('stats : messages counted by OnlineCTR type, both ways', async () => {
+  const fake = fakeNetwork();
+  const hostNet = createOnlineNet();
+  hostNet.host(fake.hostRoom('A'));
+  const net = createOnlineNet();
+  net.guest(fake.guestRoom('B'));
+  net.connect();
+  await tick();
+  const [{ peer }] = drain(hostNet);
+  net.send(-1, bytes(0x06, 1), 1); // CG_WEAPON
+  hostNet.send(peer, bytes(0x08, 1), 1); // SG_WEAPON
+  await tick();
+  assert.deepEqual([net.stats.sent[6], hostNet.stats.received[6], hostNet.stats.sent[8], net.stats.received[8]], [1, 1, 1, 1]);
+});

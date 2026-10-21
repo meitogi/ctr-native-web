@@ -45,10 +45,13 @@ export function createOnlineNet({ name = 'Player' } = {}) {
     hostLink: null,
     pending: null,
     lastError: null,
+    /** messages by OnlineCTR type (low nibble of the first byte), for the debug getter */
+    stats: { sent: {}, received: {} },
   };
   let attached = false; // guest : the game is waiting for this connect
 
   const push = (entry) => { net.queue.push(entry); };
+  const count = (table, bytes) => { const t = bytes[0] & 0xf; table[t] = (table[t] ?? 0) + 1; };
 
   // ---- page side ----
 
@@ -62,7 +65,10 @@ export function createOnlineNet({ name = 'Player' } = {}) {
       net.links[peer] = link;
       link.ctrPeer = peer;
       push({ peer, event: EVENT.CONNECTED, key: addressKey(link.peerId) });
-      link.on('message', (bytes) => push({ peer, event: EVENT.DATA, bytes }));
+      link.on('message', (bytes) => {
+        count(net.stats.received, bytes);
+        push({ peer, event: EVENT.DATA, bytes });
+      });
       link.on('close', () => {
         if (net.links[peer] !== link) return; // kicked : the core already forgot it
         delete net.links[peer];
@@ -81,23 +87,23 @@ export function createOnlineNet({ name = 'Player' } = {}) {
 
   net.poll = () => net.queue.shift();
 
-  /** Guest : 0 = started (CONNECTED / DISCONNECTED follow in the queue), -1 = refused. */
-  net.connect = () => {
-    if (net.role !== 'guest') return -1;
-    attached = true;
-    if (net.hostLink) {
-      net.queue.length = 0;
-      push({ peer: -1, event: EVENT.CONNECTED });
-      return 0;
-    }
-    // The bridge gives up an attempt after 3 s and retries : the attempt in flight is kept,
-    // a retry waits for the same link.
-    if (net.pending) return 0;
+  /**
+   * Guest : starts the link to the host, or keeps the one in flight. The page calls it as soon
+   * as the room is open (a copy-paste exchange takes minutes, a WebRTC handshake seconds), the
+   * game when the player picks « Private Room ».
+   */
+  net.preconnect = () => {
+    if (net.role !== 'guest' || net.hostLink || net.pending) return;
     net.lastError = null;
     const pending = net.room.connect().then((link) => {
-      if (net.pending === pending) net.pending = null;
+      if (net.pending !== pending) return link.close(); // reset meanwhile
+      net.pending = null;
       net.hostLink = link;
-      link.on('message', (bytes) => { if (net.hostLink === link) push({ peer: -1, event: EVENT.DATA, bytes }); });
+      link.on('message', (bytes) => {
+        if (net.hostLink !== link) return;
+        count(net.stats.received, bytes);
+        push({ peer: -1, event: EVENT.DATA, bytes });
+      });
       link.on('close', () => {
         if (net.hostLink !== link) return;
         net.hostLink = null;
@@ -105,11 +111,34 @@ export function createOnlineNet({ name = 'Player' } = {}) {
       });
       if (attached) push({ peer: -1, event: EVENT.CONNECTED });
     }, (error) => {
-      if (net.pending === pending) net.pending = null;
+      if (net.pending !== pending) return;
+      net.pending = null;
       net.lastError = error;
       if (attached) push({ peer: -1, event: EVENT.DISCONNECTED });
     });
     net.pending = pending;
+  };
+
+  /** Guest : forgets the link and the attempt in flight (the page reopens the room with other settings). */
+  net.reset = () => {
+    net.disconnect();
+    net.pending = null;
+    net.lastError = null;
+  };
+
+  /** Guest : 0 = started (CONNECTED / DISCONNECTED follow in the queue), -1 = refused. */
+  net.connect = () => {
+    if (net.role !== 'guest') return -1;
+    attached = true;
+    // A link opened before the game asked : what the host already sent (its room list) is
+    // queued behind the CONNECTED the bridge waits for.
+    if (net.hostLink) {
+      net.queue.unshift({ peer: -1, event: EVENT.CONNECTED });
+      return 0;
+    }
+    // The bridge gives up an attempt after 3 s and retries : the attempt in flight is kept,
+    // a retry waits for the same link.
+    net.preconnect();
     return 0;
   };
 
@@ -125,7 +154,9 @@ export function createOnlineNet({ name = 'Player' } = {}) {
   /** `peer` -1 : to the host (guest) ; else to that guest (host). */
   net.send = (peer, bytes, reliable) => {
     const link = peer < 0 ? net.hostLink : net.links[peer];
-    link?.send(bytes, { reliable: !!reliable });
+    if (!link) return;
+    count(net.stats.sent, bytes);
+    link.send(bytes, { reliable: !!reliable });
   };
 
   /** Host : drop a guest, as enet_peer_disconnect_now (no DISCONNECTED event follows). */

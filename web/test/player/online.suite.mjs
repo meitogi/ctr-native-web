@@ -2,7 +2,8 @@
 // second tab opens the room link as the guest ; both play OnlineCTR's own menus with the
 // keyboard (Private Room, room 0, track, laps, character) into a race, both hold Cross, and
 // each side must see the other's kart move. Once over WebRTC (P2P), once with the guest
-// forced onto the relay's WebSocket path (openRoom mode: ws).
+// forced onto the relay's WebSocket path (openRoom mode: ws). Then a whole race in an item
+// room : both karts follow the racing line and fire their items, both screens filmed.
 //
 // RUN
 //   Build : web/build-web.sh debug -DCTR_ONLINE=ON -DCTR_WEB_PRELOAD_DISC=OFF
@@ -12,7 +13,9 @@
 //           python3 web/test/player/serve.py build-web-debug 8092
 //   Relay : (cd relay && npm ci && RELAY_KEY=<key> PORT=8787 node relay.js)
 //   Play  : bash plans/ctr-native-web/tools/play.sh online <session> 8092 -- \
-//             --set relay=ws://localhost:8787 --set rk=<key>
+//             --set relay=ws://localhost:8787 --set rk=<key> --set proofs=plans/ctr-native-web/proofs/<session>
+//           (proofs : the same root play.sh gives e2e.mjs ; the item race files the guest's
+//           screen there and puts both screens side by side)
 //   Both ports in AGENT_BROWSER_ORIGINS and forwarded. Browser : the agent browser.
 // Not a node --test file : `node --test web/test/*.test.js` never loads it.
 //
@@ -22,6 +25,9 @@
 // R6 — bridge calls per second in every client state, from octr.windowsClientSync ;
 // R7 — the guest's held Cross, sampled on the host after its own pad polling.
 
+import { spawnSync } from 'node:child_process'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { capture } from '/opt/devcontainer/base/skills/visual-loop/scripts/cdp.mjs'
 import { makePlayer, pageScript } from '/opt/devcontainer/base/skills/visual-loop/lib/player.mjs'
 import { PLAYER, recordWithSound } from './ctr.mjs'
@@ -40,6 +46,10 @@ const PRIVATE_ROOM = 7
 const CROSS = 'c' // keyboard C = Cross (platform/native_input.c)
 const BTN_CROSS = 0x10 // Cross in the pad word the bridge writes for a remote driver
 const RACE_MS = 10_000
+const ITEM_ROOM = 5 // rooms 5-9 have items (game/OnlineCTR/menu.c)
+const FIRE = 'v' // keyboard V = Circle, use the held item
+const CG_WEAPON = 6 // global.h ClientGiveMessageType
+const SG_WEAPON = 8 // global.h ServerGiveMessageType
 
 // Bridge calls per octr state : windowsClientSync is a char the bridge bumps once per call.
 const R6_PROBE = `if (!window.__r6) {
@@ -146,7 +156,7 @@ const rates = r6 => {
  * One 2-tab run. `host` is the suite's own tab (ctx) ; the guest gets a tab of its own,
  * driven with the same player harness.
  */
-async function twoTabs(ctx, mode) {
+async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}) {
 	const relay = ctx.args.relay
 	const rk = ctx.args.rk ?? ''
 	if (!relay) ctx.skip('no relay : --set relay=ws://localhost:8787 --set rk=<key> (a local ctr-relay, see RUN)')
@@ -155,7 +165,8 @@ async function twoTabs(ctx, mode) {
 	const host = { name: 'host', js: ctx.js, press: ctx.press, frames: ctx.frames, navigate: navigate(ctx.sid) }
 
 	await boot(host, `${origin}/index.html`)
-	await ctx.js(`localStorage.setItem('ctr-online.forceWs', ${JSON.stringify(mode === 'ws' ? '1' : '')})
+	await ctx.js(`localStorage.setItem('ctr-online.path', ${JSON.stringify(mode === 'ws' ? 'relay' : 'auto')})
+		localStorage.setItem('ctr-online.points', 'relay')
 		const set = (id, v) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('input')) }
 		set('online-name', 'Host'); set('online-relay', ${JSON.stringify(relay)}); set('online-rk', ${JSON.stringify(rk)})
 		await window.__ctrOnline.host()
@@ -168,13 +179,41 @@ async function twoTabs(ctx, mode) {
 	// opens on a small same-origin file (the agent browser's proxy refuses about:blank), so the
 	// player's page script is in place before the game page loads.
 	const { targetId } = await ctx.conn.send('Target.createTarget', { url: `${origin}/preload-flag.js`, newWindow: true })
-	const { sessionId: gsid } = await ctx.conn.send('Target.attachToTarget', { targetId, flatten: true })
+	// The guest's session, re-attached when the agent browser's proxy stops knowing it (it
+	// refuses « session is not one of this page » mid-run, with no detach event) ; every guest
+	// command goes through gconn, so the player harness follows the new session.
+	const gs = { sid: null, reattached: 0 }
+	const attachGuest = async () => {
+		gs.sid = (await ctx.conn.send('Target.attachToTarget', { targetId, flatten: true })).sessionId
+		await ctx.conn.send('Page.enable', {}, gs.sid)
+		await ctx.conn.send('Runtime.enable', {}, gs.sid)
+		await ctx.conn.send('Inspector.enable', {}, gs.sid).catch(() => {})
+	}
+	// What happens to the guest's target, for the failure message.
+	gs.events = []
+	ctx.conn.on('Inspector.targetCrashed', (p, sid) => { if (sid === gs.sid) gs.events.push(`crashed at ${new Date().toISOString()}`) })
+	ctx.conn.on('Inspector.detached', (p, sid) => { if (sid === gs.sid) gs.events.push(`inspector detached : ${p.reason}`) })
+	ctx.conn.on('Runtime.executionContextsCleared', (p, sid) => { if (sid === gs.sid) gs.events.push('contexts cleared (navigation or crash)') })
+	ctx.conn.on('Page.frameNavigated', (p, sid) => { if (sid === gs.sid && !p.frame.parentId) gs.events.push(`navigated ${p.frame.url.slice(0, 60)}`) })
+	const gconn = {
+		on: (...a) => ctx.conn.on(...a),
+		send: async (method, params) => {
+			try {
+				return await ctx.conn.send(method, params, gs.sid)
+			} catch (e) {
+				if (!/session is not one of this page|No session with given id/.test(e.message) || gs.reattached >= 5) throw e
+				gs.reattached++
+				await attachGuest()
+				return ctx.conn.send(method, params, gs.sid)
+			}
+		},
+	}
+	await attachGuest()
 	try {
-		await ctx.conn.send('Page.enable', {}, gsid)
-		await ctx.conn.send('Page.addScriptToEvaluateOnNewDocument', { source: pageScript(PLAYER) }, gsid)
-		const gjs = expression => ctx.evaluate(ctx.conn, gsid, `(async () => { ${expression} })()`)
-		const gp = makePlayer({ conn: ctx.conn, sid: gsid, js: gjs, capture, dir: '', current: () => ({ id: 'guest', proofs: [] }), pressFrames: PLAYER.pressFrames })
-		const guest = { name: 'guest', js: gjs, press: gp.press, frames: gp.frames, navigate: navigate(gsid) }
+		await gconn.send('Page.addScriptToEvaluateOnNewDocument', { source: pageScript(PLAYER) })
+		const gjs = expression => ctx.evaluate(gconn, gs.sid, `(async () => { ${expression} })()`)
+		const gp = makePlayer({ conn: gconn, sid: null, js: gjs, capture, dir: '', current: () => ({ id: 'guest', proofs: [] }), pressFrames: PLAYER.pressFrames })
+		const guest = { name: 'guest', gs, gconn, js: gjs, press: gp.press, frames: gp.frames, navigate: url => gconn.send('Page.navigate', { url }) }
 		await boot(guest, hs.link)
 		await gjs(`const e = document.getElementById('online-name'); e.value = 'Guest'; e.dispatchEvent(new Event('input')); return true`)
 		const vis = [await ctx.js('return document.visibilityState'), await gjs('return document.visibilityState')]
@@ -198,9 +237,15 @@ async function twoTabs(ctx, mode) {
 		if (hl?.peer !== 0) throw new Error(`host : guest peer id ${hl?.peer}`)
 		await ctx.shot(`${mode}-room-list`)
 
-		// Room 0 : the host first (DriverID 0 picks the track)
+		// Room 0 (no items), or room 5 (the first item room) : the host first (DriverID 0 picks the track)
+		const room = itemRoom ? ITEM_ROOM : 0
+		for (const tab of [host, guest]) for (let i = 0; i < room; i++) {
+			await tab.press('ArrowDown')
+			await tab.frames(8)
+		}
 		await host.press(CROSS)
 		await until(host, 'the track pick', s => s.octr.CurrState === ST.HOST_TRACK_PICK, 15_000)
+		if ((await online(host)).octr.serverRoom !== room) throw new Error(`host joined room ${(await online(host)).octr.serverRoom}, not ${room}`)
 		await guest.press(CROSS)
 		await until(guest, 'the track wait', s => s.octr.CurrState === ST.GUEST_TRACK_WAIT, 15_000)
 		await until(host, 'two drivers', s => s.octr.NumDrivers === 2 && s.octr.names[1] === 'Guest', 15_000)
@@ -209,9 +254,16 @@ async function twoTabs(ctx, mode) {
 		await sleep(600)
 		await host.press(CROSS) // laps
 		for (const tab of [host, guest]) await until(tab, 'the character pick', s => s.octr.CurrState === ST.CHARACTER_PICK, 15_000)
-		await host.press(CROSS)
-		await guest.press(CROSS)
+		// Lock a character : a press landing while the menu opens is lost, press again until locked.
+		for (const tab of [host, guest]) {
+			for (let i = 0; i < 6 && (await online(tab)).octr.CurrState === ST.CHARACTER_PICK; i++) {
+				await tab.press(CROSS)
+				await sleep(1500)
+			}
+		}
 		for (const tab of [host, guest]) await until(tab, 'the race (SG_STARTRACE)', s => s.octr.CurrState === ST.START_RACE, 180_000, 500)
+
+		if (itemRace) return itemRaceOn(ctx, { host, guest, gp, gjs })
 
 		// Race : both hold Cross ; the host's tab is filmed, its sound unmuted for the video
 		const samples = { host: [], guest: [] }
@@ -243,7 +295,169 @@ async function twoTabs(ctx, mode) {
 	}
 }
 
+/**
+ * Drives one tab's kart along the level's racing line until its race ends (pure pursuit on
+ * window.__ctr, as time-trial.suite.mjs does), firing whatever item it holds every 1.5 s.
+ * `p` : that tab's player (hold / release / press), `js` : its evaluate.
+ */
+async function drive(p, js, deadline) {
+	const ACCEL = 'c'
+	const REVERSE = 'x'
+	const read = () => js('if (!window.__ctr) return null; const { track, ...s } = window.__ctr; return s')
+	const line = await js('return window.__ctr?.track ?? null')
+	const path = line?.path ?? []
+	const n = path.length
+	if (n < 10) throw new Error('no racing line in window.__ctr (debug build ?)')
+	const seg = path.map((q, i) => Math.hypot(path[(i + 1) % n].x - q.x, path[(i + 1) % n].z - q.z))
+	const spacing = [...seg].sort((a, b) => a - b)[n >> 1]
+	const wrap = a => Math.atan2(Math.sin(a), Math.cos(a))
+	let near = -1
+	const nearest = k => {
+		const span = near < 0 ? n : 40
+		const from = near < 0 ? 0 : near - 10
+		let best = Infinity
+		let at = near
+		for (let j = 0; j < span; j++) {
+			const i = (((from + j) % n) + n) % n
+			const d = (path[i].x - k.pos.x) ** 2 + (path[i].z - k.pos.z) ** 2 + 4 * (path[i].y - k.pos.y) ** 2
+			if (d < best) { best = d; at = i }
+		}
+		near = at
+		return at
+	}
+	let held = null
+	const steer = async want => {
+		if (want === held) return
+		if (held) await p.release(held)
+		if (want) await p.hold(want)
+		held = want
+	}
+	let fired = 0
+	let lastFire = Date.now()
+	let slowSince = 0
+	let maxSpeed = 0
+	let lastPos = null
+	let end = null
+	await p.hold(ACCEL)
+	try {
+		while (Date.now() < deadline) {
+			const s = await read()
+			const k = s?.kart
+			if (!k) { await sleep(100); continue }
+			if (s.screen === 'finished' || k.finished) { end = s; break }
+			maxSpeed = Math.max(maxSpeed, k.speed)
+			let i = nearest(k)
+			for (let d = 0; d < spacing * 2 + Math.max(0, k.speed) / 25; i = (i + 1) % n) d += seg[i]
+			const t = path[i]
+			const err = wrap(Math.atan2(t.x - k.pos.x, t.z - k.pos.z) - (k.angle * 2 * Math.PI) / 4096)
+			const moved = lastPos ? Math.hypot(k.pos.x - lastPos.x, k.pos.z - lastPos.z) : Infinity
+			lastPos = k.pos
+			if ((maxSpeed > 0 && k.speed < maxSpeed / 5) || moved < 5) slowSince ||= Date.now()
+			else slowSince = 0
+			if (slowSince && Date.now() - slowSince > 1000) {
+				await p.release(ACCEL)
+				await steer(err > 0 ? 'ArrowRight' : 'ArrowLeft')
+				await p.hold(REVERSE)
+				await sleep(1100)
+				await p.release(REVERSE)
+				await steer(null)
+				await p.hold(ACCEL)
+				slowSince = 0
+				near = -1
+				lastPos = null
+				continue
+			}
+			await steer(Math.abs(err) > 0.05 ? (err > 0 ? 'ArrowLeft' : 'ArrowRight') : null)
+			if (Date.now() - lastFire > 1500) {
+				await p.press(FIRE)
+				fired++
+				lastFire = Date.now()
+			}
+			await sleep(30)
+		}
+	} finally {
+		await steer(null)
+		await p.release(ACCEL)
+	}
+	return { finished: !!end, rank: end?.kart?.rank ?? null, fired }
+}
+
+/** The run's proof folder : the newest one under --set proofs=<root> holding `file`. */
+function runDirOf(root, file) {
+	if (!root) return null
+	const dirs = readdirSync(root).map(d => join(root, d)).filter(d => existsSync(join(d, file)))
+	return dirs.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] ?? null
+}
+
+/**
+ * The item race : both drive the whole race and fire, both screens are filmed with their
+ * sound, then put side by side in one MP4 (H.264 + MP3, what VS Code's preview plays).
+ */
+async function itemRaceOn(ctx, { host, guest, gp, gjs }) {
+	const shot = await ctx.shot('item-race-start')
+	const dir = runDirOf(ctx.args.proofs, shot.file)
+	const guestCur = { id: 'ONLINE-ITEM-RACE-guest', proofs: [] }
+	const gRec = dir ? makePlayer({ conn: guest.gconn, sid: null, js: gjs, capture, dir, current: () => guestCur, pressFrames: PLAYER.pressFrames }) : null
+	const deadline = Date.now() + 240_000
+	const race = () => Promise.all([
+		drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, deadline),
+		drive(gp, gjs, deadline),
+	])
+	let results
+	// Which session went away, if one does : a detach or a renderer crash, host or guest.
+	const gone = []
+	const offs = [
+		ctx.conn.on('Target.detachedFromTarget', p => gone.push(`detached ${p.sessionId === guest.gs.sid ? 'guest' : p.sessionId === ctx.sid ? 'host' : p.sessionId}`)),
+		ctx.conn.on('Inspector.targetCrashed', (p, sid) => gone.push(`crashed ${sid === guest.gs.sid ? 'guest' : sid === ctx.sid ? 'host' : sid}`)),
+	]
+	let hostVideo
+	const send = ctx.conn.send
+	ctx.conn.send = (method, params, sid, ...rest) => send(method, params, sid, ...rest).catch(e => {
+		const who = sid === guest.gs.sid ? 'guest' : sid === ctx.sid ? 'host' : `session ${sid}`
+		throw new Error(`${e.message} [${method} on ${who}]`)
+	})
+	try {
+		if (!gRec) hostVideo = await recordWithSound(ctx, 'host-screen', async () => { results = await race() })
+		else {
+			// The guest's recorder starts first : once the host's records, the proxy has refused
+			// the guest's session (see LOG 9).
+			// The guest is filmed by the CDP screencast, not an in-page recorder : starting a
+			// second MediaRecorder in the guest's tab has killed its renderer (« Render process
+			// gone ») at every try (LOG 9). Silent ; the side-by-side carries the host's sound.
+			guestCur.video = await gRec.record('guest-screen', async () => {
+				hostVideo = await recordWithSound(ctx, 'host-screen', async () => { results = await race() })
+			}, { screencast: true })
+		}
+	} catch (e) {
+		throw new Error(`${e.message}${gone.length ? ` (${gone.join(', ')})` : ' (no session detached or crashed)'} · guest events : ${guest.gs.events.join(' | ') || 'none'}`)
+	} finally {
+		for (const off of offs) off()
+		ctx.conn.send = send
+	}
+	const [h, g] = results
+	const hs = await online(host)
+	const gs = await online(guest)
+	const fired = { hostSent: hs.stats.received[CG_WEAPON] ?? 0, toGuest: hs.stats.sent[SG_WEAPON] ?? 0, guestGot: gs.stats.received[SG_WEAPON] ?? 0, guestSent: gs.stats.sent[CG_WEAPON] ?? 0 }
+	let both = 'no proofs root (--set proofs=<root>) : guest screen not filmed'
+	if (dir && guestCur.video) {
+		const out = join(dir, '99-online-item-race-both-screens.mp4')
+		const r = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', join(dir, hostVideo.file), '-i', join(dir, guestCur.video.file),
+			'-filter_complex', '[0:v]scale=640:480,setsar=1[a];[1:v]scale=640:480,setsar=1[b];[a][b]hstack=inputs=2,fps=30[v]',
+			'-map', '[v]', '-map', '0:a?', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'libmp3lame', '-b:a', '192k', '-movflags', '+faststart', out])
+		both = r.status === 0 ? `both screens : ${out}` : `side-by-side failed : ${r.stderr}`
+	}
+	if (!(h.fired > 0 && g.fired > 0)) throw new Error('nobody pressed fire')
+	return `guest session re-attached ${guest.gs.reattached}× · host ${h.finished ? `finished, rank ${h.rank}` : 'did not finish'} · guest ${g.finished ? `finished, rank ${g.rank}` : 'did not finish'} · weapon messages ${JSON.stringify(fired)} · ${both}`
+}
+
 export default async ctx => {
 	await ctx.scenario('ONLINE-2TAB-P2P', () => twoTabs(ctx, 'auto'))
 	await ctx.scenario('ONLINE-2TAB-WS', () => twoTabs(ctx, 'ws'))
+	// the hold race of ONLINE-2TAB-WS in an item room : runs on a release build too (no __ctr)
+	await ctx.scenario('ONLINE-ITEM-ROOM', () => twoTabs(ctx, 'ws', { itemRoom: true }))
+	// Opt-in (--set itemRace=1) : on the headless agent browser the guest's renderer dies
+	// (« Render process gone ») as this race starts, filmed or not ; under investigation.
+	await ctx.scenario('ONLINE-ITEM-RACE', () => ctx.args.itemRace
+		? twoTabs(ctx, 'ws', { itemRace: true })
+		: ctx.skip('opt-in : --set itemRace=1 (the guest tab crashes at the start of this race on the agent browser, see LOG 9)'))
 }

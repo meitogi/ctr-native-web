@@ -805,19 +805,28 @@ panel), `tests/online/web_client.c`, `web/online/test/`.
   menu), the server is not serviced. Guests' messages wait in the JS queue,
   and their room is frozen until the host picks Private Room again.
   Hardening this is session 11's.
-- **Page (the user's choices).** An « Online » panel on the right of the 4:3
-  canvas (`page.js`, fixed position, so it covers the canvas edge in a narrow
-  window).
-  - A name field.
-  - **Host**: relay URL and key fields, prefilled from `?relay=&rk=`,
-    default `wss://ctr-relay.suuuper.app`, remembered in `localStorage`.
-    The new link is relay-only, and `relay` / `rk` are taken out of the
-    link's query, since they travel only after `#`.
-  - **Join**: paste a link, or open one (`#room=…` joins at load).
-  - A « Force relay (WebSocket) » checkbox for guests.
-  - The path to the host, or each guest's path.
-  - Debug getter: `window.__ctrOnline.state()`, with octr fields, links and
-    per-slot kart samples. Never `window.__ctr`.
+- **Page (the user's choices).** An « Online » sidebar on the right of the
+  4:3 canvas (`page.js`).
+  - **Layout**: the page makes room for the sidebar, which covers the game's
+    edge only in a narrow window. Closed, it is a round button that is
+    invisible while the mouse rests, brightens as the mouse approaches, and
+    opens the sidebar on click.
+  - **Language**: English or French, following the browser.
+  - **Host**: the *meeting points* of the new room, in order (our relay,
+    with its address and key ; public brokers ; copy-paste code). Each has a
+    one-line explanation, and only the relay can also carry the game.
+  - **Guest**: the *connection* (automatic : direct, else via the relay ;
+    or always via the relay).
+  - **Copy-paste**: the codes to exchange are shown in the sidebar.
+  - **Status**: each link's path in plain words (« direct (IPv6) »,
+    « via the relay ») and where the players met.
+  - **Pre-connect**: a guest starts its link to the host as soon as the room
+    opens, which a copy-paste exchange needs. What the host sends before the
+    game picks Private Room waits behind the `CONNECTED` event.
+  - `relay` / `rk` are taken out of the shared link's query.
+  - **Debug getter**: `window.__ctrOnline.state()`, with octr, links,
+    per-slot kart samples and message counts by OnlineCTR type. Never
+    `window.__ctr`.
 - **Channels (D7).** `reliable` → `ctl`, else `game` (the code's name for
   D7's `race`). The WebSocket link carries both through the relay. The link
   API does not say which channel a message came in on, so a received
