@@ -1,6 +1,8 @@
-# CTR Native
+# CTR Native Web
 
-A native PC port of Crash Team Racing (PS1, 1999), built on top of the [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) decompilation project.
+A fork of [CTR Native](https://github.com/CTR-tools/ctr-native) that adds a browser target : WebAssembly, WebGL2, your own NTSC-U disc image dropped into the page, and online play over WebRTC. Work in progress ; the sections below describe the upstream native port, which this fork keeps building.
+
+CTR Native is a native PC port of Crash Team Racing (PS1, 1999), built on top of the [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) decompilation project.
 
 ## Philosophy
 
