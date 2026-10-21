@@ -470,6 +470,9 @@ void UI_RenderFrame_Racing()
 				sVar2 = hudStructPtr[UI_HUD_SLOT_RANK].y;
 #ifndef USE_ONLINE
 				UI_DrawPosSuffix(sVar1, sVar2, playerStruct, (s16)partTimeVariable5);
+#else
+				(void)sVar1;
+				(void)sVar2;
 #endif
 
 				if (numPlyr > 2)

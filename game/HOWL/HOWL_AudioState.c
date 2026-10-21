@@ -197,6 +197,11 @@ void Audio_Update1(void)
 #if defined(CTR_NATIVE)
 	struct GameTracker *entryGT = GAME_TRACKER;
 #endif
+#ifdef USE_ONLINE
+	// the lead-driver searches are replaced by drivers[0]
+	(void)i;
+	(void)candidate;
+#endif
 
 	switch ((s16)((u16)GAME_AUDIO_STATE - 1))
 	{

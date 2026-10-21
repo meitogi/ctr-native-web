@@ -224,7 +224,7 @@ void UI_DrawRaceClock(s16 labelPosX, s16 labelPosY, u32 flags, struct Driver *dr
 #ifdef USE_ONLINE
 	{
 		TotalTime tt;
-		char displayTime[15]; // 99:59:59.999 or BEST: 9:59.999
+		char displayTime[32]; // 99:59:59.999 or BEST: 9:59.999 (upstream: 15, too small for any int)
 
 		ElapsedTimeToTotalTime(&tt, timeElapsed);
 		sprintf(displayTime, "%d:%02d:%02d.%03d", tt.hours, tt.minutes, tt.seconds, tt.miliseconds);
