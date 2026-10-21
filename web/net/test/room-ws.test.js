@@ -5,6 +5,7 @@ import { after, before, test } from 'node:test';
 import { createRelay } from '../../../relay/relay.js';
 import { formatRoomLink, newRoom } from '../link.js';
 import { openRoom } from '../room.js';
+import { TAG } from '../transport.js';
 
 const RK = 'relay-key-for-tests';
 const MARKER = 'plaintext-marker-7f3a';
@@ -108,6 +109,29 @@ test('a guest that opens before the host waits for it', async () => {
   const l = await pending;
   assert.equal((await hostLink).peerId, guest.selfId);
   assert.equal(l.peerId, host.selfId);
+  host.close(); guest.close();
+});
+
+test('a stray relay frame does not replace a live WebRTC link ; a join does', async () => {
+  const link = newRoom({ relay: relayUrl, rk: RK });
+  const host = await openRoom({ link, role: 'host' });
+  const guest = await openRoom({ link, role: 'guest', mode: 'ws' });
+  await sleep(100);
+  // stands in for a WebRTC link already established with this guest
+  const rtc = { peerId: guest.selfId, backend: 'webrtc', closed: false, close() { this.closed = true; } };
+  host.links[guest.selfId] = rtc;
+  let links = 0;
+  host.on('link', () => links++);
+  await guest.signaling.data(host.selfId, new Uint8Array([TAG.game, 1, 2]));
+  await sleep(200);
+  assert.equal(rtc.closed, false, 'a game frame through the relay leaves the WebRTC link alone');
+  assert.equal(host.links[guest.selfId], rtc);
+  assert.equal(links, 0);
+  await guest.signaling.data(host.selfId, new Uint8Array([TAG.join]));
+  await sleep(200);
+  assert.equal(rtc.closed, true, 'a join means the guest fell back : the relay link replaces it');
+  assert.equal(host.links[guest.selfId].backend, 'ws');
+  assert.equal(links, 1);
   host.close(); guest.close();
 });
 

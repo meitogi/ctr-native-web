@@ -46,7 +46,9 @@ export async function roomKeys(secret, room) {
  * this sealer, then a 64-bit counter ; the additional data binds room, sender and recipient.
  * So the relay can neither read a message, forge one, redirect it to another peer, nor
  * replay it : `open()` refuses a counter that does not increase for that sender.
- * One sealer per peer identity (its counter is shared by everything that peer sends).
+ * One sealer per peer identity (its counter is shared by everything that peer sends) :
+ * a receiver pins the first IV prefix it accepts from an id, so a new sealer needs a new id
+ * (openRoom draws a fresh one per join).
  * @param {CryptoKey} aead
  * @param {string} room
  * @param {string} selfId

@@ -52,6 +52,14 @@ test('open refuses : wrong key, tampering, wrong sender, wrong recipient, replay
   assert.equal(await bob.open('alice', second), null, 'older counter after a newer one');
 });
 
+test('a second sealer under an id already seen is refused (a new sealer needs a new id)', async () => {
+  const { room, key } = newRoom();
+  const { aead } = await roomKeys(key, room);
+  const bob = createSealer(aead, room, 'bob');
+  assert.ok(await bob.open('alice', await createSealer(aead, room, 'alice').seal('bob', bytes('first'))));
+  assert.equal(await bob.open('alice', await createSealer(aead, room, 'alice').seal('bob', bytes('again'))), null);
+});
+
 test('the same secret under another room id derives other keys', async () => {
   const { room, key } = newRoom();
   const a = createSealer((await roomKeys(key, room)).aead, room, 'alice');
