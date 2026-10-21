@@ -101,6 +101,23 @@ freely, subject to the following restrictions:
    misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.
 
+## ENet
+
+Source: <https://github.com/lsalzman/enet>
+
+Path: `externals/enet`
+
+ENet provides the reliable UDP transport of the OnlineCTR protocol
+(`CTR_ONLINE` builds and `tests/online`).
+
+Vendored version: 1.3.18 (`v1.3.18`, commit
+`2662c0de09e36f2a2030ccc2c528a3e4c9e8138a`), sources, headers, `LICENSE`,
+`README`, `ChangeLog` and `CMakeLists.txt` unchanged.
+
+Copyright (c) 2002-2024 Lee Salzman
+
+License: MIT (see `externals/enet/LICENSE`)
+
 ## maspsx
 
 Source: <https://github.com/mkst/maspsx>
