@@ -66,7 +66,15 @@ const STRINGS = {
     connecting: 'Connecting to the host…',
     notConnected: 'Not connected',
     game: (s) => `In the game : ${s}`,
-    hint: 'In the game : Online → Private Room, then the same room number as the host.',
+    controls: [
+      'Controls (keyboard) :',
+      '  arrows = D-pad (steer, menus)    C = Cross (accelerate, OK)    V = Circle (use item)',
+      '  X = Square (brake, reverse)      Z = Triangle (back)',
+      '  L Shift = L1 (hop / drift)       R Shift = R1 (hop / drift)    L Ctrl = L2    R Ctrl = R2',
+      '  Enter = Start (pause)            Space = Select (leave the online room)',
+      '  A gamepad works as is (standard mapping). F4 moves the keyboard to the next player.',
+    ],
+    hint: 'Once there is a room, the game skips its server menu and lists the rooms : pick the same room number as the host (C = Cross).',
     paths: { 'direct-ipv6': 'direct (IPv6)', 'direct-lan': 'direct (local network)', 'direct-nat': 'direct (through NAT)', relay: 'via the relay' },
     meets: { relay: 'our relay', mqtt: 'public brokers', paste: 'copy-paste' },
     states: ['starting', 'server menu', 'room list', 'version error', 'joining', 'track choice', 'waiting for the track', 'character choice', 'waiting for the others', 'loading', 'start line', 'racing', 'results'],
@@ -123,7 +131,15 @@ const STRINGS = {
     connecting: 'Connexion à l\'hôte…',
     notConnected: 'Pas connecté',
     game: (s) => `Dans le jeu : ${s}`,
-    hint: 'Dans le jeu : Online → Private Room, puis le même numéro de salle que l\'hôte.',
+    controls: [
+      'Commandes (clavier) :',
+      '  flèches = croix directionnelle (diriger, menus)    C = Croix (accélérer, valider)    V = Rond (utiliser l\'objet)',
+      '  X = Carré (freiner, reculer)      Z = Triangle (retour)',
+      '  Maj gauche = L1 (saut / dérapage)    Maj droite = R1 (saut / dérapage)    Ctrl gauche = L2    Ctrl droite = R2',
+      '  Entrée = Start (pause)            Espace = Select (quitter la salle en ligne)',
+      '  Une manette marche telle quelle (mapping standard). F4 passe le clavier au joueur suivant.',
+    ],
+    hint: 'Dès qu\'il y a une partie, le jeu saute son menu de serveurs et liste les salles : prends le même numéro de salle que l\'hôte (C = Croix).',
     paths: { 'direct-ipv6': 'en direct (IPv6)', 'direct-lan': 'en direct (réseau local)', 'direct-nat': 'en direct (à travers le NAT)', relay: 'via le relais' },
     meets: { relay: 'notre relais', mqtt: 'les serveurs publics', paste: 'copier-coller' },
     states: ['démarrage', 'menu des serveurs', 'liste des salles', 'erreur de version', 'arrivée', 'choix du circuit', 'attente du circuit', 'choix du perso', 'attente des autres', 'chargement', 'ligne de départ', 'course', 'résultats'],
@@ -419,6 +435,15 @@ export function attach(Module) {
   }
   setInterval(render, 500);
 
+  // The server menu (Europe, USA… Private Room) asks a question the page already answered :
+  // once there is a room, Private Room is picked for the player, every 3 s at most (a guest
+  // whose host is not there yet goes back to that menu after the bridge's attempts).
+  let lastPick = 0;
+  setInterval(() => {
+    if (!net.room || Date.now() - lastPick < 3000) return;
+    if (Module.ctrOnlinePickPrivateRoom?.()) lastPick = Date.now();
+  }, 250);
+
   window.__ctrOnline = {
     state() {
       return {
@@ -438,6 +463,9 @@ export function attach(Module) {
     },
     host,
   };
+
+  // The controls, once, in the page's log under the canvas and in the browser's console.
+  for (const line of T.controls) Module.print?.(line);
 
   setOpen(load('panel', 'open') !== 'closed');
   if (asGuest) guest();

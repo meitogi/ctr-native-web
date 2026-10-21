@@ -1,6 +1,6 @@
 // Player suite : Online 2-tab. The suite's tab hosts a room (sv_core runs in its wasm), a
 // second tab opens the room link as the guest ; both play OnlineCTR's own menus with the
-// keyboard (Private Room, room 0, track, laps, character) into a race, both hold Cross, and
+// keyboard (room, track, laps, character ; the page picks « Private Room » itself) into a race, both hold Cross, and
 // each side must see the other's kart move. Once over WebRTC (P2P), once with the guest
 // forced onto the relay's WebSocket path (openRoom mode: ws). Then a whole race in an item
 // room : both karts follow the racing line and fire their items, both screens filmed.
@@ -118,26 +118,9 @@ async function boot(tab, url) {
 		if (await tab.js("return /\\[OnlineCTR\\]|vblank=/.test(document.getElementById('log')?.textContent ?? '')").catch(() => false)) break
 		if (attempt === 3) throw new Error(`${tab.name} : the game never started after ${attempt} loads`)
 	}
-	await until(tab, 'the server menu', s => s.octr?.CurrState === ST.PICK_SERVER, 180_000)
+	// the server menu, or already past it : the page picks Private Room as soon as it has a room
+	await until(tab, 'the server menu', s => s.octr?.CurrState >= ST.PICK_SERVER, 180_000)
 	await tab.js(R6_PROBE)
-}
-
-/** « Private Room » : Down d times then Cross. A public entry is refused at once and the menu comes back. */
-async function pickPrivateRoom(tab) {
-	let downs = PRIVATE_ROOM
-	for (let attempt = 0; attempt < 5; attempt++) {
-		for (let i = 0; i < downs; i++) {
-			await tab.press('ArrowDown')
-			await tab.frames(8)
-		}
-		await tab.press(CROSS)
-		await sleep(800)
-		const o = (await online(tab)).octr
-		if (o.serverCountry === PRIVATE_ROOM) return attempt
-		await until(tab, 'the server menu again', s => s.octr.CurrState === ST.PICK_SERVER && s.octr.boolClientBusy === 0, 15_000)
-		downs = Math.max(0, downs + (PRIVATE_ROOM - o.serverCountry))
-	}
-	throw new Error(`${tab.name} : could not reach Private Room`)
 }
 
 /** Distance a slot's kart covered over the samples. */
@@ -214,15 +197,15 @@ async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}
 		const gjs = expression => ctx.evaluate(gconn, gs.sid, `(async () => { ${expression} })()`)
 		const gp = makePlayer({ conn: gconn, sid: null, js: gjs, capture, dir: '', current: () => ({ id: 'guest', proofs: [] }), pressFrames: PLAYER.pressFrames })
 		const guest = { name: 'guest', gs, gconn, js: gjs, press: gp.press, frames: gp.frames, navigate: url => gconn.send('Page.navigate', { url }) }
+		// The guest's name before its page loads : it connects as soon as its room opens (one
+		// origin, one localStorage : the host's name is already taken by then).
+		await ctx.js(`localStorage.setItem('ctr-online.name', 'Guest'); return true`)
 		await boot(guest, hs.link)
-		await gjs(`const e = document.getElementById('online-name'); e.value = 'Guest'; e.dispatchEvent(new Event('input')); return true`)
 		const vis = [await ctx.js('return document.visibilityState'), await gjs('return document.visibilityState')]
 		if (vis.join() !== 'visible,visible') throw new Error(`a tab is not painting : visibility ${vis.join(' / ')}`)
 
-		// Server menu → room list, both through Private Room
-		await pickPrivateRoom(host)
-		await pickPrivateRoom(guest)
-		for (const tab of [host, guest]) await until(tab, 'the room list', s => s.octr.CurrState === ST.PICK_ROOM && s.octr.numRooms === 16, 30_000)
+		// Server menu → room list : the page picks Private Room by itself once it has a room
+		for (const tab of [host, guest]) await until(tab, 'the room list (Private Room picked by the page)', s => s.octr.CurrState === ST.PICK_ROOM && s.octr.numRooms === 16 && s.octr.serverCountry === PRIVATE_ROOM, 30_000)
 		const gl = (await online(guest)).links[0]
 		const hl = (await online(host)).links[0]
 		if (mode !== 'ws' && gl?.backend === 'ws') {

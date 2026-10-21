@@ -120,6 +120,8 @@
   function bootGame(serial) {
     discStatusEl.textContent = `Disc: ${serial}`;
     discBarEl.classList.add('visible');
+    // the bar is fixed : push the canvas below it instead of covering the top of the game
+    document.body.style.paddingTop = `${discBarEl.offsetHeight}px`;
     bootEl.classList.add('hidden');
     const script = document.createElement('script');
     script.src = 'ctr_native.js';

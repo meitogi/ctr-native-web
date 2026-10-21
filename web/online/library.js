@@ -10,7 +10,7 @@ addToLibrary({
   ctr_web_online_init__deps: ['$UTF8ToString'],
   ctr_web_online_init: (octr, layout, layoutLen, karts) => {
     const l = Array.from(HEAP32.subarray(layout >> 2, (layout >> 2) + layoutLen));
-    const [curr, numDrivers, driverID, levelID, numRooms, numEnded, country, room, busy, clientCount, sync, names, nameStride, maxPlayers] = l;
+    const [curr, numDrivers, driverID, levelID, numRooms, numEnded, country, room, busy, clientCount, sync, names, nameStride, maxPlayers, lockIn1] = l;
     const u8 = (off) => HEAPU8[octr + off];
     Module.ctrOnlineOctr = () => ({
       CurrState: HEAP32[(octr + curr) >> 2],
@@ -26,6 +26,16 @@ addToLibrary({
       windowsClientSync: HEAPU8[octr + sync],
       names: Array.from({ length: maxPlayers }, (_, i) => UTF8ToString(octr + names + i * nameStride, nameStride)),
     });
+    // In the browser the server menu has one valid answer, « Private Room » (entry 7) : the
+    // page's room. Picks it as the menu's Cross would (states.c then skips the menu), when
+    // the game shows that menu and is not already connecting. A plain memory write, made
+    // while the wasm sleeps : nothing calls into it (D6). Returns true when it picked.
+    Module.ctrOnlinePickPrivateRoom = () => {
+      if (HEAP32[(octr + curr) >> 2] !== 1 || u8(lockIn1) || u8(busy)) return false; // LAUNCH_PICK_SERVER
+      HEAPU8[octr + country] = 7;
+      HEAPU8[octr + lockIn1] = 1;
+      return true;
+    };
     // sampled by platform/web_online_transport.c once per bridge frame while connected
     Module.ctrOnlineKarts = () => {
       const k = HEAP32.subarray(karts >> 2, (karts >> 2) + 1 + maxPlayers * 6);

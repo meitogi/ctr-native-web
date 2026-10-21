@@ -249,7 +249,8 @@ __attribute__((constructor)) static void WebOnline_Install(void)
 {
 	struct OnlineCTR *o = NativeOnlineGame_Octr();
 
-	// byte offsets the page's debug getter reads octr with (web/online/library.js)
+	// byte offsets the page reads octr with (web/online/library.js) : its debug
+	// getter, and the server menu's pick, which the page makes for the player
 	static const int layout[] = {
 		offsetof(struct OnlineCTR, CurrState),
 		offsetof(struct OnlineCTR, NumDrivers),
@@ -265,6 +266,7 @@ __attribute__((constructor)) static void WebOnline_Install(void)
 		offsetof(struct OnlineCTR, nameBuffer),
 		NAME_LEN + 1,
 		MAX_NUM_PLAYERS,
+		offsetof(struct OnlineCTR, serverLockIn1),
 	};
 
 	NativeOnline_Configure(&WebOnline_Transport, NULL, WEB_ONLINE_ROOM_ADDRESS);
