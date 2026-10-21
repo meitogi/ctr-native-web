@@ -730,6 +730,26 @@ same file runs against the real game and against the test stub.
 `UI_DrawLapCount` needed no change: 1P already formats the lap count with
 `sprintf`.
 
+### Reading the mapping table after session 8
+
+The mapping table above is session 7's survey, written before the code.
+Its "Today" cells and line numbers have drifted, and some R rows still read
+as work to do. Use `grep -n USE_ONLINE` on the cited file instead. Known
+drift:
+- The crate rows (`RB_CrateWeapon_LInC`, `RB_CrateFruit_LInC`,
+  `RB_CrateTime_LInC`): the online checks are in the sibling `*_ThCollide`
+  functions, where ctr-native moved the logic.
+- `VehBirth_EngineAudio_AllPlayers` ends with `return`, not `break`.
+- `PlayLevel_UpdateLapStats`: online, `HANDLE_NULL_DRIVER` is `continue`
+  (`break` otherwise). ctr-native already uses `continue` in every per-driver
+  loop. Online also skips empty slots in the rank loop, as upstream does.
+- `PROC_CollidePointWithBucket`: `mods2.c` keeps upstream's `short *`
+  signature, and `PROC.c` casts the `struct BucketSearchParams *` into it.
+- `UI_DrawRankedDrivers` reads `octr` directly. `OnlineGetNumDrivers()` is
+  called from `UI_BattleDrawHeadArrows` only.
+- The `sv_core.c` `CG_NAME` log line drops the joiner's IP. That line is
+  operator logging only.
+
 ### Single-player build unchanged
 
 With `CTR_ONLINE=OFF`, the unity translation unit (`main.c`) preprocesses to
