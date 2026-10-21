@@ -80,6 +80,11 @@ set(SDL_SNDIO OFF CACHE BOOL "" FORCE)
 set(SDL_SNDIO_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_X11_XSCRNSAVER OFF CACHE BOOL "" FORCE)
 set(SDL_X11_XTEST OFF CACHE BOOL "" FORCE)
+if(EMSCRIPTEN)
+    # SDL's Emscripten video backend creates its WebGL context through the
+    # OpenGL ES path.
+    set(SDL_OPENGLES ON CACHE BOOL "" FORCE)
+endif()
 add_subdirectory(externals/SDL)
 
 # CTR Native
@@ -109,8 +114,10 @@ if(CTR_NATIVE_MSVC_FRONTEND)
         /wd5287
     )
 else()
+    if(NOT EMSCRIPTEN)
+        target_compile_options(ctr_native PRIVATE -msse)
+    endif()
     target_compile_options(ctr_native PRIVATE
-        -msse
         -Wenum-conversion
         -Wenum-compare
         -Wswitch-enum
@@ -134,10 +141,15 @@ endif()
 if(MINGW)
     target_link_options(ctr_native PRIVATE -static)
 endif()
+if(EMSCRIPTEN)
+    include(web/emscripten.cmake)
+endif()
 
 include(CTest)
 if(BUILD_TESTING)
-    add_test(NAME ctr_native_version COMMAND $<TARGET_FILE:ctr_native> --version)
+    # The bare target name (not $<TARGET_FILE>) lets CMake prepend
+    # CMAKE_CROSSCOMPILING_EMULATOR, so the Emscripten build runs it under node.
+    add_test(NAME ctr_native_version COMMAND ctr_native --version)
     set_tests_properties(ctr_native_version PROPERTIES PASS_REGULAR_EXPRESSION "^CTR Native ")
 
     find_package(Python3 REQUIRED COMPONENTS Interpreter)

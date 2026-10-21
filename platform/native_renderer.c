@@ -9,7 +9,11 @@
 #include <SDL3/SDL.h>
 
 #include "platform/native_gpu.h"
+#if defined(__EMSCRIPTEN__)
+#include "platform/native_gl_emscripten.h"
+#else
 #include "platform/native_glad.h"
+#endif
 #include "platform/native_log.h"
 #include "platform/native_perf.h"
 #include "platform/native_renderer.h"
@@ -187,9 +191,16 @@ internal int NativeRenderer_InitialiseGLContext(char *windowName, int fullscreen
 		return 0;
 	}
 
+#if defined(__EMSCRIPTEN__)
+	// WebGL2 is an OpenGL ES 3.0 context.
+	int major_version = 3;
+	int minor_version = 0;
+	int profile = SDL_GL_CONTEXT_PROFILE_ES;
+#else
 	int major_version = 3;
 	int minor_version = 3;
 	int profile = SDL_GL_CONTEXT_PROFILE_CORE;
+#endif
 
 	// find best OpenGL version
 	do
@@ -315,7 +326,14 @@ internal void NativeRenderer_ResolveGpuMeasurements(b32 waitForResults)
 
 void NativeRenderer_UpdateSwapIntervalState(int swapInterval)
 {
+#if defined(__EMSCRIPTEN__)
+	// NOTE: SDL maps the swap interval to emscripten_set_main_loop_timing,
+	// which needs an emscripten_set_main_loop the web build does not have :
+	// VSync() paces the frames.
+	(void)swapInterval;
+#else
 	SDL_GL_SetSwapInterval(swapInterval);
+#endif
 }
 
 void NativeRenderer_BeginScene(void)
@@ -887,7 +905,11 @@ internal int NativeRenderer_Shader_CheckShaderStatus(GLuint shader)
 	if (info[0] && strlen(info) > 8)
 	{
 		NATIVE_RENDERER_ERROR("%s\n", info);
+		// NOTE: the #version 140 shaders do not compile under WebGL2 yet ; the
+		// web build logs the failure and boots on without rendering.
+#if !defined(__EMSCRIPTEN__)
 		assert(0);
+#endif
 	}
 
 	return 0;
@@ -909,7 +931,11 @@ internal int NativeRenderer_Shader_CheckProgramStatus(GLuint program)
 	if (info[0] && strlen(info) > 8)
 	{
 		NATIVE_RENDERER_ERROR("%s\n", info);
+		// NOTE: the #version 140 shaders do not compile under WebGL2 yet ; the
+		// web build logs the failure and boots on without rendering.
+#if !defined(__EMSCRIPTEN__)
 		assert(0);
+#endif
 	}
 
 	return 0;

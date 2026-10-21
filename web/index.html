@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CTR Native Web</title>
+<style>
+  body { margin: 0; background: #000; color: #ccc; font: 12px/1.4 monospace; }
+  canvas { display: block; margin: 0 auto; background: #111; }
+  #log { margin: 0; padding: 8px; max-height: 30vh; overflow: auto; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<canvas id="canvas" width="800" height="600" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+<pre id="log"></pre>
+<script>
+  // Dev page : stdout / stderr go to the console and to #log.
+  const logEl = document.getElementById('log');
+  function append(line) {
+    logEl.textContent += line + '\n';
+    if (logEl.textContent.length > 20000) logEl.textContent = logEl.textContent.slice(-10000);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  window.addEventListener('error', (e) => append('[page] ' + e.message));
+  window.addEventListener('unhandledrejection', (e) => append('[page] ' + e.reason));
+  // Muted unless the URL has ?sound : every source reaching the speakers goes
+  // through a zero-gain node. A test tab that cannot be muted from the page
+  // otherwise plays whatever the SPU emits.
+  if (!new URLSearchParams(location.search).has('sound')) {
+    const connect = AudioNode.prototype.connect;
+    AudioNode.prototype.connect = function (dest, ...rest) {
+      if (dest instanceof AudioDestinationNode) {
+        const ctx = dest.context;
+        if (!ctx.ctrMute) {
+          ctx.ctrMute = ctx.createGain();
+          ctx.ctrMute.gain.value = 0;
+          connect.call(ctx.ctrMute, dest);
+        }
+        return connect.call(this, ctx.ctrMute, ...rest);
+      }
+      return connect.call(this, dest, ...rest);
+    };
+  }
+  var Module = {
+    canvas: document.getElementById('canvas'),
+    print(text) { console.log(text); append(text); },
+    printErr(text) { console.error(text); append(text); },
+    setStatus(text) { if (text) console.log('[status] ' + text); },
+  };
+</script>
+<script src="ctr_native.js"></script>
+</body>
+</html>

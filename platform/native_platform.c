@@ -3,7 +3,11 @@
 #include <macros.h>
 
 #include "platform/native_audio.h"
+#if defined(__EMSCRIPTEN__)
+#include "platform/native_gl_emscripten.h"
+#else
 #include "platform/native_glad.h"
+#endif
 #include "platform/native_gpu.h"
 #include "platform/native_input.h"
 #include "platform/native_log.h"
@@ -17,6 +21,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
 
 SDL_Window *g_window = NULL;
 int g_dbg_polygonSelected = 0;
@@ -583,6 +590,24 @@ internal void Native_EnsureVBlankTarget(void)
 internal void Native_WaitUntilVBlankTarget(void)
 {
 	const u64 freq = SDL_GetPerformanceFrequency();
+#if defined(__EMSCRIPTEN__)
+	// NOTE: the browser renders, delivers input and runs audio only while the
+	// page has given control back. Sleep through ASYNCIFY, which returns to the
+	// event loop, and never spin : a spin would hold the page until the target.
+	NativePerf_BeginScope(NATIVE_PERF_BUCKET_VSYNC_WAIT);
+	while (1)
+	{
+		const u64 now = SDL_GetPerformanceCounter();
+
+		if (now >= s_nextVBlankCounter)
+		{
+			break;
+		}
+
+		emscripten_sleep((unsigned int)(((s_nextVBlankCounter - now) * 1000) / freq));
+	}
+	NativePerf_EndScope(NATIVE_PERF_BUCKET_VSYNC_WAIT);
+#else
 	const u64 spinWindow = Native_CounterFromMicroseconds(freq, NATIVE_VSYNC_SPIN_US);
 
 	NativePerf_BeginScope(NATIVE_PERF_BUCKET_VSYNC_WAIT);
@@ -622,6 +647,7 @@ internal void Native_WaitUntilVBlankTarget(void)
 			SDL_DelayPrecise(sleepUs * 1000ull);
 		}
 	}
+#endif
 }
 
 internal void Native_EmitVBlank(void)
@@ -635,6 +661,13 @@ internal void Native_EmitVBlank(void)
 
 	NativeAudio_StepVBlank();
 	s_nativeVBlankCount++;
+
+#if defined(__EMSCRIPTEN__)
+	if ((s_nativeVBlankCount % 60) == 0)
+	{
+		printf("[CTR Web] vblank=%d\n", s_nativeVBlankCount);
+	}
+#endif
 }
 
 internal int Native_CatchUpDueVBlanks(void)
