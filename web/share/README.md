@@ -60,6 +60,11 @@ refusal.
   dev page's mute (`index.html` without `?sound`) : guests hear the game, the host tab stays
   muted. Stereo Opus.
 
+## By hand
+
+`web/share/dev.sh [debug|release] [page-port] [relay-port]` (or `wtf ctr shared` in the
+workspace) : builds, serves, starts a local relay with a fresh key, prints the host address.
+
 ## Tests and demo
 
 ```
