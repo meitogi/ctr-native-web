@@ -33,6 +33,8 @@ if [ "${ONLINE_DEV_NO_BUILD:-}" != 1 ]; then
     || { tail -20 "$build.log"; echo "dev.sh: build failed, full log $build.log" >&2; exit 1; }
 fi
 [ -f "$build/online/page.js" ] || { echo "dev.sh: $build has no online/page.js — not a CTR_ONLINE build" >&2; exit 1; }
+# the disc the fake guest (web/online/bot.sh) stores in its browser, never copied
+[ -f "$tree/assets/ctr-u.bin" ] && ln -sf "$tree/assets/ctr-u.bin" "$build/ctr-u.bin"
 if [ ! -d "$tree/relay/node_modules" ]; then
   echo "== installing the relay's dependencies"
   (cd "$tree/relay" && npm ci --no-audit --no-fund >/dev/null)
@@ -73,6 +75,11 @@ Ready. In VS Code's Ports panel, forward $page and $relayPort (same local number
 3. In both games (they boot straight into the server menu) : Private Room, then the same room number (the host
    joins first : it picks the track). Rooms 5-9 have items.
    Keys : C = Cross (accelerate / OK), V = Circle (fire), X = Square, arrows, Space = Select (leave).
+4. No second player ? A fake guest drives one race against you : once you are in your
+   room (before you confirm the track), in another terminal :
+     wtf ctr bot '<the room link>'
+   It runs in the agent browser, which only opens ${AGENT_BROWSER_ORIGINS:-its allowed origins} :
+   serve on two of those ports (e.g. « debug 8092 8787 »), debug so it follows the racing line.
 
 Relay log : $build.relay.log   (Ctrl-C here stops everything)
 EOF

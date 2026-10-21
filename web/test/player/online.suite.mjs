@@ -41,7 +41,7 @@ export const meta = {
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 // game/OnlineCTR/global.h
-const ST = { PICK_SERVER: 1, PICK_ROOM: 2, HOST_TRACK_PICK: 5, GUEST_TRACK_WAIT: 6, CHARACTER_PICK: 7, START_RACE: 11 }
+export const ST = { PICK_SERVER: 1, PICK_ROOM: 2, HOST_TRACK_PICK: 5, GUEST_TRACK_WAIT: 6, CHARACTER_PICK: 7, START_RACE: 11 }
 const PRIVATE_ROOM = 7
 const CROSS = 'c' // keyboard C = Cross (platform/native_input.c)
 const BTN_CROSS = 0x10 // Cross in the pad word the bridge writes for a remote driver
@@ -70,9 +70,9 @@ const R6_PROBE = `if (!window.__r6) {
 return true`
 
 /** The page's online state, or null before the panel is up. */
-const online = tab => tab.js('return window.__ctrOnline ? window.__ctrOnline.state() : null')
+export const online = tab => tab.js('return window.__ctrOnline ? window.__ctrOnline.state() : null')
 
-async function until(tab, label, pred, timeout = 30_000, every = 250) {
+export async function until(tab, label, pred, timeout = 30_000, every = 250) {
 	const deadline = Date.now() + timeout
 	let s = null
 	while (Date.now() < deadline) {
@@ -87,7 +87,7 @@ async function until(tab, label, pred, timeout = 30_000, every = 250) {
 }
 
 /** Loads `url` in `tab` and boots the game to OnlineCTR's server menu ; stores the disc in OPFS once. */
-async function boot(tab, url) {
+export async function boot(tab, url) {
 	// A load that starts while the previous page of this tab is still pulling the 13 MB debug
 	// wasm through the port forward can stall with no wasm request at all : leave the page
 	// first, and retry a boot that logs nothing (as ctr.mjs's bootToMenu does for the preload).
@@ -283,7 +283,7 @@ async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}
  * window.__ctr, as time-trial.suite.mjs does), firing whatever item it holds every 1.5 s.
  * `p` : that tab's player (hold / release / press), `js` : its evaluate.
  */
-async function drive(p, js, deadline) {
+export async function drive(p, js, deadline) {
 	const ACCEL = 'c'
 	const REVERSE = 'x'
 	const read = () => js('if (!window.__ctr) return null; const { track, ...s } = window.__ctr; return s')
