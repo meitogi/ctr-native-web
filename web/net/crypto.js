@@ -72,13 +72,16 @@ export function createSealer(aead, room, selfId) {
       out.set(sealed, 12);
       return out;
     },
-    /** @returns {Promise<Uint8Array|null>} null when forged, tampered, misdirected or replayed */
-    async open(from, sealed) {
+    /**
+     * @param {string} [to=selfId] - the recipient the sender sealed for (a broadcast name such as '*')
+     * @returns {Promise<Uint8Array|null>} null when forged, tampered, misdirected or replayed
+     */
+    async open(from, sealed, to = selfId) {
       if (sealed.length < 12 + 16) return null;
       const iv = sealed.subarray(0, 12);
       let plain;
       try {
-        plain = new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad(from, selfId) }, aead, sealed.subarray(12)));
+        plain = new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad(from, to) }, aead, sealed.subarray(12)));
       } catch {
         return null;
       }

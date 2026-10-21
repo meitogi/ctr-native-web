@@ -32,3 +32,32 @@ test('invalid links throw code link', () => {
   }
   assert.equal(parseRoomLink(`room=${room}&key=${key}`).relay, '');
 });
+
+test('a link made before the backend list (relay only) parses as sig=relay, and formats back unchanged', () => {
+  const { room, key } = newRoom();
+  const old = `https://game.example/#room=${room}&key=${key}&relay=wss%3A%2F%2Frelay.example&rk=k`;
+  const parsed = parseRoomLink(old);
+  assert.deepEqual(parsed.signaling, ['relay']);
+  assert.equal(parsed.relay, 'wss://relay.example');
+  assert.equal(formatRoomLink('https://game.example/', parsed), old);
+  assert.deepEqual(parseRoomLink(`room=${room}&key=${key}`).signaling, ['paste'], 'no relay, no list : copy-paste');
+});
+
+test('the backend list keeps its order and its options', () => {
+  const room = newRoom({ relay: 'wss://relay.example', rk: 'k', signaling: ['mqtt', 'relay', 'paste'], mqtt: ['wss://broker.example:8084/mqtt'] });
+  const link = formatRoomLink('https://game.example/', room);
+  assert.match(link, /sig=mqtt%2Crelay%2Cpaste/);
+  const parsed = parseRoomLink(link);
+  assert.deepEqual(parsed.signaling, ['mqtt', 'relay', 'paste']);
+  assert.deepEqual(parsed.mqtt, ['wss://broker.example:8084/mqtt']);
+  assert.deepEqual(parsed, room);
+  assert.deepEqual(parseRoomLink(formatRoomLink('https://g/', newRoom({ signaling: ['mqtt'] }))).signaling, ['mqtt']);
+});
+
+test('a backend list that cannot work is refused with code link', () => {
+  const { room, key } = newRoom();
+  for (const hash of [`room=${room}&key=${key}&sig=relay`, `room=${room}&key=${key}&sig=carrier-pigeon`,
+    `room=${room}&key=${key}&sig=paste,paste`, `room=${room}&key=${key}&sig=mqtt&mqtt=https://x`]) {
+    assert.throws(() => parseRoomLink(hash), (e) => e.code === 'link', hash);
+  }
+});

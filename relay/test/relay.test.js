@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { connect as tlsConnect } from 'node:tls';
 import { tmpdir } from 'node:os';
 import { join as joinPath } from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -213,8 +214,11 @@ describe('TLS', () => {
   let dir;
   before(() => {
     dir = mkdtempSync(joinPath(tmpdir(), 'ctr-relay-tls-'));
-    execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes',
-      '-keyout', joinPath(dir, 'key.pem'), '-out', joinPath(dir, 'cert.pem'), '-days', '1', '-subj', '/CN=localhost'], { stdio: 'ignore' });
+    const makeCert = (name, cn) => execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes',
+      '-keyout', joinPath(dir, `${name}key.pem`), '-out', joinPath(dir, `${name}cert.pem`), '-days', '1', '-subj', `/CN=${cn}`], { stdio: 'ignore' });
+    makeCert('', 'localhost');
+    makeCert('a-', 'cert-a');
+    makeCert('b-', 'cert-b');
   });
   after(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -233,5 +237,78 @@ describe('TLS', () => {
     assert.equal(await bad.closed, CLOSE.key);
     a.close();
     await relay.close();
+  });
+
+  // The CN of the certificate a fresh TLS handshake gets.
+  const handshakeCn = (port) => new Promise((resolve, reject) => {
+    const socket = tlsConnect({ port, host: '127.0.0.1', rejectUnauthorized: false }, () => {
+      resolve(socket.getPeerCertificate().subject.CN);
+      socket.end();
+    });
+    socket.once('error', reject);
+  });
+
+  // relay.js run as a process, as in the image : TLS_CERT / TLS_KEY files, renewed in place.
+  async function startProcess(extraEnv) {
+    const live = { cert: joinPath(dir, 'live-cert.pem'), key: joinPath(dir, 'live-key.pem') };
+    copyFileSync(joinPath(dir, 'a-cert.pem'), live.cert);
+    copyFileSync(joinPath(dir, 'a-key.pem'), live.key);
+    const child = spawn(process.execPath, [new URL('../relay.js', import.meta.url).pathname], {
+      env: { ...process.env, PORT: '0', HOST: '127.0.0.1', RELAY_KEY: KEY, TLS_CERT: live.cert, TLS_KEY: live.key, ...extraEnv },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    const waiters = [];
+    const onData = (chunk) => {
+      out += chunk;
+      for (const w of waiters.slice()) if (w.re.test(out)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(out.match(w.re)); }
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    const waitLog = (re, ms = 5000) => new Promise((resolve, reject) => {
+      if (re.test(out)) return resolve(out.match(re));
+      waiters.push({ re, resolve });
+      setTimeout(() => reject(new Error(`no ${re} in relay output within ${ms} ms :\n${out}`)), ms);
+    });
+    const port = Number((await waitLog(/listening wss:\/\/127\.0\.0\.1:(\d+)/))[1]);
+    const swapToB = () => {
+      copyFileSync(joinPath(dir, 'b-key.pem'), live.key);
+      copyFileSync(joinPath(dir, 'b-cert.pem'), live.cert);
+    };
+    return { child, port, waitLog, swapToB, stop: () => child.kill('SIGTERM') };
+  }
+
+  for (const [how, extraEnv] of [['SIGHUP', { TLS_WATCH_MS: '0' }], ['a change of the files', { TLS_WATCH_MS: '100' }]]) {
+    test(`reloads a renewed certificate on ${how} : new handshakes get it, open sockets and rooms stay up`, async (t) => {
+      const relay = await startProcess(extraEnv);
+      t.after(relay.stop);
+      const url = `wss://127.0.0.1:${relay.port}`;
+      const insecure = { rejectUnauthorized: false };
+      assert.equal(await handshakeCn(relay.port), 'cert-a');
+      const a = await join(url, { id: 'r1', room: 'renew', key: KEY }, insecure);
+      assert.equal(a.ws._socket.getPeerCertificate().subject.CN, 'cert-a');
+      await a.next('peers'); // its own arrival
+
+      relay.swapToB();
+      if (how === 'SIGHUP') relay.child.kill('SIGHUP');
+      await relay.waitLog(/tls reloaded/);
+      assert.equal(await handshakeCn(relay.port), 'cert-b', 'a new handshake sees the renewed certificate');
+
+      const b = await join(url, { id: 'r2', room: 'renew', key: KEY }, insecure);
+      assert.equal(b.ws._socket.getPeerCertificate().subject.CN, 'cert-b');
+      assert.deepEqual((await a.next('peers')).list.map((p) => p.id).sort(), ['r1', 'r2'], 'the socket opened under cert A is still in its room');
+      a.send({ type: 'data', to: 'r2', data: 'c3RpbGwgdXA' });
+      assert.deepEqual(await b.next('data'), { type: 'data', from: 'r1', data: 'c3RpbGwgdXA' });
+      a.close(); b.close();
+    });
+  }
+
+  test('a key that does not match the certificate is refused, the previous pair stays', async (t) => {
+    const relay = await startProcess({ TLS_WATCH_MS: '0' });
+    t.after(relay.stop);
+    copyFileSync(joinPath(dir, 'b-cert.pem'), joinPath(dir, 'live-cert.pem')); // cert B, key still A
+    relay.child.kill('SIGHUP');
+    await relay.waitLog(/tls reload failed/);
+    assert.equal(await handshakeCn(relay.port), 'cert-a');
   });
 });

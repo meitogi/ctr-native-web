@@ -1,0 +1,156 @@
+#cloud-config
+# ctr-relay on a fresh VM, in minutes, no domain to own : paste this file as the « user data »
+# of a new Ubuntu 24.04 (or Debian 12+) VM at any provider — DigitalOcean, Hetzner, Scaleway…
+# It installs Docker, builds the relay, gets a Let's Encrypt certificate with lego and serves
+# wss:// on port 443 itself, no reverse proxy. Then it prints the relay URL and the ready-made
+# `relay=` / `rk=` fragment for room links : on the provider's console, in
+# /var/log/cloud-init-output.log, and in /root/ctr-relay.txt.
+#
+# The VM needs ports 80 (certificate checks, a few seconds per renewal) and 443 open to the
+# internet ; most providers leave them open, a provider firewall must allow them.
+# Destroy the VM after the game : nothing on it needs keeping.
+#
+# ── The only two settings ─────────────────────────────────────────────────────────────────
+#   RELAY_DOMAIN  empty = <ip>.sslip.io, a name that resolves to this VM's IP by itself.
+#                 Else your own name ; its DNS A record must point at this VM first.
+#   RELAY_KEY     empty = random, drawn at first boot. Else the relay's access key.
+write_files:
+  - path: /etc/ctr-relay/settings.env
+    permissions: '0600'
+    content: |
+      RELAY_DOMAIN=
+      RELAY_KEY=
+# ── Nothing to change below ───────────────────────────────────────────────────────────────
+
+  # First boot : key, domain, lego, image, certificate, relay, renewal timer, summary.
+  - path: /usr/local/sbin/ctr-relay-setup
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      # Where the relay comes from, and the lego release (its SHA-256 from the release's
+      # lego_<version>_checksums.txt, so a swapped download is refused).
+      RELAY_SOURCE="${RELAY_SOURCE:-https://github.com/meitogi/ctr-native-web.git#web/main:relay}"
+      LEGO_VERSION=5.5.2
+      LEGO_SHA256_amd64=2a35505089e7772c92e1e9ac144df91151ef2eca8568630db0ff91fca06d9bef
+      LEGO_SHA256_arm64=15b14ec2ab14fde69cc8396eb0204c5ce4327e31a486953225a6059b26db3e8c
+      STATE=/etc/ctr-relay
+      say() { echo "ctr-relay-setup : $*"; }
+
+      # shellcheck disable=SC1091
+      . "$STATE/settings.env"
+      # The key : the setting, else the one drawn at an earlier boot, else a new one.
+      if [ -z "${RELAY_KEY:-}" ] && [ -f "$STATE/relay.key" ]; then RELAY_KEY="$(cat "$STATE/relay.key")"; fi
+      if [ -z "${RELAY_KEY:-}" ]; then RELAY_KEY="$(openssl rand -base64 24 | tr '+/' '-_' | tr -d '=')"; fi
+      ( umask 077 && printf '%s' "$RELAY_KEY" > "$STATE/relay.key" )
+
+      # The public IPv4 : the address the default route leaves from, unless it is a private
+      # one (a provider NAT), then ask the outside. PUBLIC_IP overrides (tests).
+      ip="${PUBLIC_IP:-$(ip -4 route get 1.1.1.1 | sed -n 's/.* src \([0-9.]*\).*/\1/p')}"
+      case "$ip" in 10.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|192.168.*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*|'')
+        [ -n "${PUBLIC_IP:-}" ] || ip="$(curl -4 -fsS https://api.ipify.org)" ;;
+      esac
+      domain="${RELAY_DOMAIN:-${ip//./-}.sslip.io}"
+      say "public IP $ip, relay name $domain"
+
+      # lego, one static binary.
+      case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; *) say "unsupported CPU $(uname -m)"; exit 1 ;; esac
+      if [ "$(lego --version 2>/dev/null | awk '{print $3}')" != "$LEGO_VERSION" ]; then
+        tmp="$(mktemp -d)"
+        tarball="lego_v${LEGO_VERSION}_linux_${arch}.tar.gz"
+        curl -fsSL -o "$tmp/$tarball" "https://github.com/go-acme/lego/releases/download/v${LEGO_VERSION}/$tarball"
+        sum="LEGO_SHA256_$arch"
+        echo "${!sum}  $tmp/$tarball" | sha256sum -c --quiet
+        tar -xzf "$tmp/$tarball" -C "$tmp" lego
+        install -m 0755 "$tmp/lego" /usr/local/bin/lego
+        rm -rf "$tmp"
+      fi
+
+      say "building the relay image from $RELAY_SOURCE"
+      docker build -q -t ctr-relay "$RELAY_SOURCE" >/dev/null
+
+      # The certificate : HTTP-01 on :80, lego's own server, nothing else listens there.
+      # sslip.io is not on the Public Suffix List : every sslip.io user shares one Let's Encrypt
+      # « certificates per registered domain » bucket (raised for sslip.io, but shared). When
+      # that order fails, a certificate for the bare IP (Let's Encrypt's short-lived profile,
+      # 6 days, renewed by the same timer) keeps the promise : no domain to own.
+      echo "LEGO_DOMAINS=$domain" > "$STATE/lego.env"
+      if ! /usr/local/sbin/ctr-relay-renew; then
+        if [ -n "${RELAY_DOMAIN:-}" ]; then say "no certificate for $domain : does its A record point at $ip ?"; exit 1; fi
+        say "no certificate for $domain, trying one for the IP address $ip"
+        domain="$ip"
+        printf 'LEGO_DOMAINS=%s\nLEGO_PROFILE=shortlived\n' "$ip" > "$STATE/lego.env"
+        /usr/local/sbin/ctr-relay-renew
+      fi
+
+      docker rm -f ctr-relay >/dev/null 2>&1 || true
+      docker run -d --name ctr-relay --restart unless-stopped -p 443:8787 \
+        -e RELAY_KEY="$RELAY_KEY" -e TLS_CERT=/tls/cert.pem -e TLS_KEY=/tls/key.pem \
+        -v "$STATE/tls:/tls:ro" ctr-relay >/dev/null
+      systemctl enable --now ctr-relay-renew.timer
+
+      key_q="$(printf '%s' "$RELAY_KEY" | sed 's/+/%2B/g; s/\//%2F/g; s/=/%3D/g')"
+      {
+        echo "ctr-relay is up : wss://$domain"
+        echo "Room link fragment (append after the room's # part, with &) :"
+        echo "  relay=wss%3A%2F%2F$domain&rk=$key_q"
+        echo "Relay key : $RELAY_KEY"
+      } | tee /root/ctr-relay.txt
+
+  # Get or renew the certificate (lego decides when) ; the deploy hook hands it to the relay.
+  - path: /usr/local/sbin/ctr-relay-renew
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      set -a
+      # shellcheck disable=SC1091
+      . /etc/ctr-relay/lego.env
+      set +a
+      exec lego run --path /var/lib/ctr-relay/lego --accept-tos --http --cert.name relay \
+        --deploy-hook /usr/local/sbin/ctr-relay-deploy
+
+  # After a new certificate : copy it where the relay reads it (as its user, uid 1000), then
+  # SIGHUP the relay — it swaps the certificate, open games stay connected.
+  - path: /usr/local/sbin/ctr-relay-deploy
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      src=/var/lib/ctr-relay/lego/certificates
+      dst=/etc/ctr-relay/tls
+      mkdir -p "$dst"
+      install -m 0600 -o 1000 -g 1000 "$src/relay.key" "$dst/key.pem"
+      install -m 0644 -o 1000 -g 1000 "$src/relay.crt" "$dst/cert.pem"
+      docker kill -s HUP ctr-relay >/dev/null 2>&1 || true
+
+  - path: /etc/systemd/system/ctr-relay-renew.service
+    content: |
+      [Unit]
+      Description=Renew the ctr-relay certificate when due
+      After=network-online.target docker.service
+      Wants=network-online.target
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/ctr-relay-renew
+
+  - path: /etc/systemd/system/ctr-relay-renew.timer
+    content: |
+      [Unit]
+      Description=Check the ctr-relay certificate twice a day
+      [Timer]
+      OnCalendar=*-*-* 00,12:00:00
+      RandomizedDelaySec=1h
+      Persistent=true
+      [Install]
+      WantedBy=timers.target
+
+package_update: true
+packages:
+  - docker.io
+  - git
+  - curl
+  - openssl
+
+runcmd:
+  - [/usr/local/sbin/ctr-relay-setup]

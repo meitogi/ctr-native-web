@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# docker, as far as ctr-relay-setup / -deploy use it, in a container without Docker :
+# `run` starts relay.js directly with the same environment and the /tls volume mapped.
+echo "docker $*" >> /tmp/shim.log
+case "$1" in
+  build) exit 0 ;;
+  rm) pkill -f 'node /relay-src/relay.js' || true; sleep 0.3 ;;
+  kill) pkill -HUP -f 'node /relay-src/relay.js' ;;
+  run)
+    shift
+    envs=()
+    while [ $# -gt 1 ]; do
+      case "$1" in
+        -e) envs+=("${2//\/tls\//\/etc\/ctr-relay\/tls\/}"); shift 2 ;;
+        -v|-p|--name|--restart) shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    runuser -u node -- env "${envs[@]}" PORT=8787 node /relay-src/relay.js > /tmp/relay.log 2>&1 &
+    sleep 1 ;;
+esac

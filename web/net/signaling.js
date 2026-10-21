@@ -1,7 +1,7 @@
 // Signaling : how peers of a room find each other and exchange their WebRTC offer / answer.
 //
-// Backend contract — every backend (this ctr-relay one ; public signaling and copy-paste
-// come next) returns an Emitter with :
+// Backend contract — every backend (this ctr-relay one, signaling-mqtt.js, signaling-paste.js)
+// returns an Emitter with :
 //   selfId                 this peer's id in the room
 //   peers                  [{id, name, kind}] currently in the room, self included
 //   join()                 → Promise, resolves once in the room ; rejects with `code`

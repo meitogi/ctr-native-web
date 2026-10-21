@@ -7,7 +7,7 @@
 //
 // Run : `node relay.js` — env in README.md. Import `createRelay()` to embed it.
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, watchFile } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { pathToFileURL } from 'node:url';
@@ -46,7 +46,8 @@ function validField(value, required) {
  * @param {number} [options.helloTimeoutMs=5000] - a socket without a valid hello by then is closed
  * @param {boolean} [options.logData=false] - log the head of each forwarded `data` (ciphertext)
  * @param {(line: string) => void} [options.log=console.log]
- * @returns {Promise<{port: number, close(): Promise<void>}>}
+ * @returns {Promise<{port: number, setTls(tls: {cert, key}): void, close(): Promise<void>}>}
+ *   `setTls` swaps the certificate for new TLS handshakes ; open sockets keep theirs.
  */
 export function createRelay({
   port = 8787,
@@ -214,6 +215,10 @@ export function createRelay({
       log(`ctr-relay listening ${tls ? 'wss' : 'ws'}://${host}:${actual} ${keyDigest ? 'private (RELAY_KEY set)' : 'OPEN (no RELAY_KEY)'}`);
       resolve({
         port: actual,
+        setTls(next) {
+          if (!tls) throw new Error('setTls() needs a relay started with tls');
+          server.setSecureContext({ cert: next.cert, key: next.key });
+        },
         close() {
           clearInterval(heartbeat);
           for (const ws of wss.clients) ws.terminate();
@@ -232,9 +237,8 @@ function envInt(name, fallback) {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const env = process.env;
-  const tls = env.TLS_CERT && env.TLS_KEY
-    ? { cert: readFileSync(env.TLS_CERT), key: readFileSync(env.TLS_KEY) }
-    : undefined;
+  const readTls = () => ({ cert: readFileSync(env.TLS_CERT), key: readFileSync(env.TLS_KEY) });
+  const tls = env.TLS_CERT && env.TLS_KEY ? readTls() : undefined;
   createRelay({
     port: envInt('PORT', 8787),
     host: env.HOST || '0.0.0.0',
@@ -245,6 +249,26 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     burst: envInt('RELAY_BURST', 240),
     roomMax: envInt('RELAY_ROOM_MAX', 8),
     logData: env.RELAY_LOG_DATA === '1',
+  }).then((relay) => {
+    if (!tls) return;
+    // A renewed certificate (lego, certbot…) is written over the same files : re-read them on
+    // SIGHUP, or when they change. Rooms and open sockets are untouched ; a half-written pair
+    // fails to load and the previous certificate stays until the next change.
+    const reload = (why) => {
+      try {
+        relay.setTls(readTls());
+        console.log(`tls reloaded (${why})`);
+      } catch (e) {
+        console.error(`tls reload failed (${why}), keeping the previous certificate : ${e.message}`);
+      }
+    };
+    process.on('SIGHUP', () => reload('SIGHUP'));
+    const interval = envInt('TLS_WATCH_MS', 60_000);
+    if (interval > 0) {
+      for (const file of [env.TLS_CERT, env.TLS_KEY]) {
+        watchFile(file, { interval }, (now, before) => { if (now.mtimeMs !== before.mtimeMs) reload('file changed'); });
+      }
+    }
   }).catch((e) => {
     console.error('ctr-relay :', e.message);
     process.exit(1);
