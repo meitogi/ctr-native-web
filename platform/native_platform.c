@@ -561,6 +561,19 @@ int NikoGetEnterKey(void)
 #define NATIVE_VBLANK_GPU_CYCLES 897619ull // 3413 * 263
 #define NATIVE_GPU_CLOCK_HZ      53693175ull
 #define NATIVE_VSYNC_CATCHUP_MAX 8
+#if defined(__EMSCRIPTEN__)
+// NOTE: on the web a late wake-up replayed up to 8 VBlanks in one host frame :
+// after a short stall (a disc read, a menu load) the game visibly lurched
+// forward. A visible page replays at most one 30 fps frame's worth and rebases
+// beyond. A hidden page keeps 8 : the browser wakes it only every 100 ms or
+// more, and the catch-up is what keeps the game, and its music sequencer
+// (driven by VBlanks), near real time there (measured : ~50 VBlanks/s in the
+// first seconds hidden, of ~60).
+#define NATIVE_VSYNC_CATCHUP_MAX_VISIBLE 2
+EM_JS(int, NativeWeb_PageHidden, (void), {
+	return document.hidden ? 1 : 0;
+});
+#endif
 // NOTE(aalhendi): SDL_DelayPrecise handles most of the wait; the final window
 // spins against SDL's performance counter so pacing follows the VBlank target.
 #define NATIVE_VSYNC_SPIN_US     200
@@ -697,6 +710,11 @@ internal void Native_EmitVBlank(void)
 internal int Native_CatchUpDueVBlanks(void)
 {
 	int emittedVBlanks = 0;
+#if defined(__EMSCRIPTEN__)
+	const u64 catchUpMax = NativeWeb_PageHidden() ? NATIVE_VSYNC_CATCHUP_MAX : NATIVE_VSYNC_CATCHUP_MAX_VISIBLE;
+#else
+	const u64 catchUpMax = NATIVE_VSYNC_CATCHUP_MAX;
+#endif
 
 	Native_EnsureVBlankTarget();
 
@@ -713,7 +731,7 @@ internal int Native_CatchUpDueVBlanks(void)
 			const u64 step = (freq * NATIVE_VBLANK_GPU_CYCLES) / NATIVE_GPU_CLOCK_HZ;
 			const u64 dueApprox = ((now - s_nextVBlankCounter) / step) + 1;
 
-			if (dueApprox > NATIVE_VSYNC_CATCHUP_MAX)
+			if (dueApprox > catchUpMax)
 			{
 				s_nextVBlankCounter = now;
 				s_vblankRemainder = 0;
@@ -730,7 +748,7 @@ internal int Native_CatchUpDueVBlanks(void)
 		Native_EmitVBlank();
 		emittedVBlanks++;
 
-		if (emittedVBlanks >= NATIVE_VSYNC_CATCHUP_MAX)
+		if ((u64)emittedVBlanks >= catchUpMax)
 		{
 			// NOTE(aalhendi): Keep normal late frames faithful, but rebase if the
 			// due count grew past the cap while we were replaying.

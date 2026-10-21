@@ -60,19 +60,48 @@ EM_JS(int, CTRWeb_DiscReady, (void), {
 	return globalThis.__ctrDisc ? 1 : 0;
 });
 
-EM_ASYNC_JS(int, CTRWeb_ReadRawSector, (u32 lba, u8 *dst), {
+// Reads up to `count` whole raw sectors from `lba` in one Blob slice ; returns
+// how many it read (fewer at the end of the disc), 0 on failure.
+EM_ASYNC_JS(u32, CTRWeb_ReadRawSectors, (u32 lba, u32 count, u8 *dst), {
 	var disc = globalThis.__ctrDisc;
 	if (!disc) return 0;
 	var offset = lba * 2352;
-	if ((offset + 2352) > disc.size) return 0;
+	var end = Math.min(offset + count * 2352, disc.size - (disc.size % 2352));
+	if (end <= offset) return 0;
 	try {
-		var buf = await disc.slice(offset, offset + 2352).arrayBuffer();
+		var buf = await disc.slice(offset, end).arrayBuffer();
 		HEAPU8.set(new Uint8Array(buf), dst);
-		return 1;
+		return (end - offset) / 2352;
 	} catch (e) {
 		return 0;
 	}
 });
+
+// NOTE: each Blob read is one Asyncify unwind / rewind plus an OPFS round trip,
+// and the game reads sector by sector : an XA track prepared on the game thread
+// (voice lines, the final lap and race-end music) was thousands of awaits, a
+// visible freeze. Sequential reads dominate (XA tracks, level files, directory
+// walks), so one read-ahead window serves them from memory.
+#define CTR_WEB_DISC_READ_AHEAD 256u // sectors, ~600 KB
+global_variable u8 s_ctrWebDiscWindow[CTR_WEB_DISC_READ_AHEAD * NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE];
+global_variable u32 s_ctrWebDiscWindowLba;
+global_variable u32 s_ctrWebDiscWindowCount;
+
+internal int CTRWeb_ReadRawSector(u32 lba, u8 *dst)
+{
+	if ((lba < s_ctrWebDiscWindowLba) || (lba - s_ctrWebDiscWindowLba >= s_ctrWebDiscWindowCount))
+	{
+		s_ctrWebDiscWindowLba = lba;
+		s_ctrWebDiscWindowCount = CTRWeb_ReadRawSectors(lba, CTR_WEB_DISC_READ_AHEAD, s_ctrWebDiscWindow);
+		if (s_ctrWebDiscWindowCount == 0)
+		{
+			return 0;
+		}
+	}
+
+	memcpy(dst, &s_ctrWebDiscWindow[(lba - s_ctrWebDiscWindowLba) * NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE], NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE);
+	return 1;
+}
 #endif
 
 internal int NativeDiscImage_FindHostImagePath(char *dst, size_t dstSize, NativeStr8 assetsDir)
@@ -413,6 +442,7 @@ int NativeDiscImage_Init(const char *assetsDir)
 
 #ifdef __EMSCRIPTEN__
 	s_nativeDiscImageIsWebBlob = 0;
+	s_ctrWebDiscWindowCount = 0;
 #endif
 
 	if ((assetsDir != NULL) && NativeDiscImage_FindHostImagePath(path, sizeof(path), NativeStr8_FromCString(assetsDir)))
