@@ -325,9 +325,11 @@ internal void NativeInput_ApplyRemotePads(void)
 // axis | MAP_FLAG_AXIS). Written every update (32 ints), so a re-init of the defaults cannot
 // outlive the page's choice. Local input only : guests' pads (NativeInput_ApplyRemotePads) are
 // not remapped here. No page hook = the defaults below, as on native.
-EM_JS(void, NativeInput_WebPullMappings, (s32 *keyboard, s32 *gamepad), {
+// Couch mode (web/ui, Settings › Players) adds a second keyboard key set (keyboard2, same layout)
+// and *duo : 1 while two players share the keyboard (s_keyboard2ControllerSlot, below).
+EM_JS(void, NativeInput_WebPullMappings, (s32 *keyboard, s32 *keyboard2, s32 *gamepad, s32 *duo), {
 	const input = Module['ctrInput'];
-	if (input) input.pull(HEAP32, keyboard >> 2, gamepad >> 2);
+	if (input) input.pull(HEAP32, keyboard >> 2, gamepad >> 2, keyboard2 >> 2, duo >> 2);
 });
 
 // include/platform/native_web_ui.h : 1 when the page saw a press for « Skip intro » (consumed).
@@ -363,6 +365,171 @@ internal void NativeInput_WebBlockLocalInput(void)
 		NativeInput_SetSnapshotButtons(snapshot, 0xffff);
 		memset(snapshot->analog, 0x80, sizeof(snapshot->analog));
 	}
+}
+
+// Couch mode — the page's Settings › Players (web/ui/src/lib/players.js). The native build keeps
+// one keyboard (F4 / F6 move it and the pads, CTR_INTERNAL builds) ; the web build adds :
+//   - a second keyboard key set (s_keyboardMapping2) driving its own slot while the page says
+//     two players share the keyboard ; it takes the first slot with no pad and no keyboard ;
+//   - swap commands, pulled one at a time : (1 << 8) | (a << 4) | b swaps players a and b — their
+//     pads and their keyboards — 0 = none ;
+//   - a report of each slot (who drives it, the pad's name / vendor / product, analog or
+//     digital, the buttons held before Settings blocks them) sent when it changes, so the page
+//     shows P1–P4 and lights a row while its device is pressed.
+#define NATIVE_INPUT_WEB_CMD_SWAP       1
+#define NATIVE_INPUT_WEB_SLOT_CONNECTED 0x1
+#define NATIVE_INPUT_WEB_SLOT_PAD       0x2
+#define NATIVE_INPUT_WEB_SLOT_KEYBOARD  0x4
+#define NATIVE_INPUT_WEB_SLOT_KEYBOARD2 0x8
+#define NATIVE_INPUT_WEB_SLOT_ANALOG    0x10
+#define NATIVE_INPUT_WEB_REPORT_INTS    6
+
+global_variable struct NativeInputKeyboardMapping s_keyboardMapping2;
+global_variable s32 s_keyboard2ControllerSlot = -1;
+global_variable s32 s_webDuo;
+
+EM_JS(int, NativeInput_WebPullPlayerCommand, (void), {
+	const input = Module['ctrInput'];
+	return input && input.players ? input.players.next() : 0;
+});
+
+// per slot : flags, buttons (PSX word, active low), SDL instance id, USB vendor, product, name
+EM_JS(void, NativeInput_WebReportPlayersJS, (const s32 *slots, int count), {
+	const input = Module['ctrInput'];
+	if (!input || !input.players) return;
+	const list = [];
+	for (let i = 0; i < count; i++) {
+		const at = (slots >> 2) + i * 6;
+		list.push({ flags: HEAP32[at], buttons: HEAP32[at + 1] & 0xffff, instance: HEAP32[at + 2], vendor: HEAP32[at + 3],
+			product: HEAP32[at + 4], name: HEAP32[at + 5] ? UTF8ToString(HEAP32[at + 5]) : "" });
+	}
+	input.players.report(list);
+});
+
+// The first slot with no pad and neither keyboard, else -1.
+internal s32 NativeInput_WebFreeSlot(void)
+{
+	for (s32 slot = 0; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+	{
+		if ((s_controllers[slot].controller == NULL) && (slot != s_keyboardControllerSlot) && (slot != s_keyboard2ControllerSlot))
+		{
+			return slot;
+		}
+	}
+
+	return -1;
+}
+
+// The second keyboard follows the page's choice ; when a pad or the first keyboard lands on its
+// slot it moves to a free one (or waits off until one frees).
+internal void NativeInput_WebPlaceKeyboard2(void)
+{
+	if (s_webDuo == 0)
+	{
+		s_keyboard2ControllerSlot = -1;
+		return;
+	}
+
+	if ((s_keyboard2ControllerSlot >= 0) && (s_controllers[s_keyboard2ControllerSlot].controller == NULL) &&
+	    (s_keyboard2ControllerSlot != s_keyboardControllerSlot))
+	{
+		return;
+	}
+
+	s_keyboard2ControllerSlot = -1;
+	s_keyboard2ControllerSlot = NativeInput_WebFreeSlot();
+}
+
+internal s32 NativeInput_SwapSlotValue(s32 value, s32 slotA, s32 slotB)
+{
+	if (value == slotA)
+	{
+		return slotB;
+	}
+	if (value == slotB)
+	{
+		return slotA;
+	}
+
+	return value;
+}
+
+internal void NativeInput_SwapControllerSlots(s32 slotA, s32 slotB);
+
+internal void NativeInput_WebApplyPlayerCommands(void)
+{
+	for (s32 n = 0; n < 8; n++)
+	{
+		const s32 command = NativeInput_WebPullPlayerCommand();
+		const s32 slotA = (command >> 4) & 0xf;
+		const s32 slotB = command & 0xf;
+
+		if (command == 0)
+		{
+			return;
+		}
+		if (((command >> 8) != NATIVE_INPUT_WEB_CMD_SWAP) || !NativeInput_IsValidControllerSlot(slotA) || !NativeInput_IsValidControllerSlot(slotB))
+		{
+			continue;
+		}
+
+		NativeInput_SwapControllerSlots(slotA, slotB);
+		s_keyboardControllerSlot = NativeInput_SwapSlotValue(s_keyboardControllerSlot, slotA, slotB);
+		s_keyboard2ControllerSlot = NativeInput_SwapSlotValue(s_keyboard2ControllerSlot, slotA, slotB);
+	}
+}
+
+internal void NativeInput_WebReportPlayers(void)
+{
+	local_persist s32 s_reported[NATIVE_INPUT_MAX_CONTROLLERS * NATIVE_INPUT_WEB_REPORT_INTS];
+	local_persist s32 s_reportedOnce;
+	s32 slots[NATIVE_INPUT_MAX_CONTROLLERS * NATIVE_INPUT_WEB_REPORT_INTS];
+
+	memset(slots, 0, sizeof(slots));
+	for (s32 slot = 0; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+	{
+		const struct NativeInputController *controller = &s_controllers[slot];
+		s32 *out = &slots[slot * NATIVE_INPUT_WEB_REPORT_INTS];
+		s32 flags = 0;
+
+		if (controller->snapshot.connected != 0)
+		{
+			flags |= NATIVE_INPUT_WEB_SLOT_CONNECTED;
+		}
+		if (controller->controller != NULL)
+		{
+			SDL_Joystick *joystick = SDL_GetGamepadJoystick(controller->controller);
+
+			flags |= NATIVE_INPUT_WEB_SLOT_PAD;
+			if (controller->analogEnabled != 0)
+			{
+				flags |= NATIVE_INPUT_WEB_SLOT_ANALOG;
+			}
+			out[2] = (s32)controller->instanceId;
+			out[3] = SDL_GetGamepadVendor(controller->controller);
+			out[4] = SDL_GetGamepadProduct(controller->controller);
+			out[5] = (s32)(size_t)(joystick != NULL ? SDL_GetJoystickName(joystick) : SDL_GetGamepadName(controller->controller));
+		}
+		if (slot == s_keyboardControllerSlot)
+		{
+			flags |= NATIVE_INPUT_WEB_SLOT_KEYBOARD;
+		}
+		if (slot == s_keyboard2ControllerSlot)
+		{
+			flags |= NATIVE_INPUT_WEB_SLOT_KEYBOARD2;
+		}
+		out[0] = flags;
+		out[1] = NativeInput_GetSnapshotButtons(&controller->snapshot);
+	}
+
+	if (s_reportedOnce && (memcmp(slots, s_reported, sizeof(slots)) == 0))
+	{
+		return;
+	}
+
+	memcpy(s_reported, slots, sizeof(slots));
+	s_reportedOnce = 1;
+	NativeInput_WebReportPlayersJS(slots, NATIVE_INPUT_MAX_CONTROLLERS);
 }
 #endif
 
@@ -580,9 +747,8 @@ internal void NativeInput_ApplyController(s32 slot)
 	snapshot->analog[3] = NativeInput_AxisToByte(leftY);
 }
 
-internal u16 NativeInput_ReadKeyboard(void)
+internal u16 NativeInput_ReadKeyboardMapping(const struct NativeInputKeyboardMapping *mapping)
 {
-	const struct NativeInputKeyboardMapping *mapping = &s_keyboardMapping;
 	u16 buttons = 0xffff;
 
 	if (s_keyboardState == NULL)
@@ -658,6 +824,11 @@ internal u16 NativeInput_ReadKeyboard(void)
 	return buttons;
 }
 
+internal u16 NativeInput_ReadKeyboard(void)
+{
+	return NativeInput_ReadKeyboardMapping(&s_keyboardMapping);
+}
+
 internal s32 NativeInput_KeyboardSuppressed(void)
 {
 	if (s_keyboardState == NULL)
@@ -668,11 +839,11 @@ internal s32 NativeInput_KeyboardSuppressed(void)
 	return s_keyboardState[SDL_SCANCODE_RALT] || s_keyboardState[SDL_SCANCODE_LALT];
 }
 
-internal void NativeInput_ApplyKeyboard(s32 slot, u16 keyboardButtons)
+internal void NativeInput_ApplyKeyboardTo(s32 slot, s32 keyboardSlot, u16 keyboardButtons)
 {
 	struct PlatformInputPadSnapshot *snapshot = &s_controllers[slot].snapshot;
 
-	if (slot != s_keyboardControllerSlot)
+	if (slot != keyboardSlot)
 	{
 		return;
 	}
@@ -686,6 +857,11 @@ internal void NativeInput_ApplyKeyboard(s32 slot, u16 keyboardButtons)
 
 	u16 buttons = NativeInput_GetSnapshotButtons(snapshot);
 	NativeInput_SetSnapshotButtons(snapshot, buttons & keyboardButtons);
+}
+
+internal void NativeInput_ApplyKeyboard(s32 slot, u16 keyboardButtons)
+{
+	NativeInput_ApplyKeyboardTo(slot, s_keyboardControllerSlot, keyboardButtons);
 }
 
 internal s32 NativeInput_FindActiveControllerSlot(void)
@@ -906,7 +1082,10 @@ void Platform_InputUpdate(void)
 
 	SDL_PumpEvents();
 #if defined(__EMSCRIPTEN__)
-	NativeInput_WebPullMappings(&s_keyboardMapping.kc_square, &s_controllerMapping.gc_square);
+	NativeInput_WebPullMappings(&s_keyboardMapping.kc_square, &s_keyboardMapping2.kc_square, &s_controllerMapping.gc_square, &s_webDuo);
+	NativeInput_WebApplyPlayerCommands();
+	NativeInput_WebPlaceKeyboard2();
+	u16 keyboard2Buttons = (NativeInput_KeyboardSuppressed() || (s_keyboard2ControllerSlot < 0)) ? 0xffff : NativeInput_ReadKeyboardMapping(&s_keyboardMapping2);
 #endif
 	u16 keyboardButtons = NativeInput_KeyboardSuppressed() ? 0xffff : NativeInput_ReadKeyboard();
 
@@ -915,8 +1094,12 @@ void Platform_InputUpdate(void)
 		NativeInput_ResetSnapshot(slot);
 		NativeInput_ApplyController(slot);
 		NativeInput_ApplyKeyboard(slot, keyboardButtons);
+#if defined(__EMSCRIPTEN__)
+		NativeInput_ApplyKeyboardTo(slot, s_keyboard2ControllerSlot, keyboard2Buttons);
+#endif
 	}
 #if defined(__EMSCRIPTEN__)
+	NativeInput_WebReportPlayers();
 	NativeInput_WebBlockLocalInput();
 	NativeInput_ApplyRemotePads();
 #endif
@@ -946,6 +1129,18 @@ void Platform_InputControllerAdded(int deviceIndex)
 	{
 		return;
 	}
+#if defined(__EMSCRIPTEN__)
+	// SDL also sends GAMEPAD_ADDED for a pad Platform_InputInit already opened (one visible at
+	// start-up : a button pressed while the page loaded) : without this it opens a second time in
+	// the next free slot, one pad driving P1 and P2, and its removal closes only the first.
+	for (s32 slot = 0; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+	{
+		if ((s_controllers[slot].controller != NULL) && (s_controllers[slot].instanceId == (SDL_JoystickID)deviceIndex))
+		{
+			return;
+		}
+	}
+#endif
 
 	s32 slot = NativeInput_FindSlotForDeviceIndex(deviceIndex);
 	if (slot >= 0)

@@ -143,17 +143,23 @@ export default async ctx => {
 		// (after SCEA / copyright) : the VBlank count at the menu is the game time since boot.
 		// Right after UX-ZIP-BOOT the game has just started ; else (a preloaded build, booted
 		// before the suite) the page is reloaded.
-		if (!booted) await ctx.reload()
-		const t0 = Date.now()
+		// The 605 MB preload over the forwarded port can break on a reload (« network error »,
+		// the data file still pending) : no game after 2 min = reload again, 3 tries (12b).
+		let t0 = Date.now()
 		const seen = []
 		let s = null
-		say('mashing Enter through the intro (SCEA, copyright, crate, title) until the main menu')
-		while (!(s && onMainMenu(s)) && Date.now() - t0 < 180_000) {
-			if (s && !seen.includes(s.screen)) { seen.push(s.screen); say(`game screen : ${s.screen}${s.menu ? ` (menu ${s.menu.label || '…'})` : ''}`) }
-			if (s?.menu?.input) await ctx.press('z')
-			else await ctx.press('Enter').catch(() => {})
-			await sleep(150)
-			s = await state(ctx).catch(() => null)
+		for (let attempt = 1; attempt <= 3 && !(s && onMainMenu(s)); attempt++) {
+			if (!booted || attempt > 1) await ctx.reload()
+			t0 = Date.now()
+			s = null
+			say(`mashing Enter through the intro (SCEA, copyright, crate, title) until the main menu${attempt > 1 ? ` (attempt ${attempt})` : ''}`)
+			while (!(s && onMainMenu(s)) && Date.now() - t0 < (s ? 180_000 : 120_000)) {
+				if (s && !seen.includes(s.screen)) { seen.push(s.screen); say(`game screen : ${s.screen}${s.menu ? ` (menu ${s.menu.label || '…'})` : ''}`) }
+				if (s?.menu?.input) await ctx.press('z')
+				else await ctx.press('Enter').catch(() => {})
+				await sleep(150)
+				s = await state(ctx).catch(() => null)
+			}
 		}
 		s = await until(ctx, 'the main menu', onMainMenu, { timeout: 5000 })
 		await shot(ctx, 'menu-after-skip')

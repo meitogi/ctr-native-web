@@ -2,6 +2,12 @@
 
 A fork of [CTR Native](https://github.com/CTR-tools/ctr-native) that adds a browser target : WebAssembly, WebGL2, your own NTSC-U disc image dropped into the page, and online play over WebRTC. Work in progress ; the sections below describe the upstream native port, which this fork keeps building.
 
+### In the browser : couch play, and the game on a TV
+
+- **Several players on one machine** : plug in one gamepad per player (a pad shows up once you press one of its buttons), then pick VS. or Arcade with 2–4 players in the game's own menus — the split screen of the original. Settings › Players shows who is P1–P4, swaps them, and puts two players on one keyboard (left half : WASD and the keys around G ; right half : the arrows and the keys around L ; both changeable in Settings › Controls).
+- **The stick** : every pad starts in analog mode (ANA) — the left stick steers and moves through every menu. Select + Start together switches a pad to digital (DIG, stick ignored) and back, like the PlayStation's Analog button.
+- **AirPlay to an Apple TV** : Safari cannot send the game alone. A page can only AirPlay a `<video>`, and the game's picture would be a live stream (`canvas.captureStream()`), which WebKit refuses for AirPlay — its MediaStream player says « This engine does not support wireless playback » (`MediaPlayerPrivateMediaStreamAVFObjC::supportsType`). What works on a Mac : Control Center › Screen Mirroring › the Apple TV › **Use As Separate Display**, drag the browser window to that display and make it full screen (Ctrl + Cmd + F), and pick the Apple TV as the sound output (Control Center › Sound). The pads stay connected to the Mac.
+
 CTR Native is a native PC port of Crash Team Racing (PS1, 1999), built on top of the [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) decompilation project.
 
 ## Philosophy

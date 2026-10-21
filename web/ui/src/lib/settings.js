@@ -1,5 +1,5 @@
 // The page's settings, one place : player name, volume / mute, skip intro, keyboard and gamepad
-// mappings. Persisted in localStorage ; a missing or blocked storage (private mode) only means
+// mappings, two players on one keyboard (duo) and its two key sets. Persisted in localStorage ; a missing or blocked storage (private mode) only means
 // nothing is remembered.
 //
 // The player name keeps the key the Online panel already used (`ctr-online.name`,
@@ -8,7 +8,7 @@
 //
 // createSettings() returns a Svelte-compatible store (subscribe / set / update) usable from plain
 // JS too — test/settings.test.js drives it with an in-memory storage.
-import { DEFAULT_GAMEPAD, DEFAULT_KEYBOARD, loadMapping, saveMapping } from './mappings.js'
+import { DEFAULT_GAMEPAD, DEFAULT_KEYBOARD, DEFAULT_KEYBOARD_LEFT, DEFAULT_KEYBOARD_RIGHT, loadMapping, saveMapping } from './mappings.js'
 
 export const NAME_LEN = 9 // game/OnlineCTR/global.h
 export const KEYS = {
@@ -18,6 +18,9 @@ export const KEYS = {
   skipIntro: 'ctr-ui.skip-intro',
   keyboard: 'ctr-ui.keyboard',
   gamepad: 'ctr-ui.gamepad',
+  duo: 'ctr-ui.duo',
+  keyboardLeft: 'ctr-ui.keyboard-left',
+  keyboardRight: 'ctr-ui.keyboard-right',
 }
 export const DEFAULT_VOLUME = 0.8
 
@@ -43,6 +46,9 @@ export function loadSettings(storage) {
     skipIntro: read(storage, KEYS.skipIntro) !== '0',
     keyboard: loadMapping(storage, KEYS.keyboard, DEFAULT_KEYBOARD),
     gamepad: loadMapping(storage, KEYS.gamepad, DEFAULT_GAMEPAD),
+    duo: read(storage, KEYS.duo) === '1',
+    keyboardLeft: loadMapping(storage, KEYS.keyboardLeft, DEFAULT_KEYBOARD_LEFT),
+    keyboardRight: loadMapping(storage, KEYS.keyboardRight, DEFAULT_KEYBOARD_RIGHT),
   }
 }
 
@@ -53,6 +59,14 @@ function saveSettings(storage, s) {
   write(storage, KEYS.skipIntro, s.skipIntro ? null : '0')
   saveMapping(storage, KEYS.keyboard, s.keyboard, DEFAULT_KEYBOARD)
   saveMapping(storage, KEYS.gamepad, s.gamepad, DEFAULT_GAMEPAD)
+  write(storage, KEYS.duo, s.duo ? '1' : null)
+  saveMapping(storage, KEYS.keyboardLeft, s.keyboardLeft, DEFAULT_KEYBOARD_LEFT)
+  saveMapping(storage, KEYS.keyboardRight, s.keyboardRight, DEFAULT_KEYBOARD_RIGHT)
+}
+
+/** The key sets the game gets : [first keyboard, second keyboard] — the two halves in duo. */
+export function keyboardSets(s) {
+  return s.duo ? [s.keyboardLeft, s.keyboardRight] : [s.keyboard, s.keyboardRight]
 }
 
 /** A store over the settings. `storage` : localStorage, or anything with getItem / setItem / removeItem. */

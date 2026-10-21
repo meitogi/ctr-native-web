@@ -1,9 +1,10 @@
 <script>
-  // The Settings sidebar (design B) : tabs on top — Player, Controls, Sound, Disc, then the panels
+  // The Settings sidebar (design B) : tabs on top — Profile, Players, Controls, Sound, Disc, then the panels
   // other modules hand over (Online : web/online/page.js, Share : web/share/panel.js), About.
   // The game keeps running beside it, re-centred in what is left ; while it is open the game
   // gets no local input (Module.ctrInput.blocked).
   import Controls from './Controls.svelte'
+  import Players from './Players.svelte'
   import { NAME_LEN } from './lib/settings.js'
   import { T } from './lib/strings.js'
   import { ui } from './state.svelte.js'
@@ -15,6 +16,7 @@
 
   const ICONS = {
     player: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    players: '<circle cx="8.5" cy="8" r="3.2"/><circle cx="16.5" cy="9" r="2.6"/><path d="M2.5 20a6 6 0 0 1 12 0M14 14.6a5 5 0 0 1 7.5 4.4"/>',
     controls: '<path d="M7 6h10c3 0 4.5 2 5 5l.5 4c.3 2.5-2 4-4 2l-2.5-2.5h-8L5.5 17c-2 2-4.3.5-4-2L2 11c.5-3 2-5 5-5z"/>',
     sound: '<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
     disc: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/>',
@@ -24,6 +26,7 @@
   }
   const tabs = $derived([
     { id: 'player', title: T.tabs.player },
+    { id: 'players', title: T.tabs.players },
     { id: 'controls', title: T.tabs.controls },
     { id: 'sound', title: T.tabs.sound },
     { id: 'disc', title: T.tabs.disc },
@@ -72,6 +75,8 @@
         <span>{T.skipIntro}<small>{T.skipIntroHelp}</small></span>
         <input id="ctr-skip-intro" type="checkbox" role="switch" class="switch" checked={s.skipIntro} onchange={(e) => settings.patch({ skipIntro: e.currentTarget.checked })} />
       </label>
+    {:else if current.id === 'players'}
+      <Players />
     {:else if current.id === 'controls'}
       <Controls {layout} />
     {:else if current.id === 'sound'}

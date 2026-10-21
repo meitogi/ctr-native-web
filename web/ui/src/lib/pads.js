@@ -76,3 +76,9 @@ export const OTHER_LABELS = {
   nintendo: ['L', 'R', 'ZL', 'ZR', 'LS', 'RS', '−', '+', 'Home'],
   other: ['L1', 'R1', 'L2', 'R2', 'L3', 'R3', 'Back', 'Start', 'Home'],
 }
+
+/** The family of a pad from its USB vendor id (a number, 0 when unknown) and its name. */
+export function padFamily(vendor, name = '') {
+  const v = vendor ? VENDORS[vendor.toString(16).padStart(4, '0')] : ''
+  return v || parsePadId(name).family
+}

@@ -21,6 +21,8 @@ export const ui = $state({
   toasts: [],
   // connected pads by Gamepad.index : { index, id, family, name }
   pads: [],
+  // the game's four player slots (lib/players.js describe()) : { pad, keyboard, keyboard2, pressed }
+  players: [],
   // the stored disc : { serial, size } or null
   disc: null,
   // the Controls tab is waiting for a key / button : { device: 'keyboard'|'gamepad', button }

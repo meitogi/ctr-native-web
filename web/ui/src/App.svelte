@@ -16,6 +16,7 @@
   import { refusal, scancodeOf } from './lib/keys.js'
   import { bind, STANDARD_TO_SDL } from './lib/mappings.js'
   import { parsePadId } from './lib/pads.js'
+  import { keyboardSets } from './lib/settings.js'
   import { T } from './lib/strings.js'
   import { watchPads } from './lib/input-hook.js'
   import { tick } from 'svelte'
@@ -109,7 +110,9 @@
       return
     }
     ui.notice = ''
-    settings.patch({ keyboard: bind(settings.get().keyboard, ui.listening.button, scancodeOf(e.code)) })
+    const s = settings.get()
+    const field = ui.listening.device === 'keyboard2' ? 'keyboardRight' : s.duo ? 'keyboardLeft' : 'keyboard'
+    settings.patch({ [field]: bind(s[field], ui.listening.button, scancodeOf(e.code)) })
     ui.listening = null
   }
   const focusables = () => [...document.querySelectorAll('#ctr-settings button:not([disabled]), #ctr-settings input, #ctr-settings textarea, #ctr-settings [tabindex="0"]')].filter((n) => n.offsetParent !== null)
@@ -137,17 +140,19 @@
     const a = document.activeElement
     return !!a && a !== document.body && a.id !== 'canvas' && /^(BUTTON|INPUT|SELECT|TEXTAREA|A)$/.test(a.tagName)
   }
+  // the key sets the game reads : the right half only while two players share the keyboard
+  const claimed = (s) => (s.duo ? keyboardSets(s) : [s.keyboard])
   function claimKey(e) {
     if (e.metaKey || e.altKey || (e.ctrlKey && !/^Control/.test(e.code)) || /^F\d+$/.test(e.code) || onAControl()) return
     const sc = scancodeOf(e.code)
-    if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space' || /^Arrow/.test(e.code) || (sc >= 0 && settings.get().keyboard.includes(sc))) e.preventDefault()
+    if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space' || /^Arrow/.test(e.code) || (sc >= 0 && claimed(settings.get()).some((m) => m.includes(sc)))) e.preventDefault()
   }
   function onKeyCapture(e) {
     if (e.type === 'keydown') {
       input.onKey(e) // « Skip intro » counts presses
       claimKey(e)
     }
-    if (ui.listening?.device === 'keyboard') {
+    if (ui.listening && ui.listening.device !== 'gamepad') {
       e.preventDefault()
       e.stopImmediatePropagation()
       if (e.type === 'keydown' && !e.repeat) bindKey(e)

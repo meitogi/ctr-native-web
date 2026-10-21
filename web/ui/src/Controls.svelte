@@ -1,10 +1,11 @@
 <script>
-  // Settings › Controls : every PSX button, its keyboard key and its gamepad button. Click a box,
+  // Settings › Controls : every PSX button, its keyboard key and its gamepad button (and the second
+  // keyboard's key while two players share it : Settings › Players). Click a box,
   // press the key or button (App.svelte routes the press here through ui.listening) ; conflicts
   // shown on both buttons ; reset per device. Saved at once (settings store → localStorage), the
   // game reads it at its next input update (Module.ctrInput.pull).
   import Glyph from './Glyph.svelte'
-  import { BUTTONS, DEFAULT_GAMEPAD, DEFAULT_KEYBOARD, DISPLAY_ORDER, conflicts } from './lib/mappings.js'
+  import { BUTTONS, DEFAULT_GAMEPAD, DEFAULT_KEYBOARD, DEFAULT_KEYBOARD_LEFT, DEFAULT_KEYBOARD_RIGHT, DISPLAY_ORDER, conflicts } from './lib/mappings.js'
   import { codeOf } from './lib/keys.js'
   import { T } from './lib/strings.js'
   import { ui } from './state.svelte.js'
@@ -17,7 +18,11 @@
   let device = $state(ui.pads.length ? 'gamepad' : 'keyboard')
   const pad = $derived(ui.pads[0] ?? null)
   const family = $derived(pad?.family ?? 'other')
-  const map = $derived(device === 'keyboard' ? s.keyboard : s.gamepad)
+  // the settings field each device edits : the keyboard is its left half while two players share it
+  const FIELD = { keyboard: () => (s.duo ? 'keyboardLeft' : 'keyboard'), keyboard2: () => 'keyboardRight', gamepad: () => 'gamepad' }
+  const DEFAULTS = { keyboard: DEFAULT_KEYBOARD, keyboardLeft: DEFAULT_KEYBOARD_LEFT, keyboardRight: DEFAULT_KEYBOARD_RIGHT, gamepad: DEFAULT_GAMEPAD }
+  $effect(() => { if (device === 'keyboard2' && !s.duo) device = 'keyboard' })
+  const map = $derived(s[FIELD[device]()])
   const clash = $derived(conflicts(map))
 
   const listen = (button) => {
@@ -27,7 +32,8 @@
   const reset = () => {
     ui.listening = null
     ui.notice = ''
-    settings.patch(device === 'keyboard' ? { keyboard: DEFAULT_KEYBOARD.slice() } : { gamepad: DEFAULT_GAMEPAD.slice() })
+    const field = FIELD[device]()
+    settings.patch({ [field]: DEFAULTS[field].slice() })
   }
   const label = (b) => T.buttons[b][0]
   const firstClash = $derived.by(() => {
@@ -40,8 +46,14 @@
   <div class="seg" role="tablist">
     <button role="tab" aria-selected={device === 'keyboard'} class:on={device === 'keyboard'} onclick={() => { device = 'keyboard'; ui.listening = null }}>
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" stroke-linecap="round" /></svg>
-      {T.keyboard}
+      {s.duo ? T.keyboardLeft : T.keyboard}
     </button>
+    {#if s.duo}
+      <button role="tab" data-device="keyboard2" aria-selected={device === 'keyboard2'} class:on={device === 'keyboard2'} onclick={() => { device = 'keyboard2'; ui.listening = null }}>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" stroke-linecap="round" /></svg>
+        {T.keyboardRight}
+      </button>
+    {/if}
     <button role="tab" aria-selected={device === 'gamepad'} class:on={device === 'gamepad'} onclick={() => { device = 'gamepad'; ui.listening = null }}>
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M7 6h10c3 0 4.5 2 5 5l.5 4c.3 2.5-2 4-4 2l-2.5-2.5h-8L5.5 17c-2 2-4.3.5-4-2L2 11c.5-3 2-5 5-5z" /></svg>
       {pad ? T.families[family] : T.gamepad}
@@ -60,7 +72,7 @@
           aria-label={`${label(b)} : ${device}`} onclick={() => listen(b)}>
           {#if isListening}
             <span class="pulse">{T.listening}</span>
-          {:else if device === 'keyboard'}
+          {:else if device !== 'gamepad'}
             <Glyph kind="key" value={codeOf(map[i])} {layout} />
           {:else}
             <Glyph kind="pad" value={map[i]} {family} />
@@ -71,7 +83,7 @@
   </div>
 
   {#if ui.listening}
-    <p class="note">{ui.listening.device === 'keyboard' ? T.listeningKey : T.listeningPad}</p>
+    <p class="note">{ui.listening.device !== 'gamepad' ? T.listeningKey : T.listeningPad}</p>
   {/if}
   {#if ui.notice}<p class="note warn">{ui.notice}</p>{/if}
   {#if firstClash}

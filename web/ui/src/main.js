@@ -5,6 +5,7 @@
 //   ctrUI.adopt(id, title, el)  put another module's panel in a Settings tab (web/online/page.js,
 //                             web/share/panel.js) ; returns { open(), close() }
 //   ctrUI.toast(title, detail)
+//   ctrUI.players              couch mode (lib/players.js) : slots as the game reports them, swap(a, b)
 // and Module.ctrInput for the game (lib/input-hook.js, pulled by platform/native_input.c).
 import { mount } from 'svelte'
 import App from './App.svelte'
@@ -12,6 +13,7 @@ import './app.css'
 import { findCachedDisc, forgetDisc, probeDisc, storeDiscStream } from '../../disc.js'
 import { resolveDisc } from './lib/discsource.js'
 import { createInputHook } from './lib/input-hook.js'
+import { createPlayers } from './lib/players.js'
 import { LANG, T, errorText } from './lib/strings.js'
 import { ui } from './state.svelte.js'
 import { settings } from './store.js'
@@ -35,7 +37,12 @@ document.documentElement.lang = LANG
 // there, a key is being bound, or a confirmation is up) ; with the panel open and the focus on the
 // game (a click on it), the game plays — the Online tab stays open beside a race.
 const inPanel = () => !!document.activeElement?.closest?.('#ctr-settings')
-const input = createInputHook(settings, { blocked: () => ui.phase === 'running' && (ui.listening !== null || ui.confirm !== null || (ui.settingsOpen && inPanel())) })
+// Couch mode : the game reports its four player slots, Settings › Players swaps them.
+const players = createPlayers({
+  onChange: (slots) => { ui.players = slots },
+  onAnalog: (slot, pad) => toast(pad.analog ? T.analogOn(slot + 1) : T.analogOff(slot + 1), pad.analog ? '' : T.analogOffHelp, pad.family),
+})
+const input = createInputHook(settings, { blocked: () => ui.phase === 'running' && (ui.listening !== null || ui.confirm !== null || (ui.settingsOpen && inPanel())) }, { players })
 if (Module) Module.ctrInput = input
 
 // ---- boot ----
@@ -148,7 +155,7 @@ function adopt(id, title, el) {
   }
 }
 
-globalThis.ctrUI = { settings, adopt, toast, handleFile }
+globalThis.ctrUI = { settings, adopt, toast, handleFile, players }
 
 // Test-only hook (session 3) : the agent browser runs on another machine than the files, so CDP's
 // DOM.setFileInputFiles cannot point at them ; suites fetch a same-origin fixture into the same

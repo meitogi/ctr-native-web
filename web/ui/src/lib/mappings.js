@@ -34,6 +34,24 @@ export const DEFAULT_KEYBOARD = [
   80 /* LEFT */, 79 /* RIGHT */, 82 /* UP */, 81 /* DOWN */,
 ]
 
+// Two players on one keyboard (Settings › Players, user's choice) : two compact halves. Left : WASD
+// to steer, the buttons under the right hand around G ; right : the arrows, the buttons under the
+// left hand around L. Tab / Enter start, ` and / select. L3 / R3 unbound (the game never reads them).
+export const DEFAULT_KEYBOARD_LEFT = [
+  9 /* F */, 11 /* H */, 23 /* T */, 10 /* G */,
+  21 /* R */, 20 /* Q */, -1,
+  28 /* Y */, 8 /* E */, -1,
+  43 /* TAB */, 53 /* ` */,
+  4 /* A */, 7 /* D */, 26 /* W */, 22 /* S */,
+]
+export const DEFAULT_KEYBOARD_RIGHT = [
+  14 /* K */, 51 /* ; */, 18 /* O */, 15 /* L */,
+  12 /* I */, 54 /* , */, -1,
+  19 /* P */, 55 /* . */, -1,
+  40 /* RETURN */, 56 /* / */,
+  80 /* LEFT */, 79 /* RIGHT */, 82 /* UP */, 81 /* DOWN */,
+]
+
 export const DEFAULT_GAMEPAD = [
   SDL_PAD.WEST, SDL_PAD.EAST, SDL_PAD.NORTH, SDL_PAD.SOUTH,
   SDL_PAD.LEFT_SHOULDER, SDL_AXIS.LEFT_TRIGGER | AXIS_FLAG, SDL_PAD.LEFT_STICK,
