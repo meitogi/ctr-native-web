@@ -1,0 +1,16 @@
+# ctr-relay behind an existing Caddy : the relay joins Caddy's network as `ctr-relay`,
+# and your Caddyfile imports relay.caddy (with RELAY_DOMAIN in Caddy's environment).
+#   docker compose --env-file ../.env -p ctr-relay up -d --build
+services:
+  ctr-relay:
+    build: ../..
+    image: ctr-relay
+    restart: unless-stopped
+    environment:
+      RELAY_KEY: ${RELAY_KEY}
+    networks: [proxy]
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK}

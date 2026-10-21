@@ -1,0 +1,16 @@
+# ctr-relay behind an existing HAProxy : the relay joins the proxy's network as `ctr-relay`,
+# ctr-relay.cfg adds the backend, and one line in your HTTPS frontend routes to it.
+#   docker compose --env-file ../.env -p ctr-relay up -d --build
+services:
+  ctr-relay:
+    build: ../..
+    image: ctr-relay
+    restart: unless-stopped
+    environment:
+      RELAY_KEY: ${RELAY_KEY}
+    networks: [proxy]
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK}

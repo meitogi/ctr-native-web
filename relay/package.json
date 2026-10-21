@@ -1,0 +1,17 @@
+{
+  "name": "ctr-relay",
+  "private": true,
+  "version": "1.0.0",
+  "description": "WebSocket meeting point and fallback relay for CTR Native Web rooms",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "main": "relay.js",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node relay.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}

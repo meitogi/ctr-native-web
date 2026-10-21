@@ -1,0 +1,5 @@
+# ctr-relay site for Caddy 2 — in your Caddyfile : import /path/to/relay.caddy
+# Caddy gets the certificate and proxies WebSockets with no extra directive.
+{$RELAY_DOMAIN} {
+	reverse_proxy ctr-relay:8787
+}

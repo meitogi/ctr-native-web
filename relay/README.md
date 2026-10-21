@@ -1,0 +1,101 @@
+# ctr-relay
+
+The meeting point of CTR Native Web rooms : a small WebSocket server where the
+players of a room find each other and exchange their WebRTC offer and answer.
+When two players have no direct WebRTC path, it also forwards their game
+messages. It never reads them : the browsers encrypt everything with the room
+secret, which stays in the room link and never reaches any server.
+
+One Node file (`relay.js`), one dependency (`ws`). Node 24 or later.
+
+## Run it
+
+```
+docker build -t ctr-relay relay/
+docker run -d --name ctr-relay -p 8787:8787 -e RELAY_KEY="$(openssl rand -base64 24)" ctr-relay
+```
+
+or without Docker : `cd relay && npm ci && RELAY_KEY=… npm start`.
+
+It listens on plain `ws://:8787`. Browsers need `wss://` : put it behind a
+reverse proxy ([deploy/](deploy/), next section), or give it a certificate with
+`TLS_CERT` / `TLS_KEY` and it serves `wss://` itself.
+
+| Variable | Default | |
+|---|---|---|
+| `RELAY_KEY` | empty | access key ; empty = open relay (anyone can use it) |
+| `PORT` / `HOST` | `8787` / `0.0.0.0` | listening address |
+| `TLS_CERT` / `TLS_KEY` | — | PEM files : serve `wss://` without a proxy |
+| `RELAY_MAX_BYTES` | `16384` | largest message ; above it the socket is closed (1009) |
+| `RELAY_RATE` / `RELAY_BURST` | `120` / `240` | messages per second per socket, sustained / at once |
+| `RELAY_ROOM_MAX` | `8` | peers per room |
+| `RELAY_LOG_DATA` | — | `1` logs the first characters of each forwarded message (ciphertext), for debugging |
+
+`GET /healthz` answers `200 ok` (Docker healthcheck, proxy health checks).
+
+## Behind your reverse proxy
+
+[deploy/](deploy/) holds a drop-in for **Traefik**, **HAProxy** and **Caddy**.
+Each one reads the host name from `RELAY_DOMAIN` in one `.env` :
+
+```
+cp relay/deploy/.env.example relay/deploy/.env     # set RELAY_DOMAIN, RELAY_KEY, PROXY_NETWORK
+cd relay/deploy/traefik                            # or haproxy, caddy
+docker compose --env-file ../.env -p ctr-relay up -d --build
+```
+
+- **Traefik** (docker provider) : the labels in `traefik/compose.yml` are the whole
+  snippet. Set `TRAEFIK_ENTRYPOINT` and `TRAEFIK_CERTRESOLVER` to your names.
+- **HAProxy** : load `haproxy/ctr-relay.cfg` next to your config
+  (`haproxy -f haproxy.cfg -f ctr-relay.cfg`, with `RELAY_DOMAIN` in HAProxy's
+  environment) and add the `use_backend` line from its header to your HTTPS
+  frontend. `timeout tunnel 1h` keeps idle WebSockets open.
+- **Caddy** : `import relay.caddy` in your Caddyfile, `RELAY_DOMAIN` in Caddy's
+  environment. Caddy gets the certificate and proxies WebSockets as is.
+
+The relay container joins your proxy's network (`PROXY_NETWORK`) as `ctr-relay`.
+The DNS record of `RELAY_DOMAIN` must point straight at the proxy : a CDN in
+front (Cloudflare's orange cloud) cuts idle WebSockets.
+
+`deploy/test/run.sh [traefik|haproxy|caddy|all]` starts each snippet for real with
+its proxy in Docker and checks a `wss://` connection, the key and forwarding
+through it.
+
+## The access key
+
+With `RELAY_KEY` set, the first message of a connection must be its `hello` and
+carry `key`. A wrong key, another first message, or no hello within 5 s closes
+the socket with code 4401. Comparison is constant time. The key is not a header
+or a query string (browsers cannot set WebSocket headers, and query strings end
+up in proxy logs) ; players get it in the room link after `#`, as `rk=`.
+
+Rotate it : change `RELAY_KEY`, restart, share new links.
+
+## Protocol
+
+JSON text messages : the `hello` / `peers` / `signal` / `ping` protocol of the
+debrid-remote `signal-relay` (a client that sends no `room` still works), scoped
+to rooms, plus `data`.
+
+| Message | Sent by | Relay does |
+|---|---|---|
+| `{type:'hello', id, name?, kind?, room?, key?}` | every peer, first | joins `room` (default `""`), replies `{type:'welcome', peers}`, sends `{type:'peers', list}` to the room |
+| `{type:'signal', to, …}` | a peer | forwards it as is to `to` in the same room, `from` set to the sender |
+| `{type:'data', to?, data}` | a peer | forwards `{type:'data', from, data}` to `to`, or to everyone else in the room when `to` is absent ; `data` is an opaque string |
+| `{type:'ping', ts}` | a peer | replies `{type:'pong', ts, srv}` |
+
+`peers` / `list` are `[{id, name, kind}]` of the room, the peer itself included.
+A peer leaving triggers a new `peers`. Close codes : 4400 malformed hello,
+4401 key, 4403 room full, 4409 id already in the room, 4429 rate limit,
+1009 message too big.
+
+## Tests
+
+```
+cd relay && npm ci && npm test        # relay : rooms, key, limits, TLS
+relay/deploy/test/run.sh              # the three proxy snippets, in Docker
+```
+
+## License
+
+GPL-3.0, like the rest of CTR Native Web.

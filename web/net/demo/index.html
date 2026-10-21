@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ctr-net demo</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f6f6f4; --fg: #1c1c1c; --muted: #6b6b6b; --line: #d8d8d4; --ok: #1f7a3a; --bad: #b3261e; --tag: #e9e9e4; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161616; --fg: #e8e8e6; --muted: #9a9a96; --line: #333; --ok: #6fcf8a; --bad: #f2948b; --tag: #262626; } }
+  body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.lead { color: var(--muted); margin: 0 0 16px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
+  input { font: inherit; padding: 6px 8px; border: 1px solid var(--line); background: transparent; color: inherit; border-radius: 6px; min-width: 0; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--tag); color: inherit; cursor: pointer; }
+  .runs { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  section { border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+  h2 { font-size: 15px; margin: 0 0 8px; display: flex; justify-content: space-between; gap: 8px; }
+  .status { font-weight: 600; }
+  .status.pass { color: var(--ok); } .status.fail { color: var(--bad); }
+  .path { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--tag); font-family: ui-monospace, monospace; font-size: 12px; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0 0 8px; }
+  dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; }
+  pre { margin: 0; max-height: 260px; overflow: auto; font: 12px/1.4 ui-monospace, monospace; background: var(--tag); padding: 8px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ctr-net — two peers, one page</h1>
+  <p class="lead">A host and a guest open the same room link. <b>Auto</b> tries WebRTC (proof bound to the DTLS fingerprints) and falls back to the relay ; <b>Forced WebSocket</b> goes through the relay, sealed with the room key.</p>
+  <div class="bar">
+    <label>Relay <input id="relay" size="28"></label>
+    <label>Relay key <input id="rk" size="20"></label>
+    <button id="run-auto">Run auto (P2P)</button>
+    <button id="run-ws">Run forced WebSocket</button>
+  </div>
+  <div class="runs">
+    <section id="auto"><h2>Auto (P2P first) <span class="status">not run</span></h2><dl></dl><pre></pre></section>
+    <section id="ws"><h2>Forced WebSocket <span class="status">not run</span></h2><dl></dl><pre></pre></section>
+  </div>
+</main>
+<script type="module" src="demo.js"></script>
+</body>
+</html>

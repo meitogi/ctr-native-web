@@ -1,0 +1,23 @@
+# ctr-relay behind an existing Traefik (docker provider) : the labels are the whole snippet.
+#   docker compose --env-file ../.env -p ctr-relay up -d --build
+services:
+  ctr-relay:
+    build: ../..
+    image: ctr-relay
+    restart: unless-stopped
+    environment:
+      RELAY_KEY: ${RELAY_KEY}
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${PROXY_NETWORK}
+      - traefik.http.routers.ctr-relay.rule=Host(`${RELAY_DOMAIN}`)
+      - traefik.http.routers.ctr-relay.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.ctr-relay.tls=true
+      - traefik.http.routers.ctr-relay.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      - traefik.http.services.ctr-relay.loadbalancer.server.port=8787
+    networks: [proxy]
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK}
