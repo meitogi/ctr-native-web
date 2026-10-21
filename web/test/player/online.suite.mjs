@@ -24,7 +24,7 @@
 
 import { capture } from '/opt/devcontainer/base/skills/visual-loop/scripts/cdp.mjs'
 import { makePlayer, pageScript } from '/opt/devcontainer/base/skills/visual-loop/lib/player.mjs'
-import { PLAYER } from './ctr.mjs'
+import { PLAYER, recordWithSound } from './ctr.mjs'
 
 export const meta = {
 	url: 'http://localhost:8092/index.html',
@@ -70,29 +70,43 @@ async function until(tab, label, pred, timeout = 30_000, every = 250) {
 		if (s && pred(s)) return s
 		await sleep(every)
 	}
-	const log = await tab.js("return (document.getElementById('log')?.textContent ?? '').trim().split('\\n').slice(-4).join(' | ')").catch(e => e.message)
+	const log = await tab.js(`return [location.href, document.visibilityState, document.getElementById('boot-status')?.textContent,
+		document.getElementById('drop-error')?.textContent, 'game script ' + !!document.querySelector('script[src="ctr_native.js"]'),
+		(document.getElementById('log')?.textContent ?? '').trim().split('\\n').slice(-4).join(' | ')].join(' ; ')`).catch(e => e.message)
 	throw new Error(`${tab.name} : timed out after ${Math.round(timeout / 1000)}s waiting for ${label} (last state ${s?.octr?.CurrState}, ${s?.error || s?.lastError?.message || 'no error'} ; page log : ${log})`)
 }
 
 /** Loads `url` in `tab` and boots the game to OnlineCTR's server menu ; stores the disc in OPFS once. */
 async function boot(tab, url) {
-	await tab.navigate(url)
-	const deadline = Date.now() + 30_000
-	while (!(await tab.js('return document.readyState === "complete" && typeof window.__ctrTestHandleFileFromUrl === "function"').catch(() => false))) {
-		if (Date.now() > deadline) throw new Error(`${tab.name} : the page never loaded (${await tab.js('return location.href').catch(e => e.message)})`)
-		await sleep(250)
-	}
-	if (await tab.js('return !document.getElementById("boot").classList.contains("hidden")')) {
-		// 605 MB over the port forward the first time : start it, watch the drop zone go away
-		await tab.js(`void window.__ctrTestHandleFileFromUrl(location.origin + '/ctr-u.bin'); return true`)
-		const until2 = Date.now() + 900_000
-		for (;;) {
-			const s = await tab.js('return { hidden: document.getElementById("boot").classList.contains("hidden"), error: document.getElementById("drop-error").textContent }')
-			if (s.error) throw new Error(`${tab.name} : disc refused : ${s.error}`)
-			if (s.hidden) break
-			if (Date.now() > until2) throw new Error(`${tab.name} : the disc never reached OPFS`)
-			await sleep(2000)
+	// A load that starts while the previous page of this tab is still pulling the 13 MB debug
+	// wasm through the port forward can stall with no wasm request at all : leave the page
+	// first, and retry a boot that logs nothing (as ctr.mjs's bootToMenu does for the preload).
+	for (let attempt = 1; ; attempt++) {
+		await tab.navigate(new URL('/preload-flag.js', url).href)
+		await sleep(1000)
+		await tab.navigate(url)
+		const deadline = Date.now() + 30_000
+		while (!(await tab.js('return document.readyState === "complete" && typeof window.__ctrTestHandleFileFromUrl === "function"').catch(() => false))) {
+			if (Date.now() > deadline) throw new Error(`${tab.name} : the page never loaded (${await tab.js('return location.href').catch(e => e.message)})`)
+			await sleep(250)
 		}
+		if (await tab.js('return !document.getElementById("boot").classList.contains("hidden")')) {
+			// 605 MB over the port forward the first time : start it, watch the drop zone go away
+			await tab.js(`void window.__ctrTestHandleFileFromUrl(location.origin + '/ctr-u.bin'); return true`)
+			const stored = Date.now() + 900_000
+			for (;;) {
+				const s = await tab.js('return { hidden: document.getElementById("boot").classList.contains("hidden"), error: document.getElementById("drop-error").textContent }')
+				if (s.error) throw new Error(`${tab.name} : disc refused : ${s.error}`)
+				if (s.hidden) break
+				if (Date.now() > stored) throw new Error(`${tab.name} : the disc never reached OPFS`)
+				await sleep(2000)
+			}
+		}
+		// The game prints its first lines within seconds of the wasm arriving.
+		const started = Date.now() + 60_000
+		while (Date.now() < started && !(await tab.js("return /\\[OnlineCTR\\]|vblank=/.test(document.getElementById('log')?.textContent ?? '')").catch(() => false))) await sleep(500)
+		if (await tab.js("return /\\[OnlineCTR\\]|vblank=/.test(document.getElementById('log')?.textContent ?? '')").catch(() => false)) break
+		if (attempt === 3) throw new Error(`${tab.name} : the game never started after ${attempt} loads`)
 	}
 	await until(tab, 'the server menu', s => s.octr?.CurrState === ST.PICK_SERVER, 180_000)
 	await tab.js(R6_PROBE)
@@ -199,9 +213,9 @@ async function twoTabs(ctx, mode) {
 		await guest.press(CROSS)
 		for (const tab of [host, guest]) await until(tab, 'the race (SG_STARTRACE)', s => s.octr.CurrState === ST.START_RACE, 180_000, 500)
 
-		// Race : both hold Cross ; the host's tab is filmed
+		// Race : both hold Cross ; the host's tab is filmed, its sound unmuted for the video
 		const samples = { host: [], guest: [] }
-		await ctx.record(`${mode}-race`, async () => {
+		await recordWithSound(ctx, `${mode}-race`, async () => {
 			await ctx.hold(CROSS)
 			await gp.hold(CROSS)
 			const end = Date.now() + RACE_MS
