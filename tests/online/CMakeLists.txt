@@ -26,8 +26,7 @@ if(EMSCRIPTEN)
     return()
 endif()
 
-add_subdirectory(${ROOT}/externals/enet ${CMAKE_BINARY_DIR}/enet EXCLUDE_FROM_ALL)
-target_include_directories(enet PUBLIC ${ROOT}/externals/enet/include)
+include(${ROOT}/externals/enet.cmake)
 
 # A2 — the original server, unchanged (upstream's own warning flags)
 add_executable(ctr_srv_upstream
