@@ -193,6 +193,15 @@ int RB_CrateWeapon_ThCollide(struct Thread *crateThread, struct Thread *collidin
 			// A received clock suppresses the roulette reward, but still consumes the crate.
 			if (driver->clockReceive == 0)
 			{
+#ifdef USE_ONLINE
+				if (driver->driverID != 0)
+					return 0; // guessing return 0 means """cancel"""
+
+				// do nothing at end of race
+				if ((driver->actionsFlagSet & ACTION_RACE_FINISHED) != 0)
+					return 0;
+#endif
+
 				driver->heldItemID = HELD_ITEM_ROULETTE;
 				driver->numTimesHitWeaponBox++;
 				driver->itemRollTimer = 90;
@@ -321,6 +330,14 @@ int RB_CrateFruit_ThCollide(struct Thread *crateThread, struct Thread *colliding
 			{
 				driver = collidingTh->object;
 
+#ifdef USE_ONLINE
+				if (driver->driverID != 0)
+				{
+					RB_Player_ModifyWumpa(driver, newWumpa);
+					return 0; // thread not born????
+				}
+#endif
+
 				driver->PickupWumpaHUD.cooldown = 5;
 				driver->PickupWumpaHUD.numCollected = newWumpa;
 
@@ -338,6 +355,14 @@ int RB_CrateFruit_ThCollide(struct Thread *crateThread, struct Thread *colliding
 			else if ((hitModelID == DYNAMIC_BOMB) || (hitModelID == DYNAMIC_ROCKET) || (hitModelID == DYNAMIC_SHIELD) || (hitModelID == DYNAMIC_SHIELD_GREEN))
 			{
 				driver = ((struct TrackerWeapon *)collidingTh->object)->driverParent;
+
+#ifdef USE_ONLINE
+				if (driver->driverID != 0)
+				{
+					RB_Player_ModifyWumpa(driver, newWumpa);
+					return 0; // thread not born????
+				}
+#endif
 
 				driver->PickupWumpaHUD.cooldown = 5;
 				driver->PickupWumpaHUD.numCollected = newWumpa;
@@ -464,6 +489,11 @@ int RB_CrateTime_ThCollide(struct Thread *crateThread, struct Thread *driverTh, 
 			{
 				driver = driverTh->object;
 			}
+
+#ifdef USE_ONLINE
+			if (driver->driverID != 0)
+				return 0;
+#endif
 
 			driver->numTimeCrates++;
 			modelID = crateInst->model->id;

@@ -307,6 +307,11 @@ DamageApplied:
 
 	if ((attackDriver != NULL) && ((GAME_TRACKER->gameMode1 & END_OF_RACE) == 0))
 	{
+#ifdef USE_ONLINE
+		if (attackDriver->driverID != 0)
+			return 0; // 0 = "quit"?
+#endif
+
 		worldPosition.x = (s16)attackDriver->instSelf->matrix.t[0];
 		worldPosition.y = (s16)attackDriver->instSelf->matrix.t[1];
 		worldPosition.z = (s16)attackDriver->instSelf->matrix.t[2];

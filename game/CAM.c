@@ -534,6 +534,11 @@ void CAM_StartOfRace(struct CameraDC *cDC)
 	struct GameTracker *gGT = GAME_TRACKER;
 	struct Level *level1 = gGT->level1;
 
+#ifdef USE_ONLINE
+	if (cDC != &gGT->cameraDC[0])
+		return;
+#endif
+
 	// Initialize the fly-in when the level has camera restart data.
 	if (2 < level1->cnt_restart_points)
 	{

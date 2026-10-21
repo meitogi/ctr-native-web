@@ -248,6 +248,20 @@ void VehPhysProc_Driving_PhysLinear(struct Thread *thread, struct Driver *driver
 	superEngineTimer = driver->superEngineTimer;
 	jumpTenBuffer = driver->jump_TenBuffer;
 
+#ifdef USE_ONLINE
+	// reserves past the s16 cap drain from uncappedReserves first
+	if (driver->reserves == 0)
+	{
+		driver->uncappedReserves = 0;
+	}
+
+	if (driver->uncappedReserves > 0)
+	{
+		driver->uncappedReserves = (driver->uncappedReserves > msPerFrame) ? (driver->uncappedReserves - msPerFrame) : 0;
+		driver->timeSpentUsingReserves = CTR_MipsSubLo(driver->timeSpentUsingReserves, msPerFrameNeg);
+	}
+	else
+#endif
 	if (reservesTimer > 0)
 	{
 		reservesTimer = CTR_MipsAddLo(reservesTimer, msPerFrameNeg);
@@ -815,6 +829,10 @@ itemRollDone:
 			bomb = (struct TrackerWeapon *)driver->instBombThrow->thread->object;
 			bomb->flags |= 2;
 			driver->instBombThrow = NULL;
+#if defined(USE_ONLINE)
+			if (ROOM_IS_ITEMS(octr->serverRoom) && driver->driverID == 0)
+				octr->Shoot[0].boolNow = 1;
+#endif
 			goto CheckJumpButtons;
 		}
 
@@ -825,6 +843,10 @@ itemRollDone:
 			shield = (struct Shield *)driver->instBubbleHold->thread->object;
 			shield->flags |= SHIELD_FLAG_SHOOT;
 			driver->instBubbleHold = NULL;
+#if defined(USE_ONLINE)
+			if (ROOM_IS_ITEMS(octr->serverRoom) && driver->driverID == 0)
+				octr->Shoot[0].boolNow = 1;
+#endif
 			goto CheckJumpButtons;
 		}
 
@@ -951,6 +973,7 @@ ClearJumpButtonHeld:
 CheckJumpDone:
 	CTR_PSX_OBSERVE_VALUE(buttonsHeld);
 	CTR_PSX_LOAD_WORD(approximateSpeedRaw, square);
+#ifndef USE_ONLINE
 	if (
 	    // If you are holding Square
 	    (approximateSpeedRaw != 0) &&
@@ -961,6 +984,31 @@ CheckJumpDone:
 		// Set Reserves to zero
 		driver->reserves = 0;
 	}
+#else
+	// upstream online builds define USE_RETROFUELED, enabled in retro rooms only
+	// Assume you're holding cross (X)
+	u32 assumeCross = VEH_PHYS_PROC_ASSUMED_CROSS_BUTTON;
+	// if you are holding square
+	if (approximateSpeedRaw != 0)
+	{
+		// held DOWN or have landing boost, in a retro room
+		if (ROOM_IS_RETRO(octr->serverRoom) &&
+		    ((ptrgamepad->buttonsHeldCurrFrame & BTN_DOWN) || (driver->jump_LandingBoost)))
+		{
+			// if not holding cross (X)
+			if (cross == 0)
+			{
+				assumeCross = 0;
+			}
+		}
+
+		// not on a turbo pad: Set Reserves to zero
+		else if ((driver->stepFlagSet & COLL_STEP_TRIGGER_TURBO_PAD_MASK) == 0)
+		{
+			driver->reserves = 0;
+		}
+	}
+#endif
 
 	// assume normal gas pedal
 	stickRY = VEH_PHYS_PROC_STICK_CENTER;
@@ -1028,6 +1076,9 @@ CheckJumpDone:
 		// Assume you're holding Cross, because
 		// you have Reserves and you aren't slowing down
 		cross = (u32)approximateSpeedRaw;
+#ifdef USE_ONLINE
+		cross = assumeCross;
+#endif
 	}
 
 
@@ -1631,6 +1682,10 @@ CheckJumpDone:
 void VehPhysProc_Driving_Audio(struct Thread *t, struct Driver *d)
 {
 	(void)t;
+#ifdef USE_ONLINE
+	if (d->driverID != 0)
+		return;
+#endif
 	EngineSound_Player(d);
 }
 
@@ -2483,6 +2538,10 @@ void VehPhysProc_PowerSlide_Update(struct Thread *t, struct Driver *d)
 		{
 			int highMeter = CTR_MipsSll((u8)d->const_turboLowRoomWarning, VEH_PHYS_PROC_FRAME_TIME_SHIFT);
 
+#ifdef USE_ONLINE
+			void AssignMeterGrade(struct Driver * driver, int meterLeft);
+			AssignMeterGrade(d, meterLeft);
+#endif
 			if (meterLeft < highMeter)
 			{
 				int incrementReserves =
@@ -2525,6 +2584,9 @@ void VehPhysProc_PowerSlide_Update(struct Thread *t, struct Driver *d)
 
 			if (d->turbo_MeterRoomLeft == 0)
 			{
+#ifdef USE_ONLINE
+				if (d->driverID == 0)
+#endif
 				OtherFX_Play_Echo(VEH_PHYS_PROC_DRIFT_METER_FULL_FX, 1, (u16)(d->actionsFlagSet >> 16) & 1);
 
 				d->KartStates.Drifting.numBoostsAttempted = (s8)CTR_MipsAddLo((u8)d->KartStates.Drifting.numBoostsAttempted, VEH_PHYS_PROC_DRIFT_MAX_BOOSTS);
@@ -2870,6 +2932,9 @@ void VehPhysProc_SpinFirst_Init(struct Thread *t, struct Driver *d)
 		RB_Player_ModifyWumpa(d, -1);
 	}
 
+#ifdef USE_ONLINE
+	if (d->driverID == 0)
+#endif
 	Voiceline_RequestPlay(VEH_PHYS_PROC_SPIN_VOICELINE_ID, GAME_CHARACTER_IDS[d->driverID], VEH_PHYS_PROC_SPIN_VOICELINE_PRIORITY);
 
 	// if spinning left

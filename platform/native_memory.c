@@ -14,9 +14,17 @@
 
 // Native uses the NTSC-U 926 mempack window inside the retail 2 MiB address
 // space so memory regressions fail here as they would on PSX.
+#ifndef USE_ONLINE
 #define CTR_NATIVE_MEMPACK_BUFFER_SIZE  0x200000u
 #define CTR_NATIVE_MEMPACK_START_OFFSET 0xba9f0u
 #define CTR_NATIVE_MEMPACK_SIZE         0x144e10u
+#else
+// OnlineCTR loads 8 drivers' models: upstream requires the 8 MiB RAM
+// expansion (RAMEX), same window start (docs/ONLINECTR_PORT.md, D1).
+#define CTR_NATIVE_MEMPACK_BUFFER_SIZE  0x800000u
+#define CTR_NATIVE_MEMPACK_START_OFFSET 0xba9f0u
+#define CTR_NATIVE_MEMPACK_SIZE         0x744e10u
+#endif
 
 CTR_STATIC_ASSERT(CTR_NATIVE_MEMPACK_START_OFFSET + CTR_NATIVE_MEMPACK_SIZE + MEMPACK_PS1_END_GUARD_SIZE == CTR_NATIVE_MEMPACK_BUFFER_SIZE);
 

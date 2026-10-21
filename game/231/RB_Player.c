@@ -185,6 +185,11 @@ void RB_Player_ModifyWumpa(struct Driver *driver, int wumpaDelta)
 		driver->numWumpas = DRIVER_WUMPA_MAX_COUNT;
 	}
 
+#ifdef USE_ONLINE
+	if (driver->driverID != 0)
+		return;
+#endif
+
 	if (
 	    // if did not have juiced wumpa before
 	    (numWumpaOriginal < DRIVER_WUMPA_JUICED_COUNT) &&

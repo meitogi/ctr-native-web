@@ -59,6 +59,9 @@ struct Instance *UI_INSTANCE_BirthWithThread(int modelID, int tickFunc, int hudS
 	while (driverThread != 0)
 	{
 		struct Driver *driver = driverThread->object;
+#ifdef USE_ONLINE
+		driver = gGT->drivers[0];
+#endif
 		struct UiElement3D *ui3D;
 		struct Thread *hudThread;
 		s16 createdModelID;
@@ -223,6 +226,10 @@ struct Instance *UI_INSTANCE_BirthWithThread(int modelID, int tickFunc, int hudS
 		driverThread = driverThread->siblingThread;
 
 		hudStruct += UI_HUD_SLOT_COUNT;
+
+#ifdef USE_ONLINE
+		break;
+#endif
 	}
 
 	return inst;
@@ -389,7 +396,9 @@ void UI_INSTANCE_InitAll(void)
 	    // If you're not in Battle Mode
 	    ((gameMode1 & BATTLE_MODE) == 0))
 	{
+#ifndef USE_ONLINE
 		UI_INSTANCE_BirthWithThread(STATIC_BIG1, (int)UI_ThTick_big1, UI_HUD_SLOT_BIG1, 0, 0, (int)sdata->s_big1);
+#endif
 	}
 
 	// If you're not in Adventure Mode
@@ -398,9 +407,11 @@ void UI_INSTANCE_InitAll(void)
 		return;
 	}
 
+#ifndef USE_ONLINE
 	sdata->ptrHudC = UI_INSTANCE_BirthWithThread(STATIC_C, (int)UI_ThTick_CtrLetters, UI_HUD_SLOT_TOKEN_OR_CTR, 0, 0, (int)sdata->s_hudc);
 	sdata->ptrHudT = UI_INSTANCE_BirthWithThread(STATIC_T, (int)UI_ThTick_CtrLetters, UI_HUD_SLOT_TOKEN_OR_CTR, 0, 0, (int)sdata->s_hudt);
 	sdata->ptrHudR = UI_INSTANCE_BirthWithThread(STATIC_R, (int)UI_ThTick_CtrLetters, UI_HUD_SLOT_TOKEN_OR_CTR, 0, 0, (int)sdata->s_hudr);
+#endif
 
 	// Make a token
 	sdata->ptrToken = UI_INSTANCE_BirthWithThread(STATIC_TOKEN, (int)UI_ThTick_Reward, UI_HUD_SLOT_TOKEN_OR_CTR, 0, 0, (int)sdata->s_token);

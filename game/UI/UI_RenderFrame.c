@@ -129,6 +129,10 @@ void UI_RenderFrame_Racing()
 		{
 			// pointer to player structure
 			playerStruct = (struct Driver *)playerThread->object;
+
+#ifdef USE_ONLINE
+			playerStruct = gGT->drivers[0];
+#endif
 			// if player has not driven backwards very far,
 			if ((playerStruct->distanceDrivenBackwards < 0x1f5)
 
@@ -464,7 +468,9 @@ void UI_RenderFrame_Racing()
 
 				sVar1 = hudStructPtr[UI_HUD_SLOT_RANK].x;
 				sVar2 = hudStructPtr[UI_HUD_SLOT_RANK].y;
+#ifndef USE_ONLINE
 				UI_DrawPosSuffix(sVar1, sVar2, playerStruct, (s16)partTimeVariable5);
+#endif
 
 				if (numPlyr > 2)
 				{
@@ -542,6 +548,10 @@ void UI_RenderFrame_Racing()
 			playerThread = playerThread->siblingThread;
 
 			hudStructPtr += UI_HUD_SLOT_COUNT;
+
+#ifdef USE_ONLINE
+			break;
+#endif
 
 		} while (playerThread != 0);
 	}
@@ -756,7 +766,9 @@ void UI_RenderFrame_Racing()
 			UI_Map_DrawDrivers(levPtrMap, gGT->threadBuckets[PLAYER].thread, local_30);
 			UI_Map_DrawDrivers(levPtrMap, gGT->threadBuckets[ROBOT].thread, local_30);
 
+#ifndef USE_ONLINE
 			UI_Map_DrawGhosts(levPtrMap, gGT->threadBuckets[GHOST].thread);
+#endif
 
 			UI_Map_DrawTracking(levPtrMap, gGT->threadBuckets[TRACKING].thread);
 

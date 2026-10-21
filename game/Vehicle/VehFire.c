@@ -42,6 +42,11 @@ void VehFire_Audio(struct Driver *driver, int speed_cap)
 	register u32 packedAudio CTR_PSX_REGISTER("$2");
 	register u32 audioFlags CTR_PSX_REGISTER("$6");
 
+#ifdef USE_ONLINE
+	if (audioDriver->driverID != 0)
+		return;
+#endif
+
 	// if turbo audio cooldown is not done
 	if (audioDriver->VehFire_AudioCooldown != 0)
 	{
@@ -299,6 +304,11 @@ void VehFire_Increment(struct Driver *driverArg, int reservesArg, u32 typeArg, i
 	    CTR_MipsSra(CTR_MipsMulLo(fireLevel, CTR_MipsSubLo(driver->const_SacredFireSpeed, driver->const_SingleTurboSpeed)), VEH_FIRE_SPEED_CAP_SHIFT),
 	    driver->const_SingleTurboSpeed);
 
+#if defined(USE_ONLINE)
+	// upstream online builds define USE_RETROFUELED, enabled in retro rooms only
+	int rn = octr->serverRoom;
+	int doRetroFueled = ROOM_IS_RETRO(rn);
+#endif
 	if (
 	    // any gain in boost,
 	    // resize to gain boost
@@ -316,7 +326,11 @@ void VehFire_Increment(struct Driver *driverArg, int reservesArg, u32 typeArg, i
 	        // Current speed cap is greater than 0x1000
 	        // AND
 	        // You are not on a super turbo pad
-	        (int)driver->const_SacredFireSpeed < (int)driver->fireSpeedCap && ((driver->stepFlagSet & COLL_STEP_TRIGGER_SUPER_TURBO_PAD) == 0)))
+	        (int)driver->const_SacredFireSpeed < (int)driver->fireSpeedCap && ((driver->stepFlagSet & COLL_STEP_TRIGGER_SUPER_TURBO_PAD) == 0)
+#if defined(USE_ONLINE)
+	        && !doRetroFueled // is not retrofueled mode
+#endif
+	        ))
 
 	{
 		driver->fireSpeedCap = (s16)newFireSpeedCap;
@@ -351,7 +365,12 @@ void VehFire_Increment(struct Driver *driverArg, int reservesArg, u32 typeArg, i
 
 		if (oldOTT < reserves)
 		{
+#ifdef USE_ONLINE
+			void FixReservesIncrement(struct Driver * driver, int reserves);
+			FixReservesIncrement(driver, reserveDelta);
+#else
 			driver->reserves = (s16)CTR_MipsAddLo((u16)driver->reserves, reserveDelta);
+#endif
 			driver->turbo_outsideTimer = (s16)reserves;
 		}
 	}
@@ -360,7 +379,12 @@ void VehFire_Increment(struct Driver *driverArg, int reservesArg, u32 typeArg, i
 	else if ((type & SUPER_ENGINE) == 0)
 	{
 		// increase reserves BY param2
+#ifdef USE_ONLINE
+		void FixReservesIncrement(struct Driver * driver, int reserves);
+		FixReservesIncrement(driver, reserves);
+#else
 		driver->reserves = (s16)CTR_MipsAddLo((u16)driver->reserves, reserves);
+#endif
 	}
 
 	// super engine
@@ -372,6 +396,11 @@ void VehFire_Increment(struct Driver *driverArg, int reservesArg, u32 typeArg, i
 			driver->reserves = (s16)reserves;
 		}
 	}
+
+#if defined(USE_ONLINE)
+	if (driver->driverID != 0) // if not ourself
+		return;
+#endif
 
 	// player of any kind
 	if (driver->instSelf->thread->modelIndex == DYNAMIC_PLAYER)

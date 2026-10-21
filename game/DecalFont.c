@@ -66,7 +66,12 @@ void DecalFont_DrawLineStrlen(char *str, s16 len, s16 posX, s16 posY, s16 fontTy
 		x = posX - DecalFont_GetLineWidthStrlen(str, len, fontType);
 	}
 
+#ifdef USE_ONLINE
+	// bug fix exclusive to versions after USA Retail, used online
+	flags &= 0x7ff;
+#else
 	flags &= 0xfff;
+#endif
 	for (character = (u8 *)str; *character != 0 && len != 0; character++, len--)
 	{
 		s16 extraX = 0;

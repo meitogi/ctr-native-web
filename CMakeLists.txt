@@ -135,6 +135,28 @@ else()
     endif()
 endif()
 target_link_libraries(ctr_native SDL3::SDL3)
+
+# OnlineCTR (docs/ONLINECTR_PORT.md). Off: the single-player build is unchanged.
+option(CTR_ONLINE "Build the OnlineCTR online mode (USE_ONLINE)" OFF)
+if(CTR_ONLINE)
+    target_compile_definitions(ctr_native PRIVATE USE_ONLINE)
+    target_sources(ctr_native PRIVATE
+        platform/native_online.c
+        platform/native_online_loopback.c
+        platform/online_server/sv_core.c
+    )
+    # A browser cannot speak ENet (raw UDP): the web transport is session 9's.
+    if(NOT EMSCRIPTEN)
+        add_subdirectory(externals/enet EXCLUDE_FROM_ALL)
+        target_include_directories(enet PUBLIC ${CMAKE_SOURCE_DIR}/externals/enet/include)
+        target_sources(ctr_native PRIVATE platform/native_online_enet.c)
+        target_compile_definitions(ctr_native PRIVATE NATIVE_ONLINE_HAS_ENET)
+        target_link_libraries(ctr_native enet)
+        if(WIN32)
+            target_link_libraries(ctr_native ws2_32 winmm)
+        endif()
+    endif()
+endif()
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_link_options(ctr_native PRIVATE -static-libgcc)
 endif()

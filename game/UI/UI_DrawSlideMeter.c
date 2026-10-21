@@ -43,6 +43,14 @@ void UI_DrawSlideMeter(s16 posX, s16 posY, struct Driver *driver)
 	memset(&black, 0, sizeof(black));
 	CTR_Box_DrawWireBox(&box, &black, GAME_TRACKER->pushBuffer_UI.ptrOT, &GAME_TRACKER->backBuffer->primMem);
 
+#ifdef USE_ONLINE
+	if (driver->driverID == 0 && driver->meterGradeTimer > 0)
+	{
+		driver->meterGradeTimer -= GAME_TRACKER->elapsedTimeMS;
+		DecalFont_DrawLine(driver->meterGrade, box.x, box.y - 8, FONT_SMALL, driver->gradeColor);
+	}
+#endif
+
 	backDB = GAME_TRACKER->backBuffer;
 	primMemCursor = backDB->primMem.cursor;
 	p = 0;

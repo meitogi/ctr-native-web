@@ -136,6 +136,10 @@ void GAMEPAD_PollVsync(struct GamepadSystem *gGamepads)
 		}
 	}
 
+#ifdef USE_ONLINE
+	numPorts = 1;
+	maxPadsPerPort = 1;
+#endif
 
 	// loop through all gamepad ports
 	// that gameplay cares about. Either
@@ -238,6 +242,10 @@ s32 GAMEPAD_GetNumConnected(struct GamepadSystem *gGamepads)
 		}
 	}
 
+#ifdef USE_ONLINE
+	numPorts = 1;
+	maxPadsPerPort = 1;
+#endif
 
 	port = 0;
 	if (numPorts != 0)
@@ -332,6 +340,11 @@ s32 GAMEPAD_ProcessHold(struct GamepadSystem *gGamepads)
 	// loop through all 8 gamepadBuffers
 	for (i = 0; i < 8; i++)
 	{
+#ifdef USE_ONLINE
+		// only P1 is polled: slots 1-7 hold the remote drivers' pads
+		if (i != 0)
+			break;
+#endif
 		pad = &gGamepads->gamepad[i];
 		pad->buttonsHeldPrevFrame = pad->buttonsHeldCurrFrame;
 
@@ -550,6 +563,11 @@ void GAMEPAD_ProcessSticks(struct GamepadSystem *gGamepads)
 
 	for (rwd = &GAMEPAD_WHEEL_DATA[0]; i < 8; i++)
 	{
+#ifdef USE_ONLINE
+		// only P1 is polled: slots 1-7 hold the remote drivers' pads
+		if (i != 0)
+			break;
+#endif
 		pad = &gGamepads->gamepad[i];
 		packet = pad->ptrControllerPacket;
 		pad->rwd = NULL;
@@ -787,6 +805,9 @@ s32 GAMEPAD_ProcessTapRelease(struct GamepadSystem *gGamepads)
 				pad->buttonsTapped = 0;
 				pad->buttonsReleased = 0;
 			}
+#ifdef USE_ONLINE
+			break;
+#endif
 			++i;
 		} while (i < gGamepads->numGamepadsConnected);
 	}

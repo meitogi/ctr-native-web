@@ -15,6 +15,19 @@ void UI_Lerp2D_Angular(SVec2 *pos, s16 drawnPosition, s16 absolutePosition, s16 
 	s32 drawnPositionInt = drawnPosition;
 	s32 absolutePositionInt = absolutePosition;
 
+#ifdef USE_ONLINE
+	// online rank column (UI_DrawRankedDrivers): 8 icons, 20 px apart from
+	// y = 53, swinging around x = 10
+	{
+		s32 swing = MATH_Sin((frameCounter * (1 << UI_LERP2D_ANGULAR_FRAME_SHIFT)) / UI_LERP2D_TRANSITION_FRAMES) * UI_LERP2D_RANK_ICON_RADIUS >>
+		            UI_LERP2D_FIXED_SHIFT;
+
+		pos->x = (absolutePositionInt < drawnPositionInt) ? (10 + swing) : (10 - swing);
+		pos->y = 53 + (drawnPositionInt * 20) + (((absolutePositionInt - drawnPositionInt) * 20) * frameCounter) / UI_LERP2D_TRANSITION_FRAMES;
+		return;
+	}
+#endif
+
 	// NOTE(aalhendi): Keep each direction's sine sample and position update together for retail scheduling.
 	if (absolutePositionInt < drawnPositionInt)
 	{

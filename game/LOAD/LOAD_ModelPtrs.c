@@ -22,6 +22,18 @@ void LOAD_GlobalModelPtrs_MPK()
 		gGT->modelPtr[m->id] = m;
 	}
 
+#ifdef USE_ONLINE
+	for (i = 0; i < ONLINE_DRIVER_MODEL_COUNT; i++)
+	{
+		struct Model *m = onlineDriverModelExtras[i].model;
+
+		if ((m != NULL) && (m->id != -1))
+		{
+			gGT->modelPtr[m->id] = m;
+		}
+	}
+#endif
+
 	if (GAME_PLAYER_OBJECT_LIST != 0)
 	{
 		// NOTE(aalhendi): Retail reloads the tracker for this call after the model loop.

@@ -1691,6 +1691,18 @@ void VehPhysGeneral_SetHeldItem(struct Driver *driver)
 	// NOTE(aalhendi): Retail classifies the field before choosing the mode-specific item set.
 	mode = GAME_TRACKER->numPlyrCurrGame + GAME_TRACKER->numBotsNextGame;
 
+#if defined(USE_ONLINE)
+	int rn = octr->serverRoom;
+	if (ROOM_IS_ITEMS(rn)) // if in item lobby.
+	{
+		mode = octr->NumDrivers;
+		if (octr->NumDrivers == 1)
+			mode = 2; // why does this matter?
+		if (octr->NumDrivers == 7)
+			mode = 8; // default 1p arcade
+	}
+#endif
+
 	if ((GAME_TRACKER->gameMode1 & BATTLE_MODE) != 0)
 	{
 		// 6th Itemset (Battle Mode Custom Itemset)

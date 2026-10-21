@@ -237,6 +237,13 @@ void MainInit_JitPoolsNew(struct GameTracker *gGT)
 		}
 	}
 
+// assume RAMEX,
+// always have 8 drivers
+#ifdef USE_ONLINE
+	poolScale = 0x1000;
+	renderBucketSize = 0x1000;
+#endif
+
 	MEMPACK_PushState();
 
 	JitPool_Init(&gGT->JitPools.thread, (renderBucketSize * 3) >> 7, sizeof(struct Thread), rdata.s_ThreadPool);
@@ -250,9 +257,17 @@ void MainInit_JitPoolsNew(struct GameTracker *gGT)
 	{
 		numDriver = 4;
 	}
+#ifdef USE_ONLINE
+	numDriver = 8;
+#endif
 	JitPool_Init(&gGT->JitPools.largeStack, numDriver, THREAD_LARGE_STACK_SIZE, rdata.s_LargeStackPool);
 
 	int numParticle = poolScale >> 5;
+#ifdef USE_ONLINE
+	// fix mystery caves with 8 players,
+	// cause all drivers use P1 exhaust
+	numParticle = 120 * 10;
+#endif
 	JitPool_Init(&gGT->JitPools.particle, numParticle, sizeof(struct Particle), rdata.s_ParticlePool);
 	JitPool_Init(&gGT->JitPools.oscillator, numParticle, 0x18, rdata.s_OscillatorPool);
 	JitPool_Init(&gGT->JitPools.rain, poolScale >> 9, sizeof(struct RainLocal), rdata.s_RainPool);
@@ -463,7 +478,13 @@ void MainInit_FinalizeInit(struct GameTracker *gGT)
 		gGT->trackLength_x_numLaps_x_8 = lev1->ptr_restart_points[0].distToFinish * gGT->numLaps * 8;
 	}
 
+#ifndef USE_ONLINE
+	// OG code
 	MainInit_Drivers(gGT);
+#else
+	void OnlineInit_Drivers(struct GameTracker * gGT);
+	OnlineInit_Drivers(gGT);
+#endif
 
 	// assume 1P fov
 	numPlyr = 1;
@@ -620,6 +641,15 @@ void MainInit_FinalizeInit(struct GameTracker *gGT)
 
 #if 0
     BOTS_EmptyFunc();
+#endif
+
+#ifdef USE_ONLINE
+	void octr_initHook();
+	octr_initHook();
+
+	// quit, so confetti doesn't initialize
+	// when loading into Polar Credits LEV
+	return;
 #endif
 
 	if ((gGT->gameMode1 & GAME_CUTSCENE) != 0)

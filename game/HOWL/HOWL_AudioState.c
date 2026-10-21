@@ -244,6 +244,10 @@ void Audio_Update1(void)
 		Audio_SetMaskSong(0);
 
 		// human driver in the lead
+#ifdef USE_ONLINE
+		gGT = GAME_TRACKER;
+		d = gGT->drivers[0];
+#else
 		gGT = GAME_TRACKER;
 		for (i = 0; i < 8; i++)
 		{
@@ -255,6 +259,7 @@ void Audio_Update1(void)
 				break;
 			}
 		}
+#endif
 
 		Voiceline_Update();
 
@@ -285,6 +290,10 @@ void Audio_Update1(void)
 		Audio_SetMaskSong(0);
 
 		// human driver in the lead
+#ifdef USE_ONLINE
+		gGT = GAME_TRACKER;
+		d = gGT->drivers[0];
+#else
 		gGT = GAME_TRACKER;
 		for (i = 0; i < 8; i++)
 		{
@@ -296,6 +305,7 @@ void Audio_Update1(void)
 				break;
 			}
 		}
+#endif
 
 #if defined(CTR_NATIVE)
 		// NOTE(aalhendi): The host cannot read the retail low-RAM null driver.
@@ -359,6 +369,10 @@ void Audio_Update1(void)
 		Audio_SetMaskSong(20);
 
 		// human driver in the lead
+#ifdef USE_ONLINE
+		gGT = GAME_TRACKER;
+		d = gGT->drivers[0];
+#else
 		gGT = GAME_TRACKER;
 		for (i = 0; i < 8; i++)
 		{
@@ -370,6 +384,7 @@ void Audio_Update1(void)
 				break;
 			}
 		}
+#endif
 
 		Voiceline_Update();
 
@@ -398,6 +413,15 @@ void Audio_Update1(void)
 		raceOrderIndex = -1;
 
 		// human driver in the lead
+#ifdef USE_ONLINE
+		gGT = GAME_TRACKER;
+		d = gGT->drivers[0];
+		// upstream tests d->driverRank == 0 for the victory fanfare
+		if (d != NULL)
+		{
+			raceOrderIndex = d->driverRank;
+		}
+#else
 		gGT = GAME_TRACKER;
 		for (i = 0; i < 8; i++)
 		{
@@ -410,6 +434,7 @@ void Audio_Update1(void)
 				break;
 			}
 		}
+#endif
 
 #if defined(CTR_NATIVE)
 		// NOTE(aalhendi): The host cannot read the retail low-RAM null driver.

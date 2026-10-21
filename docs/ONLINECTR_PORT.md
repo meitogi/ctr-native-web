@@ -606,3 +606,132 @@ available (session 1's `emcc` / wasm32, or an i386 / x86 host):
 | R10 | **Timing of the room reset.** Upstream measures 6 s of CPU time (`clock()`, with `CLOCKS_PER_SEC_FIX` on POSIX); `sv_core.c` measures wall time. | Accept and document the difference. The trace comparison (part A 4) ignores the reset delay and checks only the message order. |
 | R11 | **Host leaving.** Upstream has no host re-election (TODO in `ProcessDisconnectEvent`). In the browser, the host also runs the server, so the host leaving ends the room for everyone. | Not session 8's to fix. Documented as a known limitation; session 11 (hardening) decides whether to migrate the server. |
 | R12 | **OnlineCTR's dependency on other mods.** Upstream online builds also carry other `AltMods` (e.g. the reserves bar in `BoostBar/mods5.c` has `USE_ONLINE` branches, `16BY9/mods2.c` changes `metaPhys` under `#ifndef USE_ONLINE`). | The mapping table lists them. Session 8 ports only what OnlineCTR needs for compatible races. Gameplay-affecting constants (`metaPhys`, `StatsUpgrade`) must match upstream, otherwise karts diverge from DuckStation players. |
+
+## Session 8 findings
+
+What implementing D1–D7 found that this audit did not say, or said
+differently. The code is behind `CTR_ONLINE` (CMake) / `USE_ONLINE`.
+
+### Where things went
+
+| Piece | Files |
+|---|---|
+| Mod, upstream text | `game/OnlineCTR/` (12 files from `e3f19686`, no `debugcam.c` / `zMirrorMode.c`), included last in `game/game_unity.h` |
+| Native glue of the mod | `game/OnlineCTR/native_bridge.c` (`octr` storage, `checkpointTimes`, the game-field accessors), `game/OnlineCTR/native_compat.h` (`DECOMP_` names, `FPS_DOUBLE`, `u_int`, the 8-model array) |
+| Client bridge | `platform/native_online.c`, `native_online.h`, `native_online_game.h` (game fields by name), `native_online_transport.h` |
+| Transports | `platform/native_online_enet.c`, `platform/native_online_loopback.c` (+ `.h`) |
+| Server | `platform/online_server/sv_core.c` (+ `.h`), `sv_enet.c` (+ `.h`), `sv_enet_main.c` |
+| ENet | `externals/enet/` (1.3.18, unchanged) |
+| Tests | `tests/online/` (standalone CMake project, see its `CMakeLists.txt`) ; the original server, unchanged, in `tests/online/upstream/` |
+
+The bridge talks to the game only through `native_online_game.h`, so the
+same file runs against the real game and against the test stub.
+
+### The mod text
+
+- Kept as upstream text, with every native change marked `// ctr-native:`:
+  - `ThreadFunc` is a typedef here (the mod's function is `octr_ThreadFunc`);
+  - renamed fields (`unk1e` → `funcState`, `unkAudioState` → `audioState`,
+    `startPlusFour` → `uiOT`);
+  - `UI_DrawDriverIcon` takes the position and prim memory explicitly;
+  - the MIPS poke and the 8 MB mempack poke;
+  - the scratchpad pointer of `names3d.c`;
+  - NULL checks where the PS1 build wrote low RAM through an empty driver slot
+    (`Ghostify`, `OnRaceEnd`, remote shots, overhead names, the checkpoint
+    tracker on levels without restart points).
+- `DECOMP_` names, `FPS_DOUBLE` and `u_int` come from `native_compat.h`, so
+  most of the mod diffs cleanly against CTR-ModSDK.
+
+### Corrections to the audit
+
+- **D1, `MEMPACK_SIZE`**: natively, `MEMPACK_Init` ignores its size. The arena
+  is fixed in `platform/native_memory.c` (`CTR_NATIVE_MEMPACK_*`). The 8 MB
+  arena is set there under `USE_ONLINE`, and `MainMain.c` as well, for parity.
+  `platform/native_memory.c` was outside this session's lane: the edit is one
+  `#ifdef` block, and no other session owns that file.
+- **R12, `StatsUpgrade`**:
+  - Upstream's `struct MetaPhys` for USA retail is `{offset, size, value[5]}`,
+    with value 4 = "MAX". The disc says `{debug word, offset, size, value[4]}`
+    (gravity row at `0x98e0c` of `ctr-u.bin`: `0, 0x416, 2, 900, 900, 900, 900`),
+    which is ctr-native's layout.
+  - Upstream rebuilds both the table and its readers with its own layout, so
+    online karts get the MAX column on stats 9–12: 544, 1152, 13900, 15400.
+  - That is the largest class value of each row, so the port copies the
+    maximum (`hooks.c`).
+- **Required mods the audit counted as optional**: upstream's `common.h` turns
+  on more mods under `USE_ONLINE`. Two of them change what a compatible race
+  needs.
+  - `USE_DRIVERLOD`: without it, the 1P arcade MPK has the wrong 7 models.
+    `LOAD_DriverMPK` loads the high-LOD models of drivers 0–6 plus the Time
+    Trial MPK of driver 7. Upstream writes those models past
+    `data.driverModelExtras[3]`. `struct Data` is pinned here, so they go to
+    `onlineDriverModelExtras[8]`, which `VehBirth_GetModelByName`, the stage-6
+    pointer fix-up and `LOAD_GlobalModelPtrs_MPK` also walk.
+  - `USE_RETROFUELED`, in retro rooms: holding Square with DOWN or a landing
+    boost keeps the reserves, and the fire is not resized
+    (`VehPhysProc_Driving_PhysLinear`, `VehFire_Increment`).
+  - `USE_BIGQUEUE` is not needed: load stage 4 queues exactly 8 files.
+  - `USE_BOOSTBAR` and `USE_16BY9` are visual only. They were not ported.
+- **R7**:
+  - Natively, `GAMEPAD_ProcessSticks` resets the sticks of every unplugged pad.
+    Without the online guard, it would overwrite the remote drivers' sticks
+    each frame.
+  - `GAMEPAD_ProcessHold` and `ProcessSticks` start with `if (i != 0) break;`
+    online, rather than upstream's break at the end of the loop body: the native
+    loops have a `continue` that would skip a trailing break.
+- **Bridge connection**:
+  - Upstream blocks for up to 3 × 3 s in `enet_host_service`. The bridge
+    connects asynchronously and checks the result once per frame.
+  - After 3 failed attempts, upstream's loop fell through to `LAUNCH_PICK_ROOM`
+    with no connection. The bridge sets `CurrState = -1` instead, and the game
+    reopens the server menu (`thread.c`).
+  - The "Private Room" entry (7) connects to `CTR_ONLINE_SERVER` (`host:port`,
+    default `127.0.0.1:64001`). The player name comes from `CTR_ONLINE_NAME`.
+    Both can be set with `NativeOnline_Configure()`.
+- **R6**: the bridge logs one `[OnlineCTR] frame N: state S (level L, loading
+  X)` line per state change and every 600 frames. Whether the `readyToSend`
+  site runs every frame in the lobby is for session 8b to read in that log.
+  The guarded second call (D3) was not added without that evidence.
+
+### Upstream server behaviour the tests pinned
+
+- **Uninitialised padding.** `SG_ROOMS`, and the empty `SG_NAME` sent when a
+  player disconnects, are built in uninitialised structs. The 4 bits after
+  `type` are stack garbage on the wire. No client reads them, and the trace
+  comparison masks them. `sv_core.c` sends zeros.
+- **Out-of-bounds room.** `CG_JOINROOM` accepts room 16 (`> 16`), which indexes
+  `roomInfos[16]`. `sv_core.c` rejects it.
+- **Room-list peers.** A peer that leaves from the room list stays in the
+  room-list peer list until its ENet slot is reused. `sv_core.c` removes it.
+- **Room reset delay (R10).** The reset happens 6 s of CPU time after the race
+  ends. In the test, that took **31 s** of wall time against the original
+  server, and 6.0 s against `sv_core.c`.
+- **64-bit (R4).** The original server builds on aarch64 64-bit unchanged.
+  The pointer → `unsigned int` casts only compute a room index from two
+  pointers into the same array, so truncating them is harmless. No test patch
+  was needed.
+- **Bitfields (R5).** Every `CG_*` / `SG_*` struct packs to the same bytes
+  under GCC 12 (aarch64) and Emscripten 6.0.13 (wasm32). Those bytes match a
+  hand-derived LSB-first layout. This holds for this tree's `global.h` and for
+  upstream's.
+
+### Not ported (visual only)
+
+- Online speedometer redesign (`UI_DrawSpeedNeedle`, `UI_DrawSpeedBG`,
+  `UI_JumpMeter_Draw` gradient, slide-meter offsets).
+- Map moved up and shown together with the speedometer (`UI_Map_DrawRawIcon`
+  `posY -= 50`, `mapPosY = 145`).
+- `WIDE_PICK` HUD offset.
+- BoostBar online bar.
+- Mirror mode (D2).
+- The byte-budget `#ifndef USE_ONLINE` around function definitions and
+  includes (`WindowBoxLines`, `UI_AAA_BigBlock1.c`).
+
+`UI_DrawLapCount` needed no change: 1P already formats the lap count with
+`sprintf`.
+
+### Single-player build unchanged
+
+With `CTR_ONLINE=OFF`, the unity translation unit (`main.c`) preprocesses to
+the same C token stream as before these changes. Line breaks and `__LINE__`
+inside `assert` are excluded from the comparison.

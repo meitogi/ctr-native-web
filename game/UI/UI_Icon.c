@@ -279,8 +279,14 @@ void UI_DrawDriverIcon(struct Icon *icon, s16 posX, s16 posY, struct PrimMem *pr
 	int scaledHeight = FP_Mult(height, scale);
 	int topX = posX;
 	int bottomX = topX + scaledWidth;
+#ifdef USE_ONLINE
+	// 8 rank icons go below the retail clip line
+	int topY = posY;
+	int bottomY = topY + scaledHeight;
+#else
 	int topY = (posY < UI_DRIVER_ICON_NTSC_CLIP_LIMIT) ? posY : UI_DRIVER_ICON_NTSC_CLIP_MAX;
 	int bottomY = ((posY + scaledHeight) < UI_DRIVER_ICON_NTSC_CLIP_LIMIT) ? (posY + scaledHeight) : UI_DRIVER_ICON_NTSC_CLIP_MAX;
+#endif
 
 	p->tag.bits.size = (sizeof(*p) - sizeof(p->tag)) / sizeof(u32);
 	p->colorCode.code.code = UI_DRIVER_ICON_FT4_CODE;
@@ -304,6 +310,16 @@ void UI_DrawDriverIcon(struct Icon *icon, s16 posX, s16 posY, struct PrimMem *pr
 		p->colorCode.code.kind.poly.semiTransparency = 1;
 	}
 
+#ifdef USE_ONLINE
+	p->v[0].texCoords.u = icon->texLayout.u0;
+	p->v[0].texCoords.v = icon->texLayout.v0;
+	p->v[1].texCoords.u = icon->texLayout.u1;
+	p->v[1].texCoords.v = icon->texLayout.v1;
+	p->v[2].texCoords.u = icon->texLayout.u2;
+	p->v[2].texCoords.v = icon->texLayout.v2;
+	p->v[3].texCoords.u = icon->texLayout.u3;
+	p->v[3].texCoords.v = icon->texLayout.v3;
+#else
 	u8 bottomV = (u8)((icon->texLayout.v0 + bottomY) - posY);
 	p->v[0].texCoords.u = icon->texLayout.u0;
 	p->v[0].texCoords.v = icon->texLayout.v0;
@@ -313,6 +329,7 @@ void UI_DrawDriverIcon(struct Icon *icon, s16 posX, s16 posY, struct PrimMem *pr
 	p->v[2].texCoords.v = bottomV;
 	p->v[3].texCoords.u = icon->texLayout.u3;
 	p->v[3].texCoords.v = bottomV;
+#endif
 
 	AddPrimitive(p, ot);
 	primMem->cursor = p + 1;

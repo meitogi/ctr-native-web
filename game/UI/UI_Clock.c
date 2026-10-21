@@ -221,6 +221,32 @@ void UI_DrawRaceClock(s16 labelPosX, s16 labelPosY, u32 flags, struct Driver *dr
 	}
 
 	// Draw String
+#ifdef USE_ONLINE
+	{
+		TotalTime tt;
+		char displayTime[15]; // 99:59:59.999 or BEST: 9:59.999
+
+		ElapsedTimeToTotalTime(&tt, timeElapsed);
+		sprintf(displayTime, "%d:%02d:%02d.%03d", tt.hours, tt.minutes, tt.seconds, tt.miliseconds);
+		DecalFont_DrawLine(displayTime, posX, numParamY >> 0x10, FONT_BIG, (int)timeColor);
+
+		if ((driver->driverID == 0) && (driver->lapIndex > 0))
+		{
+			ElapsedTimeToTotalTime(&tt, driver->bestLapTime);
+			tt.minutes = min(tt.minutes, 9);
+			sprintf(displayTime, "%d:%02d.%03d", tt.minutes, tt.seconds, tt.miliseconds);
+			DecalFont_DrawLine("BEST: ", posX, textPosY + 0x18, FONT_SMALL, RED);
+			DecalFont_DrawLine(displayTime, posX + data.font_charPixWidth[FONT_SMALL] * 5, textPosY + 0x18, FONT_SMALL, PERIWINKLE);
+
+			ElapsedTimeToTotalTime(&tt, driver->currLapTime);
+			tt.minutes = min(tt.minutes, 9);
+			sprintf(displayTime, "%d:%02d.%03d", tt.minutes, tt.seconds, tt.miliseconds);
+			DecalFont_DrawLine("LAST: ", posX, textPosY + 0x18 + 8, FONT_SMALL, RED);
+			DecalFont_DrawLine(displayTime, posX + data.font_charPixWidth[FONT_SMALL] * 5, textPosY + 0x18 + 8, FONT_SMALL, PERIWINKLE);
+		}
+	}
+	return;
+#endif
 	DecalFont_DrawLine(totalTimeString, posX, numParamY >> 0x10, FONT_BIG, (int)timeColor);
 
 	if (

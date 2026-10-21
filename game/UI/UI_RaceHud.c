@@ -102,10 +102,23 @@ void UI_BattleDrawHeadArrows(struct Driver *player)
 
 	u8 numPlyr = gGT->numPlyrCurrGame;
 
+#ifdef USE_ONLINE
+	int OnlineGetNumDrivers();
+	numPlyr = OnlineGetNumDrivers();
+#endif
+
 	for (u8 i = 0; i < numPlyr; i++)
 	{
 		// something related to player structure address
 		struct Driver *currDriver = gGT->drivers[i];
+
+#ifdef USE_ONLINE
+		// a player who left has no driver (PS1 read low RAM here)
+		if (currDriver == NULL)
+		{
+			continue;
+		}
+#endif
 
 		if (
 		    // skip yourself, skip invisible, skip finished players
@@ -193,6 +206,9 @@ void UI_BattleDrawHeadArrows(struct Driver *player)
 		currTeam = currDriver->BattleHUD.teamID;
 
 		gradient = data.ptrColor[PLAYER_BLUE + currTeam];
+#ifdef USE_ONLINE
+		gradient = data.ptrColor[CRASH_BLUE + data.characterIDs[i]];
+#endif
 		CtrGpu_WriteColorCode(&arrow->g3.r0, (gradient[0] & UI_BATTLE_HEAD_ARROW_COLOR_MASK) | UI_BATTLE_HEAD_ARROW_SEMITRANS_MASK);
 		CtrGpu_WriteColorCode(&arrow->g3.r1, gradient[1] | UI_BATTLE_HEAD_ARROW_SEMITRANS_MASK);
 		CtrGpu_WriteColorCode(&arrow->g3.r2, gradient[2] | UI_BATTLE_HEAD_ARROW_SEMITRANS_MASK);

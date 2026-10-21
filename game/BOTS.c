@@ -3921,6 +3921,11 @@ void BOTS_Driver_Convert(struct Driver *driver)
 	register struct NavFrame *firstNavFrame CTR_PSX_REGISTER("$2");
 	register u32 oldActionFlagsSet CTR_PSX_REGISTER("$2");
 	int damageType;
+#ifdef USE_ONLINE
+	// upstream octr_entryHook wrote "jr ra; nop" over this function
+	(void)original;
+	return;
+#endif
 	if ((original->actionsFlagSet & ACTION_BOT) != 0)
 		return;
 	d = original;

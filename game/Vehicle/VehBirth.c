@@ -64,6 +64,11 @@ void VehBirth_TeleportSelf(struct Driver *d, u32 spawnFlag, int spawnPosY)
 
 	if ((spawnFlag & VEH_BIRTH_SPAWN_USE_LEVEL_POSITION) != 0)
 	{
+#ifdef USE_ONLINE
+		// always spawn using the
+		// 8-place starting line
+		goto VehBirth_StartlinePosition;
+#endif
 		if ((GAME_TRACKER->podiumRewardID == STATIC_KEY) && (GAME_TRACKER->currAdvProfile.numKeys == 1))
 		{
 			register int numInstances CTR_PSX_REGISTER("$3");
@@ -473,6 +478,9 @@ VehBirth_RotationReady:
 			funcCursor -= sizeof(DriverFunc);
 		} while (funcIndex >= 0);
 
+#ifdef USE_ONLINE
+		if (driver->driverID == 0)
+#endif
 		CAM_StartOfRace(&GAME_TRACKER->cameraDC[driver->driverID]);
 
 		driver->instSelf->thread->funcThTick = ((GAME_TRACKER->gameMode1 & (GAME_CUTSCENE | MAIN_MENU)) == 0) ? NULL : VehBirth_NullThread;
@@ -597,6 +605,19 @@ struct Model *VehBirth_GetModelByName(char *searchName)
 
 	m = NULL;
 	i = (s32)(size_t)m;
+
+#ifdef USE_ONLINE
+	// USE_DRIVERLOD: modding, 8 drivers
+	for (int j = 0; j < ONLINE_DRIVER_MODEL_COUNT; j++)
+	{
+		extraModel = onlineDriverModelExtras[j].model;
+
+		if ((extraModel != NULL) && VEH_BIRTH_MODEL_NAME_EQUALS(extraModel, searchName))
+		{
+			return extraModel;
+		}
+	}
+#endif
 	// array to character models loaded,
 	// maximum of 4, used in VS mode
 	for (; i < VEH_EXTRA_DRIVER_MODEL_COUNT; i++)
@@ -703,12 +724,18 @@ void VehBirth_EngineAudio_AllPlayers(void)
 	for (th = gGT->threadBuckets[PLAYER].thread; th != 0; th = th->siblingThread)
 	{
 		d = th->object;
+#ifdef USE_ONLINE
+		d = gGT->drivers[0];
+#endif
 		driverID = d->driverID;
 		engine = GAME_CHARACTER_METADATA[GAME_CHARACTER_IDS[driverID]].engineID;
 		CTR_PSX_MEMORY_BARRIER();
 		engine = (engine * 4) + driverID;
 
 		EngineAudio_InitOnce((u16)engine, HOWL_SFX_CENTER_NO_DISTORTION);
+#ifdef USE_ONLINE
+		return;
+#endif
 	}
 }
 

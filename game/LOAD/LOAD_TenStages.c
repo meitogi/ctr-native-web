@@ -316,6 +316,14 @@ int LOAD_TenStages(struct GameTracker *unusedGameTracker, int loadingStage, stru
 	{
 		int ovrRegion3;
 
+#ifdef USE_ONLINE
+		// Load Region3 for planet
+		if (GAME_TRACKER->levelID == INTRO_OXIDE)
+		{
+			ovrRegion3 = 3;
+		}
+		else
+#endif
 		if (((GAME_TRACKER->gameMode1 & MAIN_MENU) != 0) && (GAME_TRACKER->levelID != ADVENTURE_GARAGE))
 		{
 			ovrRegion3 = 0;
@@ -407,6 +415,12 @@ int LOAD_TenStages(struct GameTracker *unusedGameTracker, int loadingStage, stru
 		GAME_DRIVER_MODEL_EXTRAS[0].fileBase = NULL;
 		GAME_DRIVER_MODEL_EXTRAS[1].fileBase = NULL;
 		GAME_DRIVER_MODEL_EXTRAS[2].fileBase = NULL;
+#ifdef USE_ONLINE
+		for (int j = 0; j < ONLINE_DRIVER_MODEL_COUNT; j++)
+		{
+			onlineDriverModelExtras[j].fileBase = NULL;
+		}
+#endif
 
 		// Needed, or else Post-Boss Outro will break character animations.
 		sdata->ptrMPK = 0;
@@ -497,6 +511,15 @@ int LOAD_TenStages(struct GameTracker *unusedGameTracker, int loadingStage, stru
 				GAME_DRIVER_MODEL_EXTRAS[i].model = (struct Model *)((u8 *)GAME_DRIVER_MODEL_EXTRAS[i].fileBase + LOAD_MODEL_FILE_HEADER_BYTES);
 			}
 		}
+#ifdef USE_ONLINE
+		for (i = 0; i < ONLINE_DRIVER_MODEL_COUNT; i++)
+		{
+			if (onlineDriverModelExtras[i].fileBase != NULL)
+			{
+				onlineDriverModelExtras[i].model = (struct Model *)((u8 *)onlineDriverModelExtras[i].fileBase + LOAD_MODEL_FILE_HEADER_BYTES);
+			}
+		}
+#endif
 
 		// == banks are done parsing ===
 

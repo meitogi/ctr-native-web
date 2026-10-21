@@ -92,6 +92,11 @@ void RB_Follower_Init(struct Driver *d, struct Thread *mineTh)
 		return;
 	}
 
+#ifdef USE_ONLINE
+	if (d->driverID != 0)
+		return;
+#endif
+
 	// disable for reverse camera
 	if (((GAME_TRACKER->cameraDC[d->driverID].flags) & CAMERA_FLAG_REVERSE) != 0)
 	{

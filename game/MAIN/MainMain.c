@@ -502,11 +502,21 @@ void StateZero()
 
 	memset(gGT, 0, sizeof(*gGT));
 
+#ifdef USE_ONLINE
+	// upstream: ModsMain()
+	void octr_entryHook();
+	octr_entryHook();
+#endif
+
 	// Set Video Mode to NTSC
 	SetVideoMode(0);
 	ResetCallback();
 
+#ifdef USE_ONLINE
+#define MEMPACK_SIZE 0x800000 // 8mb
+#else
 #define MEMPACK_SIZE 0x200000 // 2mb
+#endif
 
 	MEMPACK_Init(MEMPACK_SIZE);
 	LOAD_InitCD();
@@ -610,6 +620,10 @@ void StateZero()
 	memcpy(gGT->levelName, sdata->s_ndi, sizeof(sdata->s_ndi));
 	// gGT->levelID = OXIDE_TRUE_ENDING;
 
+#ifdef USE_ONLINE
+	gGT->levelID = INTRO_OXIDE;
+#endif
+
 	InitGeom();
 	SetGeomOffset(0x100, 0x78); // width/2, height/2
 	SetGeomScreen(0x140);       // "distance" to screen, alters FOV
@@ -640,6 +654,7 @@ void StateZero()
 
 	VSyncCallback(MainDrawCb_Vsync);
 
+#ifndef USE_ONLINE
 	Music_SetIntro();
 	CseqMusic_StopAll();
 	CseqMusic_Start(CSEQ_SONG_LEVEL, 0, NULL, 0, 0);
@@ -658,6 +673,7 @@ void StateZero()
 #endif
 		CDSYS_XAPauseAtEnd();
 	}
+#endif
 
 	DecalGlobal_Clear(gGT);
 

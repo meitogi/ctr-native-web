@@ -433,6 +433,9 @@ void VehStuckProc_MaskGrab_Update(struct Thread *t, struct Driver *d)
 
 
 	// CameraDC flag
+#ifdef USE_ONLINE
+	if (d->driverID == 0)
+#endif
 	GAME_TRACKER->cameraDC[d->driverID].flags |= CAMERA_FLAG_DIRECTION_CHANGED;
 
 
@@ -476,6 +479,9 @@ void VehStuckProc_MaskGrab_Animate(struct Thread *t, struct Driver *d)
 	{
 		if ((d->KartStates.MaskGrab.boolWhistle == false) && (d->NoInputTimer < VEH_STUCK_MASK_GRAB_WHISTLE_TIME))
 		{
+#ifdef USE_ONLINE
+			if (d->driverID == 0)
+#endif
 			OtherFX_Play(VEH_STUCK_MASK_GRAB_WHISTLE_FX, 1);
 			d->KartStates.MaskGrab.boolWhistle = true;
 		}
@@ -831,6 +837,11 @@ void VehStuckProc_PlantEaten_Animate(struct Thread *t, struct Driver *d)
 
 		RotTrans(&plantVector, &camVec, gteFlags);
 
+#ifdef USE_ONLINE
+		if (driver->driverID != 0)
+			return;
+#endif
+
 		GAME_TRACKER->pushBuffer[driver->driverID].pos.x = camVec.vx;
 		{
 			register u32 driverID CTR_PSX_REGISTER("$3") = driver->driverID;
@@ -1020,6 +1031,11 @@ void VehStuckProc_RevEngine_PhysLinear(struct Thread *t, struct Driver *d)
 		return;
 	}
 
+#ifdef USE_ONLINE
+	if (d->driverID != 0)
+		return;
+#endif
+
 	GAME_TRACKER->cameraDC[d->driverID].flags |= CAMERA_FLAG_MASK_GRAB;
 	GAME_TRACKER->cameraDC[d->driverID].maskGrabHeightOffset = VEH_STUCK_REV_CAMERA_HEIGHT_OFFSET;
 
@@ -1095,6 +1111,9 @@ void VehStuckProc_RevEngine_Animate(struct Thread *t, struct Driver *d)
 					d->KartStates.RevEngine.chargeState = REV_ENGINE_CHARGE_IDLE;
 					d->KartStates.RevEngine.lockoutFlags |= REV_ENGINE_LOCKOUT_ALL;
 
+#ifdef USE_ONLINE
+					if (d->driverID == 0)
+#endif
 					OtherFX_Play_Echo(VEH_STUCK_REV_OVERREV_FX, 1, ((u32)d->actionsFlagSet >> 16) & 1);
 				}
 			}
@@ -1317,6 +1336,9 @@ void VehStuckProc_RevEngine_Init(struct Thread *t, struct Driver *d)
 		d->actionsFlagSet &= ~ACTION_TOUCH_GROUND;
 
 		// CameraDC flag
+#ifdef USE_ONLINE
+		if (d->driverID == 0)
+#endif
 		GAME_TRACKER->cameraDC[d->driverID].flags |= CAMERA_FLAG_DIRECTION_CHANGED;
 	}
 

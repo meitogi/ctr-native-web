@@ -134,6 +134,7 @@ void UI_DrawRankedDrivers(void)
 		// height to draw rank (this bitshifts later)
 		int rankTextY = UI_RANK_TEXT_START_Y << 16;
 
+#ifndef USE_ONLINE
 		for (int rankLineIndex = 0; rankLineIndex < visibleRankCount; rankLineIndex++)
 		{
 			// make the text white by default
@@ -153,9 +154,19 @@ void UI_DrawRankedDrivers(void)
 			// add to Y, which mekes it lower on screen
 			rankTextY = rankTextY + (UI_RANK_TEXT_SLOT_HEIGHT << 16);
 		}
+#else
+		(void)visibleRankCount;
+		(void)rankTextY;
+#endif
 
 		for (driverIndex = 0; driverIndex < UI_RANK_DRIVER_COUNT; driverIndex++)
 		{
+#ifdef USE_ONLINE
+			if (!octr->nameBuffer[driverIndex][0])
+			{
+				continue;
+			}
+#endif
 			s16 *curr = &data.rankIconsCurr[driverIndex];
 			s16 *des = &data.rankIconsDesired[driverIndex];
 
@@ -184,6 +195,10 @@ void UI_DrawRankedDrivers(void)
 					{
 						// if top positions
 
+#ifdef USE_ONLINE
+						pos.x = 10;
+						pos.y = 53 + desiredRank * 20;
+#else
 						if (desiredRank < UI_RANK_VISIBLE_ARCADE_COUNT)
 						{
 							pos.x = UI_RANK_ICON_X;
@@ -193,11 +208,26 @@ void UI_DrawRankedDrivers(void)
 						{
 							continue;
 						}
+#endif
 					}
 				}
 
 				SVec2 iconPos = {.x = pos.x, .y = pos.y};
+#ifdef USE_ONLINE
+				s16 iconScale = FP(0.75);
+				{
+					s16 txtColor = WHITE;
+					// upstream reads checkpointTracker[] with a counter that is 0 here
+					if (checkpointTracker[0].raceFinished)
+					{
+						txtColor = RED;
+					}
+					sdata->s_spacebar[0] = (char)*curr + '1';
+					DecalFont_DrawLine(&sdata->s_spacebar[0], 29, 53 + *curr * 20, FONT_SMALL, txtColor);
+				}
+#else
 				s16 iconScale = UI_RANK_ICON_SCALE;
+#endif
 
 				int isTransitioning = (pos.x == UI_RANK_ICON_OFFSCREEN_X);
 
@@ -218,6 +248,22 @@ void UI_DrawRankedDrivers(void)
 				    gGT->pushBuffer_UI.ptrOT,
 
 				    1, iconScale, damageColor);
+
+#ifdef USE_ONLINE
+				if (checkpointTracker[driverIndex].timer > 0)
+				{
+					DecalFont_DrawLineStrlen(checkpointTracker[driverIndex].displayTime, 10, pos.x + 30, pos.y + 9, FONT_SMALL,
+					                         checkpointTracker[driverIndex].drawFlags);
+					checkpointTracker[driverIndex].timer -= sdata->gGT->elapsedTimeMS;
+					DecalFont_DrawLineStrlen(octr->nameBuffer[driverIndex], 3, pos.x + 45, pos.y + 1, FONT_SMALL,
+					                         driverIndex == 0 ? JUSTIFY_CENTER | BLUE : JUSTIFY_CENTER | ORANGE);
+				}
+				else
+				{
+					DecalFont_DrawLineStrlen(octr->nameBuffer[driverIndex], 3, pos.x + 45, pos.y + 7, FONT_SMALL,
+					                         driverIndex == 0 ? JUSTIFY_CENTER | BLUE : JUSTIFY_CENTER | ORANGE);
+				}
+#endif
 
 				if (isTransitioning)
 				{

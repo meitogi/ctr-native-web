@@ -3,6 +3,11 @@
 
 #include <common.h>
 
+#ifdef USE_ONLINE
+#include "OnlineCTR/global.h"
+#include "OnlineCTR/native_compat.h"
+#endif
+
 #include "226/R226.c"
 #include "227/R227.c"
 #include "228/R228.c"
@@ -327,5 +332,21 @@
 #include "233/CS_Garage.c"
 #include "233/R233.c"
 #include "233/D233.c"
+
+// OnlineCTR (docs/ONLINECTR_PORT.md, D2), in the order of upstream's Mods*.c
+#ifdef USE_ONLINE
+#include "OnlineCTR/hooks.c"
+#include "OnlineCTR/menu.c"
+#include "OnlineCTR/states.c"
+#include "OnlineCTR/thread.c"
+#include "OnlineCTR/endOfRaceUI.c"
+#include "OnlineCTR/meterGrade.c"
+#include "OnlineCTR/mods2.c"
+#include "OnlineCTR/names3d.c"
+#include "OnlineCTR/vehThread.c"
+#include "OnlineCTR/hsvColor.c"
+#include "OnlineCTR/lap.c"
+#include "OnlineCTR/native_bridge.c"
+#endif
 
 #endif

@@ -244,8 +244,12 @@ struct MaskHeadWeapon *VehPickupItem_MaskUseWeapon(struct Driver *driver, b32 bo
 		actionsFlagSet = driver->actionsFlagSet;
 
 		if (
+#ifdef USE_ONLINE
+		    (driver->driverID == 0) &&
+#else
 		    // If this is human and not AI
 		    ((actionsFlagSet & ACTION_BOT) == 0) &&
+#endif
 
 		    (boolPlaySound != 0))
 		{
@@ -281,7 +285,13 @@ struct MaskHeadWeapon *VehPickupItem_MaskUseWeapon(struct Driver *driver, b32 bo
 		    INSTANCE_BirthWithThread(STATIC_AKUAKU, VEH_PICKUP_DOCTOR_NAME, SMALL, OTHER, RB_MaskWeapon_ThTick, sizeof(struct MaskHeadWeapon), parentThread);
 
 		actionsFlagSet = driver->actionsFlagSet;
-		if (((actionsFlagSet & ACTION_BOT) == 0) && (OtherFX_Play_Echo(STATIC_AKUAKU + MASK_SOUND_ID_OFFSET_FROM_MODEL, 1, (actionsFlagSet >> 16) & 1),
+		if (
+#ifdef USE_ONLINE
+		    (driver->driverID == 0) &&
+#else
+		    ((actionsFlagSet & ACTION_BOT) == 0) &&
+#endif
+		    (OtherFX_Play_Echo(STATIC_AKUAKU + MASK_SOUND_ID_OFFSET_FROM_MODEL, 1, (actionsFlagSet >> 16) & 1),
 		                                             (u32)(driver->kartState - KS_ENGINE_REVVING) > 1))
 		{
 			GAME_TRACKER->gameMode1 = (GAME_TRACKER->gameMode1 | AKU_SONG) & ~UKA_SONG;
@@ -302,7 +312,13 @@ struct MaskHeadWeapon *VehPickupItem_MaskUseWeapon(struct Driver *driver, b32 bo
 		    INSTANCE_BirthWithThread(STATIC_UKAUKA, VEH_PICKUP_DOCTOR_NAME, SMALL, OTHER, RB_MaskWeapon_ThTick, sizeof(struct MaskHeadWeapon), parentThread);
 
 		actionsFlagSet = driver->actionsFlagSet;
-		if (((actionsFlagSet & ACTION_BOT) == 0) && (OtherFX_Play_Echo(STATIC_UKAUKA + MASK_SOUND_ID_OFFSET_FROM_MODEL, 1, (actionsFlagSet >> 16) & 1),
+		if (
+#ifdef USE_ONLINE
+		    (driver->driverID == 0) &&
+#else
+		    ((actionsFlagSet & ACTION_BOT) == 0) &&
+#endif
+		    (OtherFX_Play_Echo(STATIC_UKAUKA + MASK_SOUND_ID_OFFSET_FROM_MODEL, 1, (actionsFlagSet >> 16) & 1),
 		                                             (u32)(driver->kartState - KS_ENGINE_REVVING) > 1))
 		{
 			GAME_TRACKER->gameMode1 = (GAME_TRACKER->gameMode1 | UKA_SONG) & ~AKU_SONG;
@@ -599,6 +615,21 @@ void VehPickupItem_ShootNow(struct Driver *d, s32 weaponID, s32 flags)
 		goto ShootNowDone;
 	}
 	VEH_PICKUP_SHOOT_NOW_DISPATCH(weaponID);
+#endif
+#if defined(USE_ONLINE)
+	int rn = octr->serverRoom;
+	if (ROOM_IS_ITEMS(rn) && d->driverID == 0) // if in item lobby and is ourself
+	{
+		octr->Shoot[0].boolJuiced = 0;
+		if (d->numWumpas >= 10)
+			octr->Shoot[0].boolJuiced = 1;
+
+		// do not send weaponID, cause missile/bomb share
+		octr->Shoot[0].Weapon = d->heldItemID;
+		octr->Shoot[0].flags = flags & 3;
+
+		octr->Shoot[0].boolNow = 1;
+	}
 #endif
 	switch (weaponID)
 	{

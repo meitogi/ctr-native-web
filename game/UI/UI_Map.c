@@ -272,7 +272,12 @@ void UI_Map_DrawDrivers(struct UIMap *map, struct Thread *bucket, s16 *driverIco
 
 		// NOTE(aalhendi): Prepare one shared icon call in each branch. Separate
 		// calls hoist the scale into an extra saved register with GCC 2.8.1.
+#ifdef USE_ONLINE
+		// only driver[0] is the player, remote humans draw as others
+		if (d->driverID != 0)
+#else
 		if (d->actionsFlagSet & ACTION_BOT)
+#endif
 		{
 			drawMap = map;
 			worldPos = inst->matrix.t;

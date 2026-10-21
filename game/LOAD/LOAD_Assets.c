@@ -64,6 +64,10 @@ void LOAD_Robots2P(struct BigHeader *bigfile, int p1, int p2, void (*callback)(s
 
 void LOAD_Robots1P(int characterID)
 {
+#ifdef USE_ONLINE
+	return;
+#endif
+
 	int slotIndex = 1;
 	int candidateID;
 	s16 *slot;
@@ -95,6 +99,23 @@ int LOAD_DriverMPK(struct BigHeader *bigfile, int levelLOD, void (*callback)(str
 {
 	int gameMode1;
 	struct GameTracker *gGT;
+
+#ifdef USE_ONLINE
+	// upstream: goto ForceOnlineLoad8, LOAD_Robots1P (returns early online),
+	// then USE_DRIVERLOD's highLOD_DriverMPK(8): high-LOD models of
+	// drivers 0-6 and the Time Trial MPK of driver 7
+	{
+		int i;
+		for (i = 0; i < ONLINE_DRIVER_MODEL_COUNT - 1; i++)
+		{
+			LOAD_AppendQueue(bigfile, LT_GETADDR, BI_RACERMODELHI + GAME_CHARACTER_IDS[i], &onlineDriverModelExtras[i].fileBase, LOAD_DriverMPK_SetPointer);
+		}
+		LOAD_AppendQueue(bigfile, LT_GETADDR, BI_TIMETRIALPACK + GAME_CHARACTER_IDS[i], NULL, callback);
+		(void)gameMode1;
+		(void)gGT;
+		return sdata->ptrMPK;
+	}
+#endif
 
 	// 3P/4P
 	if ((u32)(levelLOD - LOAD_LEVEL_LOD_3P) < LOAD_LEVEL_LOD_3P4P_COUNT)

@@ -2,6 +2,13 @@
 
 void OtherFX_RecycleNew(u32 *soundID_Count, u32 newSoundID, u32 modifyFlags)
 {
+#ifdef USE_ONLINE
+	void Online_OtherFX_RecycleNew(u_int * soundID_Count, u_int newSoundID, u_int modifyFlags);
+
+	Online_OtherFX_RecycleNew(soundID_Count, newSoundID, modifyFlags);
+	return;
+#endif
+
 	int local = *soundID_Count;
 
 	if (

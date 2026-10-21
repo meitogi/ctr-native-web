@@ -429,7 +429,11 @@ void RB_ShieldDark_ThTick_Grow(struct Thread *th)
 		bombInst = INSTANCE_BirthWithThread(DYNAMIC_SHIELD_GREEN, rb_nameShieldBomb, MEDIUM, OTHER, RB_MovingExplosive_ThTick, sizeof(struct TrackerWeapon),
 		                                    player->instSelf->thread);
 	}
+#ifdef USE_ONLINE
+	if (player->driverID == 0)
+#else
 	if (!(player->actionsFlagSet & ACTION_BOT))
+#endif
 	{
 		Voiceline_RequestPlay(13, GAME_CHARACTER_IDS[player->driverID], 0x10);
 	}
