@@ -57,3 +57,4 @@ add_custom_command(
     DEPENDS "${CMAKE_SOURCE_DIR}/web/disc.js"
 )
 add_custom_target(ctr_web_page ALL DEPENDS "${CMAKE_BINARY_DIR}/index.html" "${CMAKE_BINARY_DIR}/disc.js")
+include(${CMAKE_SOURCE_DIR}/web/share/share.cmake)

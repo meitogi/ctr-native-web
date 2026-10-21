@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Share demo host — web/share</title>
+<style>
+  body { margin: 16px; background: #000; color: #ccc; font: 12px/1.4 monospace; }
+  canvas { display: block; background: #111; }
+  input { font: inherit; background: #000; color: #ccc; border: 1px solid #444; width: 320px; }
+  button { font: inherit; background: #222; color: #ccc; border: 1px solid #444; cursor: pointer; }
+  a { color: #6cf; word-break: break-all; }
+  #status { white-space: pre-wrap; margin-top: 8px; }
+</style>
+</head>
+<body>
+<p>A stand-in for the game page : the canvas below is presented 30 times a second like the game's
+(one <code>present()</code> per frame), a tone stands in for SDL's ScriptProcessorNode, and the
+guests' pads are read back like the game's input update. Serve the repository root, run a relay,
+open <code>web/share/demo/index.html#relay=ws://localhost:8787&amp;rk=…</code>, press Share, open the
+guest link in another tab.</p>
+<p><label>Relay <input id="relay"></label> <label>Key <input id="rk" type="password"></label>
+<button id="start" type="button">Share</button></p>
+<p>Guest link : <a id="link" target="_blank"></a></p>
+<canvas id="canvas" width="800" height="600"></canvas>
+<div id="status"></div>
+<script type="module" src="demo.js"></script>
+</body>
+</html>

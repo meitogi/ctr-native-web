@@ -2177,6 +2177,18 @@ void NativeRenderer_UpdateVRAM(void)
 	NativePerf_EndScope(NATIVE_PERF_BUCKET_RENDERER_UPDATE_VRAM);
 }
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+
+// NOTE: Share mode (web/share/) captures the canvas one frame per present
+// (canvas.captureStream(0) + requestFrame) ; the PS1 display size sets the
+// stream's resolution. JS only, never calls back into the wasm.
+EM_JS(void, NativeRenderer_WebSharePresent, (int displayW, int displayH, int viewportW, int viewportH), {
+	const share = Module['ctrShare'];
+	if (share) share.present(displayW, displayH, viewportW, viewportH);
+});
+#endif
+
 void NativeRenderer_PresentVRAMRect(int displayX, int displayY, int displayW, int displayH)
 {
 	if (displayW <= 0 || displayH <= 0)
@@ -2198,6 +2210,9 @@ void NativeRenderer_PresentVRAMRect(int displayX, int displayY, int displayW, in
 
 	s_previousShader = (ShaderID)-1;
 	s_lastBoundTexture = (TextureID)-1;
+#if defined(__EMSCRIPTEN__)
+	NativeRenderer_WebSharePresent(displayW, displayH, s_presentViewport.w, s_presentViewport.h);
+#endif
 }
 
 void NativeRenderer_PresentVRAMDisplay(void)

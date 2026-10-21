@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CTR Native Web — Share guest</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #ccc; font: 12px/1.4 monospace; overflow: hidden; }
+  #video { position: fixed; inset: 0 0 24px 0; width: 100%; height: calc(100% - 24px); object-fit: contain; background: #000; }
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; height: 24px; display: flex; gap: 12px; align-items: center;
+    padding: 0 8px; background: #111; border-top: 1px solid #333; white-space: nowrap; overflow: hidden; }
+  #bar button { font: inherit; background: #222; color: #ccc; border: 1px solid #444; cursor: pointer; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+    background: rgba(0, 0, 0, .75); z-index: 10; cursor: pointer; }
+  #overlay.hidden { display: none; }
+  #overlay p { max-width: 520px; padding: 16px; }
+  #overlay .error { color: #f66; }
+</style>
+</head>
+<body>
+<video id="video" autoplay playsinline muted></video>
+<div id="overlay"><p id="overlay-text">Connecting to the host…</p></div>
+<div id="bar">
+  <span id="status">Connecting…</span>
+  <span id="pad">keyboard</span>
+  <button id="crop" type="button" title="F : show only your part of the split screen">My view : off</button>
+</div>
+<script type="module" src="guest-page.js"></script>
+</body>
+</html>

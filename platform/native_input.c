@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
 
 #define NATIVE_INPUT_MAX_CONTROLLERS       PLATFORM_INPUT_PAD_COUNT
 #define NATIVE_INPUT_PHYSICAL_SLOT_COUNT   2
@@ -250,6 +253,67 @@ internal void NativeInput_WriteInstalledSnapshots(void)
 
 	NativeInput_WritePadBus();
 }
+
+#if defined(__EMSCRIPTEN__)
+// NOTE: Share mode (web/share/) drives P2–P4 from guests' pads. The page keeps
+// each guest's latest pad ; once per input update the C side pulls them (JS
+// never calls into the wasm : ASYNCIFY). Slots 1–3 only, after the SDL /
+// keyboard pass : a guest's pad replaces whatever was in its slot, slot 0 stays
+// the host's. Returns the mask of slots a guest holds (bit n = slot n) and
+// writes their PSX pad packets (status, id, buttons, analog) at dst.
+EM_JS(int, NativeInput_WebReadRemotePads, (u8 *dst), {
+	const share = Module['ctrShare'];
+	return share ? share.readPads(HEAPU8, dst) : 0;
+});
+
+internal void NativeInput_ApplyRemotePads(void)
+{
+	u8 packets[(NATIVE_INPUT_MAX_CONTROLLERS - 1) * NATIVE_INPUT_PAD_PACKET_BYTES];
+	const s32 mask = NativeInput_WebReadRemotePads(packets);
+
+	for (s32 slot = 1; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+	{
+		struct PlatformInputPadSnapshot *snapshot = &s_controllers[slot].snapshot;
+		const u8 *packet = &packets[(slot - 1) * NATIVE_INPUT_PAD_PACKET_BYTES];
+
+		if ((mask & (1 << slot)) == 0)
+		{
+			continue;
+		}
+
+		snapshot->connected = 1;
+		snapshot->status = packet[0];
+		snapshot->id = packet[1];
+		snapshot->buttons[0] = packet[2];
+		snapshot->buttons[1] = packet[3];
+		memcpy(snapshot->analog, &packet[4], sizeof(snapshot->analog));
+	}
+
+#if !defined(NDEBUG)
+	{
+		local_persist s32 s_loggedMask = 0;
+		local_persist u16 s_loggedButtons[NATIVE_INPUT_MAX_CONTROLLERS] = {0xffff, 0xffff, 0xffff, 0xffff};
+
+		for (s32 slot = 1; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+		{
+			const s32 bit = 1 << slot;
+			const u16 buttons = (mask & bit) ? NativeInput_GetSnapshotButtons(&s_controllers[slot].snapshot) : 0xffff;
+
+			if ((mask & bit) != (s_loggedMask & bit))
+			{
+				printf("[CTR Web] remote pad slot=%d %s\n", slot, (mask & bit) ? "connected" : "disconnected");
+			}
+			if (buttons != s_loggedButtons[slot])
+			{
+				printf("[CTR Web] remote pad slot=%d buttons=0x%04x\n", slot, buttons);
+				s_loggedButtons[slot] = buttons;
+			}
+		}
+		s_loggedMask = mask;
+	}
+#endif
+}
+#endif
 
 internal void NativeInput_DefaultMappings(void)
 {
@@ -798,6 +862,9 @@ void Platform_InputUpdate(void)
 		NativeInput_ApplyController(slot);
 		NativeInput_ApplyKeyboard(slot, keyboardButtons);
 	}
+#if defined(__EMSCRIPTEN__)
+	NativeInput_ApplyRemotePads();
+#endif
 	NativeInput_WritePadBus();
 
 #if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
