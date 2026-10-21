@@ -49,16 +49,17 @@ export const onMainMenu = s => s.screen === 'menu' && s.menu != null && s.menu.i
  */
 export async function bootToMenu(ctx) {
 	// The 605 MB preload crosses VS Code's port forwarding, which sometimes
-	// drops it (`TypeError: network error` in #log, blank canvas) : reload,
-	// up to 3 tries, as session 2's suite does.
-	const dropped = "return /network error/.test(document.getElementById('log')?.textContent ?? '')"
+	// drops it (`TypeError: network error` in #log) or stalls it with nothing
+	// logged at all : reload, up to 3 tries. A game that runs (`vblank=` lines)
+	// with no __ctr is a release build : no point reloading.
+	const log = () => ctx.js("return document.getElementById('log')?.textContent ?? ''")
 	for (let attempt = 1; ; attempt++) {
-		const deadline = Date.now() + 180_000
-		while (Date.now() < deadline && !(await state(ctx)) && !(await ctx.js(dropped))) await sleep(1000)
+		const deadline = Date.now() + 120_000
+		while (Date.now() < deadline && !(await state(ctx)) && !/network error/.test(await log())) await sleep(1000)
 		if (await state(ctx)) break
-		if (attempt === 3 || !(await ctx.js(dropped))) {
-			const log = await ctx.js("return (document.getElementById('log')?.textContent ?? '').trim().split('\\n').slice(-3).join(' | ')")
-			throw new Error(`no window.__ctr after attempt ${attempt} — is this a debug build ? page log : ${log}`)
+		const text = await log()
+		if (attempt === 3 || /vblank=/.test(text)) {
+			throw new Error(`no window.__ctr after attempt ${attempt} — is this a debug build ? page log : ${text.trim().split('\n').slice(-3).join(' | ')}`)
 		}
 		await ctx.reload()
 	}

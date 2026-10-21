@@ -4,12 +4,15 @@
 // framebuffer, counted by a WebGL probe installed after load — session 2's
 // method). Scenes : the main menu, then a Time Trial race reached blind with
 // the same key path TT-MENU-PATH walks on a debug build (time-trial.suite.mjs).
+// Without __ctr the waits use the game clock, the `[CTR Web] vblank=N` log
+// lines ; the video shows which scene was measured.
 //
 // RUN
 //   Build : web/build-web.sh release -DCTR_WEB_PRELOAD_DISC=ON
-//   Serve : web/serve.sh release 8093  (port forwarded to the host)
+//   Serve : python3 web/test/player/serve.py build-web-release 8093
+//           (no-store : the agent browser caches across runs ; port forwarded)
 //   Play  : bash plans/ctr-native-web/tools/play.sh fps <session> 8093
-//   Host browser : plans/ctr-native-web/tools/ctr-browser.sh on the Mac (real
+//   Browser : the agent browser on the Mac (`agent-browser up`, headless, real
 //   GPU ; never quote the Mesa sidecar's numbers).
 // Not a node --test file : `node --test web/test/*.test.js` never loads it.
 
@@ -50,6 +53,21 @@ const PROBE = `
 	}
 	return true`
 
+// The game clock without __ctr : the last `[CTR Web] vblank=N` line (every
+// 60 VBlanks, release builds too) in the page's #log.
+const vblank = ctx =>
+	ctx.js("const m = [...(document.getElementById('log')?.textContent ?? '').matchAll(/vblank=(\\d+)/g)].pop(); return m ? Number(m[1]) : 0")
+
+async function waitVblank(ctx, n, timeout = 300_000) {
+	const deadline = Date.now() + timeout
+	let v = 0
+	while ((v = await vblank(ctx)) < n) {
+		if (Date.now() > deadline) throw new Error(`the game clock stayed at ${v} VBlanks (waiting for ${n})`)
+		await sleep(1000)
+	}
+	return v
+}
+
 async function measure(ctx, label, ms = 10_000) {
 	const a = await ctx.js('return { ...globalThis.__ctrPresents, t: performance.now() }')
 	const raf = await ctx.fps({ ms, label: `${label} (rAF)` })
@@ -63,8 +81,14 @@ export default async ctx => {
 	await ctx.scenario('FPS-RELEASE-MENU', async () => {
 		if (await ctx.js('return globalThis.__ctr !== undefined')) throw new Error('window.__ctr exists : not a release build')
 		await ctx.js(PROBE)
-		// No __ctr here : the intro plays into the main menu ~45 s after boot.
-		await sleep(70_000)
+		// No __ctr here. The intro reaches the main menu at ~2360 VBlanks on
+		// a debug build (menu.suite.mjs, no skipping) ; Triangle then skips
+		// the trophy's tail and does nothing on the main menu itself.
+		await waitVblank(ctx, 2600)
+		for (let i = 0; i < 8; i++) {
+			await ctx.press('z')
+			await sleep(500)
+		}
 		if (await ctx.js('return globalThis.__ctr !== undefined')) throw new Error('window.__ctr appeared in a release build')
 		await ctx.shot('menu')
 		const m = await measure(ctx, 'menu')
@@ -79,7 +103,9 @@ export default async ctx => {
 			await sleep(1200)
 			await ctx.press('c')
 		}
-		await sleep(30_000)
+		// Load, fly-over and countdown : ~25 s on a debug build (TT-MENU-PATH).
+		const v = await vblank(ctx)
+		await waitVblank(ctx, v + 35 * 60)
 		await ctx.shot('race')
 		let m
 		await recordWithSound(ctx, 'race', async () => {

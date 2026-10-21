@@ -5,9 +5,10 @@
 //
 // RUN
 //   Build : web/build-web.sh debug -DCTR_WEB_PRELOAD_DISC=ON
-//   Serve : web/serve.sh debug 8093  (port forwarded to the host)
+//   Serve : python3 web/test/player/serve.py build-web-debug 8093
+//           (no-store : the agent browser caches across runs ; port forwarded)
 //   Play  : bash plans/ctr-native-web/tools/play.sh time-trial <session> 8093
-//   Host browser : plans/ctr-native-web/tools/ctr-browser.sh on the Mac.
+//   Browser : the agent browser (`agent-browser up`), else ctr-browser.sh on the Mac.
 // Not a node --test file : `node --test web/test/*.test.js` never loads it.
 //
 // DRIVING : the track is read, not guessed. __ctr.track.path is the level's

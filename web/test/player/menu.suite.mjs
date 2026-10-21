@@ -4,11 +4,12 @@
 // RUN
 //   Build : web/build-web.sh debug -DCTR_WEB_PRELOAD_DISC=ON  (debug : __ctr ;
 //           preload : no drop zone to get past)
-//   Serve : web/serve.sh debug 8093  (port forwarded to the host)
+//   Serve : python3 web/test/player/serve.py build-web-debug 8093
+//           (no-store : the agent browser caches across runs ; port forwarded)
 //   Play  : bash plans/ctr-native-web/tools/play.sh menu <session> 8093
 //           (= node <visual-loop>/scripts/e2e.mjs --suite web/test/player/menu.suite.mjs
 //              --url http://localhost:8093/index.html --proofs plans/ctr-native-web/proofs/<session>)
-//   Host browser : plans/ctr-native-web/tools/ctr-browser.sh on the Mac.
+//   Browser : the agent browser (`agent-browser up`), else ctr-browser.sh on the Mac.
 // Not a node --test file : `node --test web/test/*.test.js` never loads it.
 
 import { PLAYER, bootToMenu, brief, menuTo, recordWithSound, state, until, vblankAdvances } from './ctr.mjs'
