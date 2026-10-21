@@ -37,6 +37,7 @@ function render(mode) {
     ['transport', run.backend],
     ['host → guest', `${run.toGuest.length} / ${COUNT}`],
     ['guest → host', `${run.toHost.length} / ${COUNT}`],
+    ['reliable', run.reliable === undefined ? '' : run.reliable ? 'both ways' : 'missing'],
     ['warnings', run.warnings.map((w) => w.code).join(', ') || '—'],
     ['time', run.ms === null ? '' : `${run.ms} ms to link`],
   ];
@@ -76,13 +77,15 @@ async function runOnce(mode) {
     log(`linked : ${guestLink.backend}, guest sees ${guestLink.path}, host sees ${hostLink.path}`);
 
     for (let i = 0; i < COUNT; i++) {
-      guestLink.send(bytes(`${MARKER} guest→host #${i}`));
-      hostLink.send(bytes(`${MARKER} host→guest #${i}`));
+      const reliable = i === 0; // one message on the reliable channel, the rest unreliable
+      guestLink.send(bytes(`${MARKER} guest→host #${i}${reliable ? ' reliable' : ''}`), { reliable });
+      hostLink.send(bytes(`${MARKER} host→guest #${i}${reliable ? ' reliable' : ''}`), { reliable });
       await sleep(20);
     }
     await waitFor(() => run.toGuest.length === COUNT && run.toHost.length === COUNT, 3000);
     const expectedPath = mode === 'ws' ? run.guestPath === 'relay' : run.guestPath !== 'relay';
-    const ok = run.toGuest.length === COUNT && run.toHost.length === COUNT && expectedPath && run.hostPath === run.guestPath
+    run.reliable = run.toGuest.some((m) => m.endsWith(' reliable')) && run.toHost.some((m) => m.endsWith(' reliable'));
+    const ok = run.reliable && run.toGuest.length === COUNT && run.toHost.length === COUNT && expectedPath && run.hostPath === run.guestPath
       && (mode === 'ws' || run.backend === 'webrtc');
     run.status = ok ? 'PASS' : 'FAIL';
     log(`${run.toHost.length}/${COUNT} to host, ${run.toGuest.length}/${COUNT} to guest → ${run.status}`);

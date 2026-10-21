@@ -41,7 +41,8 @@ host.on('link', (l) => l.on('message', (bytes) => { /* from guest l.peerId */ })
 
 const guest = await openRoom({ link, role: 'guest' });   // mode: 'ws' forces the relay
 const toHost = await guest.connect();                   // toHost.path : 'direct-nat', 'relay'…
-toHost.send(new Uint8Array([1, 2, 3]));
+toHost.send(new Uint8Array([1, 2, 3]));                 // unreliable, unordered over WebRTC
+toHost.send(new Uint8Array([9]), { reliable: true });   // ordered, reliable
 ```
 
 ## Tests and demo

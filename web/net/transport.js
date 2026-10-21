@@ -4,7 +4,9 @@
 //   peerId     the other side's id in the room
 //   backend    'webrtc' | 'ws'
 //   path       'direct-ipv6' | 'direct-lan' | 'direct-nat' (WebRTC) | 'relay' (WebSocket)
-//   send(bytes)   a Uint8Array ; WebRTC : unordered, unreliable ; WebSocket : through the relay
+//   send(bytes, {reliable}?)   a Uint8Array ; WebRTC : unordered and unreliable by default,
+//              `reliable: true` = ordered and reliable (the `ctl` channel) ; WebSocket : always
+//              both, through the relay. OnlineCTR needs both kinds (kart state vs control).
 //   close()
 //   events : 'message' (Uint8Array), 'close'
 //
@@ -101,12 +103,17 @@ async function rtcLink(pc, ctl, game, peerId) {
     link.emit('close');
   };
   game.addEventListener('message', ({ data }) => link.emit('message', new Uint8Array(data)));
+  // On ctl, text is the handshake / control JSON ; binary is the caller's reliable messages.
+  ctl.addEventListener('message', ({ data }) => { if (typeof data !== 'string') link.emit('message', new Uint8Array(data)); });
   ctl.addEventListener('close', end);
   pc.addEventListener('connectionstatechange', () => {
     const state = pc.connectionState;
     if (state === 'failed' || state === 'closed') end();
   });
-  link.send = (bytes) => { if (game.readyState === 'open') game.send(bytes); };
+  link.send = (bytes, { reliable = false } = {}) => {
+    const channel = reliable ? ctl : game;
+    if (channel.readyState === 'open') channel.send(bytes);
+  };
   link.close = end;
   return link;
 }
