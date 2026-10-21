@@ -225,7 +225,8 @@
     window.addEventListener('gamepadconnected', onPadConnected)
     window.addEventListener('gamepaddisconnected', onPadDisconnected)
     const canvas = document.getElementById('canvas')
-    const focusGame = () => canvas?.focus()
+    // a click on the game folds Settings away and gives the game the keys
+    const focusGame = () => { if (ui.settingsOpen) setOpen(false); else canvas?.focus() }
     canvas?.addEventListener('pointerdown', focusGame)
     const stop = watchPads(onPadDown)
     return () => {

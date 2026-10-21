@@ -102,7 +102,8 @@
       <ul class="lic">{#each T.licenceLines as l}<li>{l}</li>{/each}</ul>
       <p class="help">{T.keysHint}</p>
     {:else if current.el}
-      <div class="adopted" use:host={current.el}></div>
+      <!-- keyed : from one adopted tab to another, the old panel is parked and the new one moved in -->
+      {#key current.id}<div class="adopted" use:host={current.el}></div>{/key}
     {/if}
   </div>
 </aside>
@@ -154,4 +155,6 @@
   .adopted :global(button) { font: 600 13px var(--text) !important; background: rgba(255, 255, 255, 0.08) !important; color: #fff !important; border: 0 !important; border-radius: 10px !important; padding: 8px 14px !important; cursor: pointer; }
   .adopted :global(button:hover) { background: rgba(255, 255, 255, 0.14) !important; }
   .adopted :global(.help), .adopted :global(.hint) { color: var(--ink-dim) !important; }
+  .adopted :global(label) { margin: 12px 0 !important; }
+  .adopted :global(label > input:is([type=text], [type=password], [type=range])) { display: block; margin-top: 6px !important; }
 </style>

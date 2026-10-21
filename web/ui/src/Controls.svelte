@@ -90,7 +90,8 @@
   .seg button.on { background: #fff; color: #111; }
   .help { margin: 10px 2px 8px; font-size: 13px; color: var(--ink-dim); }
   .rows { display: grid; gap: 2px; }
-  .row { display: grid; grid-template-columns: 30px 1fr 112px; gap: 12px; align-items: center; padding: 5px 8px; border-radius: 10px; }
+  .row { display: grid; grid-template-columns: 40px 1fr 112px; gap: 12px; align-items: center; padding: 5px 8px; border-radius: 10px; }
+  .row > :global(.glyph:first-child) { justify-self: center; }
   .row.sel { background: rgba(255, 255, 255, 0.06); }
   .name { font-size: 14px; }
   .name small { display: block; font-size: 11.5px; color: var(--ink-dim); }
