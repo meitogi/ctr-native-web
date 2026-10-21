@@ -10,6 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten/em_js.h>
+#endif
+
 #define NATIVE_DISC_IMAGE_PATH_MAX          1024
 #define NATIVE_DISC_IMAGE_BIN_PATH          "ctr-u.bin"
 #define NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE   2352u
@@ -38,6 +42,38 @@ global_variable char s_nativeDiscImagePath[NATIVE_DISC_IMAGE_PATH_MAX];
 global_variable FILE *s_nativeDiscImageFile;
 global_variable struct NativeDiscImageFile s_nativeDiscImageRoot;
 global_variable int s_nativeDiscImageAvailable;
+
+#ifdef __EMSCRIPTEN__
+// NOTE: no real file exists on Emscripten outside of the CTR_WEB_PRELOAD_DISC
+// dev build (which still fopen()s a real MEMFS path above, untouched). The
+// production path is the user's dropped disc, streamed into OPFS by the page
+// and handed to us as a Blob at `globalThis.__ctrDisc`. Reading it needs to
+// be async (OPFS has no synchronous read on the main thread), so only the one
+// low-level sector read below is replaced; everything that calls it (sector
+// arithmetic, directory walks, file reads) is unchanged. EM_ASYNC_JS wraps
+// the JS body in Asyncify.handleAsync(), which suspends the wasm call stack
+// — already fully Asyncify-instrumented for VSync()'s emscripten_sleep() —
+// while the Blob slice is read, so this still looks like a blocking C call.
+global_variable int s_nativeDiscImageIsWebBlob;
+
+EM_JS(int, CTRWeb_DiscReady, (void), {
+	return globalThis.__ctrDisc ? 1 : 0;
+});
+
+EM_ASYNC_JS(int, CTRWeb_ReadRawSector, (u32 lba, u8 *dst), {
+	var disc = globalThis.__ctrDisc;
+	if (!disc) return 0;
+	var offset = lba * 2352;
+	if ((offset + 2352) > disc.size) return 0;
+	try {
+		var buf = await disc.slice(offset, offset + 2352).arrayBuffer();
+		HEAPU8.set(new Uint8Array(buf), dst);
+		return 1;
+	} catch (e) {
+		return 0;
+	}
+});
+#endif
 
 internal int NativeDiscImage_FindHostImagePath(char *dst, size_t dstSize, NativeStr8 assetsDir)
 {
@@ -102,23 +138,35 @@ internal int NativeDiscImage_CheckRawSectorHeader(const u8 *sector)
 
 internal int NativeDiscImage_ReadRawSector(u32 lba, u8 *sector)
 {
-	if (s_nativeDiscImageFile == NULL)
+	if (s_nativeDiscImageFile != NULL)
 	{
-		return 0;
+		u64 offset = (u64)lba * NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE;
+		if ((offset > (u64)LONG_MAX) || (fseek(s_nativeDiscImageFile, (long)offset, SEEK_SET) != 0))
+		{
+			return 0;
+		}
+
+		if (fread(sector, 1, NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE, s_nativeDiscImageFile) != NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE)
+		{
+			return 0;
+		}
+
+		return NativeDiscImage_CheckRawSectorHeader(sector);
 	}
 
-	u64 offset = (u64)lba * NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE;
-	if ((offset > (u64)LONG_MAX) || (fseek(s_nativeDiscImageFile, (long)offset, SEEK_SET) != 0))
+#ifdef __EMSCRIPTEN__
+	if (s_nativeDiscImageIsWebBlob)
 	{
-		return 0;
-	}
+		if (!CTRWeb_ReadRawSector(lba, sector))
+		{
+			return 0;
+		}
 
-	if (fread(sector, 1, NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE, s_nativeDiscImageFile) != NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE)
-	{
-		return 0;
+		return NativeDiscImage_CheckRawSectorHeader(sector);
 	}
+#endif
 
-	return NativeDiscImage_CheckRawSectorHeader(sector);
+	return 0;
 }
 
 internal int NativeDiscImage_ReadDataSector(u32 lba, u8 *payload)
@@ -352,6 +400,7 @@ internal int NativeDiscImage_LoadRoot(void)
 int NativeDiscImage_Init(const char *assetsDir)
 {
 	char path[NATIVE_DISC_IMAGE_PATH_MAX];
+	int haveHostPath = 0;
 
 	s_nativeDiscImageAvailable = 0;
 	s_nativeDiscImagePath[0] = '\0';
@@ -362,25 +411,46 @@ int NativeDiscImage_Init(const char *assetsDir)
 		s_nativeDiscImageFile = NULL;
 	}
 
-	if ((assetsDir == NULL) || !NativeDiscImage_FindHostImagePath(path, sizeof(path), NativeStr8_FromCString(assetsDir)))
+#ifdef __EMSCRIPTEN__
+	s_nativeDiscImageIsWebBlob = 0;
+#endif
+
+	if ((assetsDir != NULL) && NativeDiscImage_FindHostImagePath(path, sizeof(path), NativeStr8_FromCString(assetsDir)))
 	{
-		return 0;
+		s_nativeDiscImageFile = fopen(path, "rb");
+		haveHostPath = s_nativeDiscImageFile != NULL;
 	}
 
-	s_nativeDiscImageFile = fopen(path, "rb");
-	if (s_nativeDiscImageFile == NULL)
+	if (!haveHostPath)
 	{
-		return 0;
+#ifdef __EMSCRIPTEN__
+		// No real file (the CTR_WEB_PRELOAD_DISC dev path above didn't find
+		// one either) : fall back to the disc the page dropped into OPFS.
+		if (CTRWeb_DiscReady())
+		{
+			s_nativeDiscImageIsWebBlob = 1;
+		}
+		else
+#endif
+		{
+			return 0;
+		}
 	}
 
 	if (!NativeDiscImage_LoadRoot())
 	{
-		fclose(s_nativeDiscImageFile);
-		s_nativeDiscImageFile = NULL;
+		if (s_nativeDiscImageFile != NULL)
+		{
+			fclose(s_nativeDiscImageFile);
+			s_nativeDiscImageFile = NULL;
+		}
+#ifdef __EMSCRIPTEN__
+		s_nativeDiscImageIsWebBlob = 0;
+#endif
 		return 0;
 	}
 
-	if (!NativePath_NormalizeSlashes(s_nativeDiscImagePath, sizeof(s_nativeDiscImagePath), NativeStr8_FromCString(path)))
+	if (haveHostPath && !NativePath_NormalizeSlashes(s_nativeDiscImagePath, sizeof(s_nativeDiscImagePath), NativeStr8_FromCString(path)))
 	{
 		fclose(s_nativeDiscImageFile);
 		s_nativeDiscImageFile = NULL;

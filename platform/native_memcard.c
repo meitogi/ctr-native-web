@@ -15,6 +15,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten/em_js.h>
+#endif
+
 #define NATIVE_MEMCARD_MAX_FOUND_FILES 64
 #define NATIVE_MEMCARD_MAX_NAME        64
 #define NATIVE_MEMCARD_MAX_PATH        512
@@ -38,6 +42,27 @@ struct NativeMemcardDeviceName
 global_variable struct NativeMemcardFindState s_memcardFind;
 global_variable char s_memcardRoot[NATIVE_MEMCARD_MAX_PATH];
 global_variable char s_memcardResolvedPath[NATIVE_MEMCARD_MAX_PATH];
+
+#ifdef __EMSCRIPTEN__
+// NOTE: NATIVE_MEMCARD_DEFAULT_ROOT ("memcards") is a relative path, and
+// main.c chdir()s into SDL_GetBasePath() ("/" on Emscripten) before any
+// memcard read/write runs, so every existing path in this file already
+// resolves to /memcards without any change here. This only has to mount an
+// IDBFS-backed /memcards before that first access. IDBFS's `autoPersist`
+// mount option (confirmed in the installed libidbfs.js) queues a persist to
+// IndexedDB on every mutating FS op by itself, so "synced after each write"
+// needs no hook at NativeMemcard_WriteSaveData et al.
+EM_ASYNC_JS(void, CTRWeb_InitMemcards, (void), {
+	FS.mkdir('/memcards');
+	FS.mount(IDBFS, { autoPersist : true }, '/memcards');
+	await new Promise((resolve) => FS.syncfs(true, () => resolve()));
+});
+
+void NativeMemcard_WebInit(void)
+{
+	CTRWeb_InitMemcards();
+}
+#endif
 
 internal struct NativeMemcardDeviceName NativeMemcard_ParseDeviceName(const char *save_name)
 {

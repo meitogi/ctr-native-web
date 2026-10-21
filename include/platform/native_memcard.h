@@ -21,4 +21,8 @@ enum NativeMemcardResult NativeMemcard_RemoveFile(const char *save_name);
 enum NativeMemcardResult NativeMemcard_ReadSaveData(const char *save_name, unsigned char *dst, int byte_count, int data_offset);
 enum NativeMemcardResult NativeMemcard_WriteSaveData(const char *save_name, const void *icon, int icon_byte_count, const unsigned char *src, int byte_count);
 
+#ifdef __EMSCRIPTEN__
+void NativeMemcard_WebInit(void);
+#endif
+
 #endif

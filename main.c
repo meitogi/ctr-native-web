@@ -151,6 +151,10 @@ int main(int argc, char *argv[])
 	printf("[CTR Native] Starting...\n");
 	fflush(stdout);
 
+#ifdef __EMSCRIPTEN__
+	NativeMemcard_WebInit();
+#endif
+
 	const char *sdlBasePath = SDL_GetBasePath();
 	printf("[CTR Native] SDL base path: %s\n", sdlBasePath ? sdlBasePath : "(null)");
 	fflush(stdout);

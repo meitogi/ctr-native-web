@@ -16,6 +16,8 @@ target_link_options(ctr_native PRIVATE
     -sMIN_WEBGL_VERSION=2
     -sMAX_WEBGL_VERSION=2
     -sFORCE_FILESYSTEM=1
+    -sEXPORTED_RUNTIME_METHODS=FS
+    -lidbfs.js
 )
 if(CTR_WEB_ASYNCIFY)
     target_link_options(ctr_native PRIVATE -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=1048576)
@@ -30,9 +32,24 @@ if(CTR_WEB_PRELOAD_DISC)
     set_property(TARGET ctr_native APPEND PROPERTY LINK_DEPENDS "${CTR_WEB_DISC}")
 endif()
 
+# index.html's drop zone needs to know, before ctr_native.js even exists on
+# disk, whether this is a CTR_WEB_PRELOAD_DISC dev build: the preloaded disc
+# lives in MEMFS, invisible to the page, so on those builds the drop zone
+# must get out of the way and boot immediately instead of waiting on OPFS.
+if(CTR_WEB_PRELOAD_DISC)
+    file(WRITE "${CMAKE_BINARY_DIR}/preload-flag.js" "window.__CTR_WEB_PRELOAD = true;\n")
+else()
+    file(WRITE "${CMAKE_BINARY_DIR}/preload-flag.js" "window.__CTR_WEB_PRELOAD = false;\n")
+endif()
+
 add_custom_command(
     OUTPUT "${CMAKE_BINARY_DIR}/index.html"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/web/index.html" "${CMAKE_BINARY_DIR}/index.html"
     DEPENDS "${CMAKE_SOURCE_DIR}/web/index.html"
 )
-add_custom_target(ctr_web_page ALL DEPENDS "${CMAKE_BINARY_DIR}/index.html")
+add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/disc.js"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/web/disc.js" "${CMAKE_BINARY_DIR}/disc.js"
+    DEPENDS "${CMAKE_SOURCE_DIR}/web/disc.js"
+)
+add_custom_target(ctr_web_page ALL DEPENDS "${CMAKE_BINARY_DIR}/index.html" "${CMAKE_BINARY_DIR}/disc.js")

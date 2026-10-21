@@ -8,11 +8,47 @@
   body { margin: 0; background: #000; color: #ccc; font: 12px/1.4 monospace; }
   canvas { display: block; margin: 0 auto; background: #111; }
   #log { margin: 0; padding: 8px; max-height: 30vh; overflow: auto; white-space: pre-wrap; }
+  #boot {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: #000; z-index: 10;
+  }
+  #boot.hidden { display: none; }
+  #boot-panel { width: min(480px, 90vw); text-align: center; }
+  #drop-zone {
+    border: 2px dashed #555; border-radius: 8px; padding: 32px 16px; margin: 16px 0;
+    color: #999;
+  }
+  #drop-zone.dragover { border-color: #6cf; color: #cde; background: #111; }
+  #drop-error { color: #f66; white-space: pre-wrap; margin-top: 8px; }
+  #drop-progress { width: 100%; margin-top: 12px; }
+  #disc-bar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 20; display: none;
+    padding: 4px 8px; background: #111; border-bottom: 1px solid #333;
+    justify-content: space-between; align-items: center;
+  }
+  #disc-bar.visible { display: flex; }
+  #disc-bar button { font: inherit; background: #222; color: #ccc; border: 1px solid #444; cursor: pointer; }
 </style>
 </head>
 <body>
+<div id="disc-bar">
+  <span id="disc-status"></span>
+  <button id="forget-disc" type="button">Forget disc</button>
+</div>
 <canvas id="canvas" width="800" height="600" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
 <pre id="log"></pre>
+<div id="boot">
+  <div id="boot-panel">
+    <p id="boot-status">Checking for a saved disc…</p>
+    <div id="drop-zone">
+      Drop your <code>ctr-u.bin</code> here (raw NTSC-U, MODE2/2352)<br>
+      or <button id="pick-disc" type="button">choose a file</button>
+      <input id="disc-input" type="file" accept=".bin" style="display:none">
+    </div>
+    <progress id="drop-progress" value="0" max="1" style="display:none"></progress>
+    <div id="drop-error"></div>
+  </div>
+</div>
 <script>
   // Dev page : stdout / stderr go to the console and to #log.
   const logEl = document.getElementById('log');
@@ -48,6 +84,108 @@
     setStatus(text) { if (text) console.log('[status] ' + text); },
   };
 </script>
-<script src="ctr_native.js"></script>
+<script src="preload-flag.js"></script>
+<script type="module">
+  import { probeDisc, findCachedDisc, storeDisc, forgetDisc } from './disc.js';
+
+  const bootEl = document.getElementById('boot');
+  const statusEl = document.getElementById('boot-status');
+  const dropZoneEl = document.getElementById('drop-zone');
+  const inputEl = document.getElementById('disc-input');
+  const pickEl = document.getElementById('pick-disc');
+  const progressEl = document.getElementById('drop-progress');
+  const errorEl = document.getElementById('drop-error');
+  const discBarEl = document.getElementById('disc-bar');
+  const discStatusEl = document.getElementById('disc-status');
+  const forgetEl = document.getElementById('forget-disc');
+
+  function showError(message) {
+    errorEl.textContent = message;
+  }
+
+  function showProgress(written, total) {
+    progressEl.style.display = '';
+    progressEl.value = total ? written / total : 0;
+  }
+
+  function bootGame(serial) {
+    discStatusEl.textContent = `Disc: ${serial}`;
+    discBarEl.classList.add('visible');
+    bootEl.classList.add('hidden');
+    const script = document.createElement('script');
+    script.src = 'ctr_native.js';
+    document.body.appendChild(script);
+  }
+
+  async function handleFile(file) {
+    showError('');
+    statusEl.textContent = `Checking ${file.name}…`;
+    const probe = await probeDisc(file);
+    if (!probe.ok) {
+      showError(probe.message);
+      statusEl.textContent = 'Drop a disc image to continue.';
+      return;
+    }
+    statusEl.textContent = 'Storing disc (this only happens once)…';
+    const stored = await storeDisc(file, showProgress);
+    globalThis.__ctrDisc = stored;
+    bootGame(probe.serial);
+  }
+
+  dropZoneEl.addEventListener('dragover', (e) => { e.preventDefault(); dropZoneEl.classList.add('dragover'); });
+  dropZoneEl.addEventListener('dragleave', () => dropZoneEl.classList.remove('dragover'));
+  dropZoneEl.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZoneEl.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  });
+  pickEl.addEventListener('click', () => inputEl.click());
+  inputEl.addEventListener('change', () => {
+    const file = inputEl.files[0];
+    if (file) handleFile(file);
+  });
+  forgetEl.addEventListener('click', async () => {
+    if (!confirm('Forget the stored disc? You will need to drop it again.')) return;
+    await forgetDisc();
+    location.reload();
+  });
+
+  // Test-only hook : the host browser running the suites is a different
+  // machine from the container, so CDP's DOM.setFileInputFiles (which needs
+  // a path that exists on the browser's own filesystem) can't be used to
+  // inject a dropped file. Suites instead fetch a same-origin fixture URL
+  // and hand it to the same handleFile() a real drop/pick would call.
+  window.__ctrTestHandleFileFromUrl = async (url) => {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return handleFile(new File([blob], url.split('/').pop()));
+  };
+
+  (async () => {
+    if (window.__CTR_WEB_PRELOAD) {
+      // Dev build with assets/ctr-u.bin baked into MEMFS at link time
+      // (CTR_WEB_PRELOAD_DISC) : the drop zone has nothing to do, the
+      // native fopen() path in native_disc_image.c finds it directly.
+      bootGame('preloaded (dev build)');
+      return;
+    }
+    const cached = await findCachedDisc();
+    if (!cached) {
+      statusEl.textContent = 'Drop a disc image to continue.';
+      return;
+    }
+    statusEl.textContent = `Checking stored ${cached.name || 'ctr-u.bin'}…`;
+    const probe = await probeDisc(cached);
+    if (!probe.ok) {
+      showError(`The stored disc failed validation (${probe.message}) — drop it again.`);
+      statusEl.textContent = 'Drop a disc image to continue.';
+      await forgetDisc();
+      return;
+    }
+    globalThis.__ctrDisc = cached;
+    bootGame(probe.serial);
+  })();
+</script>
 </body>
 </html>
