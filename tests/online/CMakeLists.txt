@@ -5,7 +5,8 @@
 #   cmake -S tests/online -B build-online && cmake --build build-online
 #   ctest --test-dir build-online --output-on-failure
 #
-# Under Emscripten only the wire-format test is built (run under node).
+# Under Emscripten : the wire-format test and the browser transport's room
+# script (wasm clients driven by node, web/online/test/wasm-room.test.mjs).
 
 cmake_minimum_required(VERSION 3.20)
 project(ctr-online-tests C)
@@ -23,6 +24,25 @@ add_test(NAME online_golden_bytes COMMAND online_golden_bytes)
 add_test(NAME online_golden_bytes_upstream COMMAND online_golden_bytes_upstream)
 
 if(EMSCRIPTEN)
+    # Session 9 — the browser transport : scripted wasm clients (A hosts sv_core,
+    # B and C are guests) driven by node over a JS room ; traces in A3's format.
+    add_executable(online_web_client
+        web_client.c stub_game.c
+        ${ROOT}/platform/native_online.c
+        ${ROOT}/platform/native_online_loopback.c
+        ${ROOT}/platform/online_server/sv_core.c
+        ${ROOT}/platform/web_online_transport.c)
+    target_compile_options(online_web_client PRIVATE -Wall -Wextra)
+    target_link_options(online_web_client PRIVATE
+        -sMODULARIZE=1 -sEXPORT_NAME=createWebClient -sENVIRONMENT=node
+        -sASYNCIFY=1 -sASSERTIONS=1 -sINITIAL_MEMORY=16MB
+        "--js-library=${ROOT}/web/online/library.js")
+    set_property(TARGET online_web_client APPEND PROPERTY LINK_DEPENDS ${ROOT}/web/online/library.js)
+    add_test(NAME online_web_room
+        COMMAND node --test --test-reporter=spec ${ROOT}/web/online/test/wasm-room.test.mjs)
+    set_tests_properties(online_web_room PROPERTIES
+        ENVIRONMENT "CTR_WEB_CLIENT=$<TARGET_FILE:online_web_client>;CTR_WEB_TRACE_DIR=${CMAKE_BINARY_DIR}/traces/web"
+        TIMEOUT 180)
     return()
 endif()
 

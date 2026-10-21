@@ -145,8 +145,30 @@ if(CTR_ONLINE)
         platform/native_online_loopback.c
         platform/online_server/sv_core.c
     )
-    # A browser cannot speak ENet (raw UDP): the web transport is session 9's.
-    if(NOT EMSCRIPTEN)
+    # A browser cannot speak ENet (raw UDP): rooms by link through web/net/,
+    # the host's page runs sv_core.c (docs/ONLINECTR_PORT.md, session 9).
+    if(EMSCRIPTEN)
+        target_sources(ctr_native PRIVATE platform/web_online_transport.c)
+        set(CTR_WEB_ONLINE_LIBRARY "${CMAKE_SOURCE_DIR}/web/online/library.js")
+        target_link_options(ctr_native PRIVATE "--js-library=${CTR_WEB_ONLINE_LIBRARY}")
+        set_property(TARGET ctr_native APPEND PROPERTY LINK_DEPENDS "${CTR_WEB_ONLINE_LIBRARY}")
+
+        # the page module and the network layer it imports, next to index.html
+        file(GLOB CTR_WEB_ONLINE_FILES CONFIGURE_DEPENDS
+            "${CMAKE_SOURCE_DIR}/web/online/*.js" "${CMAKE_SOURCE_DIR}/web/net/*.js")
+        list(REMOVE_ITEM CTR_WEB_ONLINE_FILES "${CTR_WEB_ONLINE_LIBRARY}")
+        set(CTR_WEB_ONLINE_OUTPUTS)
+        foreach(src IN LISTS CTR_WEB_ONLINE_FILES)
+            file(RELATIVE_PATH rel "${CMAKE_SOURCE_DIR}/web" "${src}")
+            add_custom_command(
+                OUTPUT "${CMAKE_BINARY_DIR}/${rel}"
+                COMMAND ${CMAKE_COMMAND} -E copy "${src}" "${CMAKE_BINARY_DIR}/${rel}"
+                DEPENDS "${src}"
+            )
+            list(APPEND CTR_WEB_ONLINE_OUTPUTS "${CMAKE_BINARY_DIR}/${rel}")
+        endforeach()
+        add_custom_target(ctr_web_online_page ALL DEPENDS ${CTR_WEB_ONLINE_OUTPUTS})
+    else()
         include(externals/enet.cmake)
         target_sources(ctr_native PRIVATE platform/native_online_enet.c)
         target_compile_definitions(ctr_native PRIVATE NATIVE_ONLINE_HAS_ENET)

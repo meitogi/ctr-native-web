@@ -755,3 +755,113 @@ drift:
 With `CTR_ONLINE=OFF`, the unity translation unit (`main.c`) preprocesses to
 the same C token stream as before these changes. Line breaks and `__LINE__`
 inside `assert` are excluded from the comparison.
+
+## Session 9 findings
+
+The browser transport and the host's server, behind `CTR_ONLINE` on
+Emscripten. Files: `platform/web_online_transport.{c,h}`, `web/online/`
+(`library.js` is the `--js-library`, `net.js` the JS queue, `page.js` the
+panel), `tests/online/web_client.c`, `web/online/test/`.
+
+### How the pieces meet
+
+- **Configure.** Nothing in `game/` or `main.c` knows the browser: a
+  constructor in `web_online_transport.c` calls
+  `NativeOnline_Configure(&WebOnline_Transport, NULL, "room-link")` before
+  `main()`, and loads `web/online/page.js` (dynamic `import()` from the
+  library) when there is a document. `index.html` is unchanged; the CMake
+  `CTR_ONLINE` block copies `web/online/*.js` and `web/net/*.js` next to it.
+- **Server menu.** Entries 0–6 are refused by `connect()` (returns -1, one
+  log line). The bridge's three attempts then fail in three frames and the
+  game reopens the server menu. Entry 7 ("Private Room") is the page's room.
+  With no room yet, it is refused the same way. Role (host / guest) and the
+  player name are read from the page at `connect()` time.
+- **Guest.** `connect()` → the page's `room.connect()`; `CONNECTED`,
+  `DATA` and `DISCONNECTED` come back through the JS queue. The bridge gives
+  up an attempt after 3 s and retries. The JS side keeps the first
+  `room.connect()` in flight, and a retry waits for that same link. The page
+  opens guest rooms with `rtcTimeoutMs: 5000`, so a failed WebRTC attempt
+  falls back to the relay inside the bridge's 3 × 3 s.
+- **Host (D4).** At the first `connect()` as host: `SvCore_Init(
+  NativeOnlineLoopback_Wrap(webCoreHost))`, then the loopback backend.
+  - `webCoreHost.send` / `kick` are synchronous calls into JS.
+  - `setTimeout` is NULL: a dead guest is its link closing (WebRTC failed,
+    WebSocket bye, the relay's peer list), not an ENet idle timer.
+  - Kick closes the link and raises no event, as `enet_peer_disconnect_now`
+    does.
+- **Peer ids and address key.**
+  - Each guest link gets the lowest free int id from 0. The loopback id 259
+    is never reached: the relay caps a room at 8.
+  - The address key is FNV-1a 64 of the guest's room peer id, so a
+    reconnecting guest keeps its key.
+  - A link the room replaces (a WebRTC re-offer) is `DISCONNECTED` under its
+    old id, then `CONNECTED` under a new one.
+- **Tick site.** The host's `poll()` services the server once per bridge
+  frame, gated on `NativeOnline_FrameCount()`: drain the JS queue into
+  `SvCore_Connect` / `Receive` / `Disconnect`, then `SvCore_Tick(now)`. That
+  is the start of `ProcessNewMessages`, inside `NativeOnline_Frame()`, so the
+  server runs exactly when the host's bridge runs (R6 below). While the
+  host's own client is not connected (it pressed SELECT, back on the server
+  menu), the server is not serviced. Guests' messages wait in the JS queue,
+  and their room is frozen until the host picks Private Room again.
+  Hardening this is session 11's.
+- **Page (the user's choices).** An « Online » panel on the right of the 4:3
+  canvas (`page.js`, fixed position, so it covers the canvas edge in a narrow
+  window).
+  - A name field.
+  - **Host**: relay URL and key fields, prefilled from `?relay=&rk=`,
+    default `wss://ctr-relay.suuuper.app`, remembered in `localStorage`.
+    The new link is relay-only, and `relay` / `rk` are taken out of the
+    link's query, since they travel only after `#`.
+  - **Join**: paste a link, or open one (`#room=…` joins at load).
+  - A « Force relay (WebSocket) » checkbox for guests.
+  - The path to the host, or each guest's path.
+  - Debug getter: `window.__ctrOnline.state()`, with octr fields, links and
+    per-slot kart samples. Never `window.__ctr`.
+- **Channels (D7).** `reliable` → `ctl`, else `game` (the code's name for
+  D7's `race`). The WebSocket link carries both through the relay. The link
+  API does not say which channel a message came in on, so a received
+  message's reliability is not known to the wasm (only the tests need it).
+
+### Live check (session 8's B8), two windows of the test Chromium
+
+Room → lobby → track and laps → characters → loading → race. Both karts move
+on both screens: over WebRTC (`direct-ipv6`), and with the guest forced onto
+the relay (WebSocket). These answer the open risks:
+
+- **R6.** Bridge calls per second, from `octr.windowsClientSync` sampled by
+  the page, measured on both sides:
+  - about 30/s in every lobby state (server menu, room list, track pick,
+    track wait, character pick);
+  - 27.8–27.9/s during the fly-in and 29.8–29.9/s in the race;
+  - about 3.5/s during `LOBBY_START_LOADING` only. That is the loading screen
+    itself: the game frame blocks on sector reads.
+
+  The lobby never misses a frame, and loading completes into the race on
+  both sides. The guarded second call at the top of `MainFrame_GameLogic` is
+  therefore not added. The server ticks at the same rate (tick site above).
+  During loading, its 6 s room reset and its broadcasts wait at most one
+  slow frame.
+- **R7.** In the real game, the host samples the guest's driver slot at its
+  bridge's first poll of a frame, which is after the game's own pad polling.
+  24 of 25 samples still hold the guest's Cross. The miss is the sample taken
+  at the release.
+- **R2** (an 8-driver race in the 8 MB arena) needs 8 browsers. It is
+  deferred to TEST-PLAN-9.
+
+### Measured limits for session 11
+
+- **Relay rate.** `ctr-relay` allows 120 messages/s per socket by default
+  (`RELAY_RATE`). It drops the excess, closing only after 240 drops in a row,
+  and that drop can hit reliable control messages too.
+  - At 30 fps, a host whose guests are all on the relay sends
+    (N − 1)² × 30 `SG_RACEDATA` per second: 120/s with 3 players, 1470/s
+    with 8.
+  - Three players are at the default limit. More players on the WebSocket
+    path need a higher `RELAY_RATE` on that relay, or fewer, coalesced
+    sends.
+- **Backlog.** The headless clients run at about 500 frames/s. At that rate,
+  the WebSocket path (sealed one message at a time) queued seconds of kart
+  states ahead of a weapon message. At the game's 30 fps it keeps up. A
+  sender that floods a reliable path delays its control messages: unordered
+  `game` exists for exactly that.
