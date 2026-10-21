@@ -1,5 +1,9 @@
 #include <common.h>
 
+#if defined(__EMSCRIPTEN__)
+#include <platform/native_web_ui.h>
+#endif
+
 #if defined(CTR_NATIVE) && defined(CTR_INTERNAL)
 #include <platform/native_perf.h>
 #include <platform/native_replay_scheduler.h>
@@ -670,6 +674,13 @@ void StateZero()
 		// NOTE(aalhendi): Retail hardware interrupts keep XA/audio moving while
 		// this loop spins. Native owns VBlank in VSync(), so pump it here.
 		VSync(0);
+#endif
+#if defined(__EMSCRIPTEN__)
+		// « Skip intro » (the web page's setting) : silence SCEA, the loop ends on XA_IDLE
+		if (NativeWeb_IntroSkip())
+		{
+			CDSYS_XAPauseForce();
+		}
 #endif
 		CDSYS_XAPauseAtEnd();
 	}

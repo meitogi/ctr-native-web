@@ -1,4 +1,7 @@
 #include <common.h>
+#if defined(__EMSCRIPTEN__)
+#include <platform/native_web_ui.h>
+#endif
 
 void MM_Title_MenuUpdate(void)
 {
@@ -447,7 +450,12 @@ u16 MM_Title_ThTick(struct Thread *title)
 	ptrTitle = (struct Title *)title->object;
 
 	// If you press Cross, Circle, Triangle, or Square
+#if defined(__EMSCRIPTEN__)
+	// « Skip intro » (the web page's setting) : any press, during the animation only
+	if (((MM_GAME_BUTTON_TAPS[0] & TITLE_INTRO_SKIP_INPUT) != 0) || (((s16)timer < TITLE_INTRO_MENU_READY_FRAME) && NativeWeb_IntroSkip()))
+#else
 	if ((MM_GAME_BUTTON_TAPS[0] & TITLE_INTRO_SKIP_INPUT) != 0)
+#endif
 	{
 		// clear gamepad input (for menus)
 		RECTMENU_ClearInput();

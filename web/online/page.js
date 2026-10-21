@@ -219,17 +219,22 @@ export function attach(Module) {
   document.head.append(el('style', { textContent: CSS }));
   const panel = el('aside', { id: 'online' });
   const toggle = el('button', { id: 'online-toggle', type: 'button', title: T.open, innerHTML: ICON });
-  document.body.append(panel, toggle);
+  // The page's Settings (web/ui, session 12) when it is there : this panel becomes its « Online »
+  // tab (no sidebar, no round button of its own) and the player name is the Settings one.
+  const ui = globalThis.ctrUI;
+  const tab = ui ? ui.adopt('online', T.title, panel) : null;
+  if (!tab) document.body.append(panel, toggle);
   // keys typed in the panel are not the game's
   panel.addEventListener('keydown', (e) => e.stopPropagation());
   panel.addEventListener('keyup', (e) => e.stopPropagation());
 
   // ---- open / closed ----
   const setOpen = (open) => {
+    save('panel', open ? 'open' : 'closed');
+    if (tab) return open ? tab.open() : tab.close();
     panel.classList.toggle('closed', !open);
     toggle.classList.toggle('hidden', open);
     document.body.style.paddingRight = open ? `${WIDTH}px` : '';
-    save('panel', open ? 'open' : 'closed');
   };
   // The closed button : invisible while the mouse rests, brighter as it approaches, opaque on it.
   let lastMove = 0;
@@ -253,6 +258,14 @@ export function attach(Module) {
   // ---- name ----
   const name = el('input', { type: 'text', maxLength: NAME_LEN, value: net.name, id: 'online-name', autocomplete: 'off' });
   name.addEventListener('input', () => { net.name = name.value || 'Player'; save('name', name.value); });
+  if (ui) {
+    // one name : Settings › Player owns it (same key, ctr-online.name) ; this field stays for scripts
+    name.addEventListener('input', () => ui.settings.patch({ name: name.value }));
+    ui.settings.subscribe((v) => {
+      net.name = v.name || 'Player';
+      if (name.value !== v.name) name.value = v.name;
+    });
+  }
 
   // ---- host ----
   const points = (load('points', 'relay') || 'relay').split(',');
@@ -310,7 +323,7 @@ export function attach(Module) {
 
   panel.append(
     el('header', {}, el('h2', {}, T.title), hideButton),
-    el('label', {}, T.name, name),
+    el('label', { hidden: !!ui }, T.name, name),
     hostBox, joinBox, codeBox,
     roomLine, status, errorLine,
     el('div', { className: 'hint' }, T.hint));

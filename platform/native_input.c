@@ -9,6 +9,8 @@
 #include <string.h>
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
+#include <stddef.h>
+#include <platform/native_web_ui.h>
 #endif
 
 #define NATIVE_INPUT_MAX_CONTROLLERS       PLATFORM_INPUT_PAD_COUNT
@@ -312,6 +314,55 @@ internal void NativeInput_ApplyRemotePads(void)
 		s_loggedMask = mask;
 	}
 #endif
+}
+#endif
+
+#if defined(__EMSCRIPTEN__)
+// NOTE: the page's Settings panel (web/ui/, src/lib/input-hook.js) remaps the local keyboard and
+// gamepads. Pulled by C once per input update, as Share's remote pads are (JS never calls into
+// the wasm : ASYNCIFY) : the page writes 16 s32 per table in the structs' field order after `id`
+// (kc_square … kc_dpad_down, gc_square … gc_dpad_down : SDL scancodes, SDL gamepad buttons or
+// axis | MAP_FLAG_AXIS). Written every update (32 ints), so a re-init of the defaults cannot
+// outlive the page's choice. Local input only : guests' pads (NativeInput_ApplyRemotePads) are
+// not remapped here. No page hook = the defaults below, as on native.
+EM_JS(void, NativeInput_WebPullMappings, (s32 *keyboard, s32 *gamepad), {
+	const input = Module['ctrInput'];
+	if (input) input.pull(HEAP32, keyboard >> 2, gamepad >> 2);
+});
+
+// include/platform/native_web_ui.h : 1 when the page saw a press for « Skip intro » (consumed).
+EM_JS(int, NativeWeb_IntroSkip, (void), {
+	const input = Module['ctrInput'];
+	return input && input.introSkip() ? 1 : 0;
+});
+
+// 1 while the Settings panel is open : its keys and pad presses are not the game's.
+EM_JS(int, NativeInput_WebLocalInputBlocked, (void), {
+	const input = Module['ctrInput'];
+	return input && input.blocked() ? 1 : 0;
+});
+
+_Static_assert(offsetof(struct NativeInputKeyboardMapping, kc_dpad_down) - offsetof(struct NativeInputKeyboardMapping, kc_square) == 15 * sizeof(s32),
+	"the page writes the keyboard mapping as 16 contiguous s32");
+_Static_assert(offsetof(struct NativeInputControllerMapping, gc_dpad_down) - offsetof(struct NativeInputControllerMapping, gc_square) == 15 * sizeof(s32),
+	"the page writes the gamepad mapping as 16 contiguous s32");
+
+// After the keyboard / SDL pass, before guests' pads : local pads stay plugged (unplugging
+// pauses a race) with nothing held and sticks centred, the keyboard reads nothing.
+internal void NativeInput_WebBlockLocalInput(void)
+{
+	if (!NativeInput_WebLocalInputBlocked())
+	{
+		return;
+	}
+
+	for (s32 slot = 0; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+	{
+		struct PlatformInputPadSnapshot *snapshot = &s_controllers[slot].snapshot;
+
+		NativeInput_SetSnapshotButtons(snapshot, 0xffff);
+		memset(snapshot->analog, 0x80, sizeof(snapshot->analog));
+	}
 }
 #endif
 
@@ -854,6 +905,9 @@ void Platform_InputUpdate(void)
 	}
 
 	SDL_PumpEvents();
+#if defined(__EMSCRIPTEN__)
+	NativeInput_WebPullMappings(&s_keyboardMapping.kc_square, &s_controllerMapping.gc_square);
+#endif
 	u16 keyboardButtons = NativeInput_KeyboardSuppressed() ? 0xffff : NativeInput_ReadKeyboard();
 
 	for (s32 slot = 0; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
@@ -863,6 +917,7 @@ void Platform_InputUpdate(void)
 		NativeInput_ApplyKeyboard(slot, keyboardButtons);
 	}
 #if defined(__EMSCRIPTEN__)
+	NativeInput_WebBlockLocalInput();
 	NativeInput_ApplyRemotePads();
 #endif
 	NativeInput_WritePadBus();

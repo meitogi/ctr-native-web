@@ -13,6 +13,9 @@ export const MAIN_MENU = ['ADVENTURE', 'TIME TRIAL', 'ARCADE', 'VS.', 'BATTLE', 
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
+/** A progress line between the harness's PASS / FAIL lines, so a long wait never looks hung. */
+export const say = (...a) => console.log(`    · ${new Date().toTimeString().slice(0, 8)}`, ...a)
+
 /** window.__ctr without its track, or null before the first published frame. */
 export const state = ctx => ctx.js('if (!window.__ctr) return null; const { track, ...s } = window.__ctr; return s')
 
@@ -54,6 +57,7 @@ export async function bootToMenu(ctx) {
 	// with no __ctr is a release build : no point reloading.
 	const log = () => ctx.js("return document.getElementById('log')?.textContent ?? ''")
 	for (let attempt = 1; ; attempt++) {
+		if (!(await state(ctx))) say(`waiting for the game to boot (window.__ctr)${attempt > 1 ? `, attempt ${attempt}` : ''}`)
 		const deadline = Date.now() + 120_000
 		while (Date.now() < deadline && !(await state(ctx)) && !/network error/.test(await log())) await sleep(1000)
 		if (await state(ctx)) break
@@ -61,6 +65,7 @@ export async function bootToMenu(ctx) {
 		if (attempt === 3 || /vblank=/.test(text)) {
 			throw new Error(`no window.__ctr after attempt ${attempt} — is this a debug build ? page log : ${text.trim().split('\n').slice(-3).join(' | ')}`)
 		}
+		say('no game after 2 min (the data stream over the forwarded port can stall) : reloading')
 		await ctx.reload()
 	}
 	// Skip the intro : Cross while the menu takes no input yet, re-read before
@@ -68,6 +73,7 @@ export async function bootToMenu(ctx) {
 	// backs out of it.
 	const deadline = Date.now() + 180_000
 	let s = await state(ctx)
+	if (!onMainMenu(s)) say(`game running (${s.screen}) : skipping the intro to the main menu`)
 	while (!onMainMenu(s) && Date.now() < deadline) {
 		if (s.menu?.input) await ctx.press('z') // keyboard Z = Triangle
 		else await ctx.press('c')
@@ -103,13 +109,14 @@ export async function menuTo(ctx, label, step) {
 }
 
 /**
- * Plays `fn` under ctx.record with the page's mute lifted. index.html routes
- * everything to the speakers through a zero-gain `ctrMute` node unless
- * `?sound` ; the harness taps what reaches the destination, i.e. after that
- * node. Lifting it for the recording puts sound in the video — and on the
- * test browser's speakers for that long.
+ * Plays `fn` under ctx.record. index.html routes everything to the speakers through a
+ * gain node (`ctrMute`), at zero under the player harness ; the harness taps what reaches the
+ * destination, i.e. after that node, so the video is silent. The test browser plays on the
+ * host's speakers (the user's Mac) : the sound is lifted only on request, `--set sound=1`
+ * (user, session 12 : « désactive ce son quand tu testes »).
  */
 export async function recordWithSound(ctx, label, fn) {
+	if (ctx.args?.sound !== '1') return ctx.record(label, fn)
 	const gain = v => ctx.js(`const m = globalThis.Module?.SDL3?.audioContext?.ctrMute; if (m) m.gain.value = ${v}; return !!m`)
 	await gain(1)
 	try {

@@ -1,4 +1,7 @@
 #include <common.h>
+#if defined(__EMSCRIPTEN__)
+#include <platform/native_web_ui.h>
+#endif
 #include <ctr_gte_transfer.h>
 
 struct CSThreadParentFrameScratch
@@ -308,7 +311,13 @@ int CS_Thread_UseOpcode(struct Instance *instance, struct CutsceneObj *cs)
 			pushBuffer->distanceToScreen_CURR = pushBuffer->distanceToScreen_PREV;
 		}
 
+#if defined(__EMSCRIPTEN__)
+		// « Skip intro » (the web page's setting) : any press ends the Naughty Dog crate, at once
+		const int webIntroSkip = (GAME_TRACKER->levelID == NAUGHTY_DOG_CRATE) && NativeWeb_IntroSkip();
+		if (((GAMEPADS->gamepad[0].buttonsTapped & BTN_START) != 0) || webIntroSkip)
+#else
 		if ((GAMEPADS->gamepad[0].buttonsTapped & BTN_START) != 0)
+#endif
 		{
 			gGT->clockEffectEnabled &= ~CAM_PATH_FLAG_CLOCK_EFFECT;
 			if ((u32)(GAME_TRACKER->levelID - CREDITS_CRASH) < CS_CREDITS_LEVEL_COUNT)
@@ -319,7 +328,11 @@ int CS_Thread_UseOpcode(struct Instance *instance, struct CutsceneObj *cs)
 			{
 				if (GAME_TRACKER->levelID == NAUGHTY_DOG_CRATE)
 				{
+#if defined(__EMSCRIPTEN__)
+					if ((webIntroSkip == 0) && ((u32)gGT->msInThisLEV >> CS_FRAME32_SHIFT < CS_ND_CRATE_SKIP_MIN_FRAME32))
+#else
 					if ((u32)gGT->msInThisLEV >> CS_FRAME32_SHIFT < CS_ND_CRATE_SKIP_MIN_FRAME32)
+#endif
 					{
 						goto afterCameraAndSkipChecks;
 					}

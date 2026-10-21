@@ -1,4 +1,7 @@
 #include <common.h>
+#if defined(__EMSCRIPTEN__)
+#include <platform/native_web_ui.h>
+#endif
 
 #ifdef CTR_NATIVE
 enum
@@ -97,6 +100,13 @@ int LOAD_TenStages(struct GameTracker *unusedGameTracker, int loadingStage, stru
 			// overwritten with copyright instead of briefly revealing SCEA.
 			while (((sdata->songPool[0].flags & 3) == 1) && (sdata->songPool[0].timeSpentPlaying < LOAD_NATIVE_NDBOX_INTRO_SONG_SYNC_TIME))
 			{
+#if defined(__EMSCRIPTEN__)
+				// « Skip intro » (the web page's setting) : the copyright page ends now
+				if (NativeWeb_IntroSkip())
+				{
+					break;
+				}
+#endif
 				VSync(0);
 				Platform_PresentVRAMDisplay();
 			}

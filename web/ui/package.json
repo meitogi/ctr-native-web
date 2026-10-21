@@ -1,0 +1,17 @@
+{
+  "name": "ctr-native-web-ui",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The browser page's interface : boot screen, whole-window disc drop (.bin / .zip), Settings, toasts. Built by web/emscripten.cmake into <build>/ui/.",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "svelte": "5.57.2",
+    "vite": "8.3.5"
+  }
+}

@@ -89,7 +89,8 @@ const panel = el('div', { id: 'share' },
 // keys typed in the panel are not the game's
 panel.addEventListener('keydown', (e) => e.stopPropagation());
 panel.addEventListener('keyup', (e) => e.stopPropagation());
-document.body.append(panel);
+// In the page's Settings (web/ui, session 12) when it is there : the « Share » tab ; else floating.
+if (!globalThis.ctrUI?.adopt('share', 'Share', panel)) document.body.append(panel);
 
 /** Waits up to `ms` for SDL's audio output, so the guests' stream carries sound from the start. */
 async function tapAudio(ms) {

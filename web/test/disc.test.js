@@ -7,69 +7,10 @@
 // Blob/File (Node 20+) backing the byte slicing probeDisc() does.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { EXPECTED_SERIAL, checkRawSectorHeader, probeDisc } from '../disc.js';
+import { checkRawSectorHeader, probeDisc } from '../disc.js';
+import { CNF_LBA, EXPECTED_SERIAL, ROOT_LBA, buildDisc, formDataOffset, writeDirRecord } from './fixtures.js';
 
 const RAW_SECTOR_SIZE = 2352;
-const FORM1_DATA_OFFSET = 24;
-const SECTOR_COUNT = 20;
-const ROOT_LBA = 17;
-const CNF_LBA = 18;
-
-function writeLE32(bytes, offset, value) {
-  bytes[offset] = value & 0xff;
-  bytes[offset + 1] = (value >>> 8) & 0xff;
-  bytes[offset + 2] = (value >>> 16) & 0xff;
-  bytes[offset + 3] = (value >>> 24) & 0xff;
-}
-
-function writeAscii(bytes, offset, text) {
-  for (let i = 0; i < text.length; i++) bytes[offset + i] = text.charCodeAt(i);
-}
-
-function sectorHeader(bytes, lba) {
-  const base = lba * RAW_SECTOR_SIZE;
-  bytes[base] = 0x00;
-  for (let i = 1; i < 11; i++) bytes[base + i] = 0xff;
-  bytes[base + 11] = 0x00;
-  bytes[base + 15] = 0x02;
-}
-
-function formDataOffset(lba) {
-  return lba * RAW_SECTOR_SIZE + FORM1_DATA_OFFSET;
-}
-
-function writeDirRecord(bytes, offset, { lba, size, flags, name }) {
-  const length = 33 + name.length;
-  bytes[offset] = length;
-  writeLE32(bytes, offset + 2, lba);
-  writeLE32(bytes, offset + 10, size);
-  bytes[offset + 25] = flags;
-  bytes[offset + 32] = name.length;
-  writeAscii(bytes, offset + 33, name);
-  return length;
-}
-
-function buildDisc({ serial = EXPECTED_SERIAL, cnfText } = {}) {
-  const bytes = new Uint8Array(SECTOR_COUNT * RAW_SECTOR_SIZE);
-  for (const lba of [16, ROOT_LBA, CNF_LBA]) sectorHeader(bytes, lba);
-
-  // PVD at LBA 16.
-  const pvd = formDataOffset(16);
-  bytes[pvd] = 1;
-  writeAscii(bytes, pvd + 1, 'CD001');
-  bytes[pvd + 6] = 1;
-  writeDirRecord(bytes, pvd + 156, { lba: ROOT_LBA, size: 2048, flags: 0x02, name: '\0' });
-
-  // Root directory at LBA 17: one entry, SYSTEM.CNF.
-  const text = cnfText ?? `BOOT = cdrom:\\${serial};1\r\nTCB = 4\r\n`;
-  const root = formDataOffset(ROOT_LBA);
-  writeDirRecord(bytes, root, { lba: CNF_LBA, size: text.length, flags: 0x00, name: 'SYSTEM.CNF;1' });
-
-  // SYSTEM.CNF data at LBA 18.
-  writeAscii(bytes, formDataOffset(CNF_LBA), text);
-
-  return new File([bytes], 'ctr-u.bin');
-}
 
 test('checkRawSectorHeader accepts a well-formed MODE2/2352 sync pattern', () => {
   const sector = new Uint8Array(RAW_SECTOR_SIZE);

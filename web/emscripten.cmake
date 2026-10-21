@@ -56,5 +56,30 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/web/disc.js" "${CMAKE_BINARY_DIR}/disc.js"
     DEPENDS "${CMAKE_SOURCE_DIR}/web/disc.js"
 )
-add_custom_target(ctr_web_page ALL DEPENDS "${CMAKE_BINARY_DIR}/index.html" "${CMAKE_BINARY_DIR}/disc.js")
+# The interface (web/ui : Svelte 5 + Vite, see its package.json) : boot screen, disc drop, Settings,
+# toasts. Built into ui/ next to index.html (ui.js, ui.css, the font's licence) with the node / npm
+# on PATH (emsdk_env.sh puts emsdk's node there). npm ci runs when package-lock.json changes ;
+# node_modules stays in web/ui/ (gitignored), shared by every build directory of the tree.
+find_program(CTR_WEB_NODE node REQUIRED)
+find_program(CTR_WEB_NPM npm REQUIRED)
+set(CTR_WEB_UI_DIR "${CMAKE_SOURCE_DIR}/web/ui")
+file(GLOB_RECURSE CTR_WEB_UI_SOURCES CONFIGURE_DEPENDS "${CTR_WEB_UI_DIR}/src/*")
+add_custom_command(
+    OUTPUT "${CTR_WEB_UI_DIR}/node_modules/.package-lock.json"
+    COMMAND "${CTR_WEB_NPM}" ci --no-audit --no-fund --loglevel=error
+    WORKING_DIRECTORY "${CTR_WEB_UI_DIR}"
+    DEPENDS "${CTR_WEB_UI_DIR}/package.json" "${CTR_WEB_UI_DIR}/package-lock.json"
+    COMMENT "web/ui : npm ci"
+)
+add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/ui/ui.js" "${CMAKE_BINARY_DIR}/ui/ui.css"
+    COMMAND ${CMAKE_COMMAND} -E env "CTR_UI_OUT=${CMAKE_BINARY_DIR}/ui"
+            "${CTR_WEB_NODE}" node_modules/vite/bin/vite.js build --logLevel warn
+    WORKING_DIRECTORY "${CTR_WEB_UI_DIR}"
+    DEPENDS ${CTR_WEB_UI_SOURCES} "${CTR_WEB_UI_DIR}/vite.config.js" "${CMAKE_SOURCE_DIR}/web/disc.js"
+            "${CTR_WEB_UI_DIR}/node_modules/.package-lock.json"
+    COMMENT "web/ui : vite build"
+)
+add_custom_target(ctr_web_page ALL DEPENDS "${CMAKE_BINARY_DIR}/index.html" "${CMAKE_BINARY_DIR}/disc.js"
+    "${CMAKE_BINARY_DIR}/ui/ui.js" "${CMAKE_BINARY_DIR}/ui/ui.css")
 include(${CMAKE_SOURCE_DIR}/web/share/share.cmake)

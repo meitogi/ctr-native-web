@@ -1,0 +1,50 @@
+/* The page's look (design « B — console », session 12) : dark glass panels, Lilita One headings,
+   system-ui text. Tokens here ; components keep their own scoped styles. */
+@font-face {
+  font-family: 'Lilita One';
+  src: url('./assets/LilitaOne-Regular.ttf') format('truetype');
+  font-display: swap;
+}
+
+:root {
+  --bg: #0b0d14;
+  --panel: rgba(18, 20, 28, 0.86);
+  --panel-solid: #12141b;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --ink: #f2f3f7;
+  --ink-dim: #9a9fb2;
+  --accent: #4f8cff;
+  --accent-2: #7cf3ff;
+  --warm: #ffb21e;
+  --danger: #ff6b6b;
+  --ok: #7be38f;
+  --radius: 16px;
+  --sidebar: 0px;
+  --sidebar-width: 400px;
+  --display: 'Lilita One', 'Arial Rounded MT Bold', system-ui, sans-serif;
+  --text: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color-scheme: dark;
+}
+
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--text); -webkit-font-smoothing: antialiased; overflow: hidden; }
+body.ctr-sidebar { --sidebar: var(--sidebar-width); }
+
+/* The game : its own 800 × 600 pixels, centred in what the sidebar leaves, scaled by a transform
+   (App.svelte sets --game-scale once SDL has created its window — never CSS width / height, which
+   SDL would take as the window size). */
+#canvas {
+  position: fixed; left: calc((100vw - var(--sidebar)) / 2); top: 50%;
+  transform: translate(-50%, -50%) scale(var(--game-scale, 1)); transform-origin: center;
+  background: #000; outline: none; display: block;
+  transition: left 220ms ease, transform 220ms ease;
+}
+/* the dev log stays in the page (suites read it), shown only with ?log */
+#log { display: none; }
+body.ctr-log #log {
+  display: block; position: fixed; left: 0; bottom: 0; right: var(--sidebar); max-height: 30vh; overflow: auto; margin: 0;
+  padding: 8px; font: 11px/1.4 ui-monospace, monospace; color: #9ab; background: rgba(0, 0, 0, 0.7); white-space: pre-wrap; z-index: 5;
+}
+
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }

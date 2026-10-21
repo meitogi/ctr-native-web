@@ -3,54 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CTR Native Web</title>
+<title>CTR in your browser</title>
+<meta name="color-scheme" content="dark">
+<link rel="stylesheet" href="ui/ui.css">
 <style>
-  body { margin: 0; background: #000; color: #ccc; font: 12px/1.4 monospace; }
-  canvas { display: block; margin: 0 auto; background: #111; }
-  #log { margin: 0; padding: 8px; max-height: 30vh; overflow: auto; white-space: pre-wrap; }
-  #boot {
-    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: #000; z-index: 10;
-  }
-  #boot.hidden { display: none; }
-  #boot-panel { width: min(480px, 90vw); text-align: center; }
-  #drop-zone {
-    border: 2px dashed #555; border-radius: 8px; padding: 32px 16px; margin: 16px 0;
-    color: #999;
-  }
-  #drop-zone.dragover { border-color: #6cf; color: #cde; background: #111; }
-  #drop-error { color: #f66; white-space: pre-wrap; margin-top: 8px; }
-  #drop-progress { width: 100%; margin-top: 12px; }
-  #disc-bar {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 20; display: none;
-    padding: 4px 8px; background: #111; border-bottom: 1px solid #333;
-    justify-content: space-between; align-items: center;
-  }
-  #disc-bar.visible { display: flex; }
-  #disc-bar button { font: inherit; background: #222; color: #ccc; border: 1px solid #444; cursor: pointer; }
+  /* before ui.css arrives : a black page, no flash */
+  html, body { margin: 0; background: #0b0d14; }
 </style>
 </head>
 <body>
-<div id="disc-bar">
-  <span id="disc-status"></span>
-  <button id="forget-disc" type="button">Forget disc</button>
-</div>
 <canvas id="canvas" width="800" height="600" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
 <pre id="log"></pre>
-<div id="boot">
-  <div id="boot-panel">
-    <p id="boot-status">Checking for a saved disc…</p>
-    <div id="drop-zone">
-      Drop your <code>ctr-u.bin</code> here (raw NTSC-U, MODE2/2352)<br>
-      or <button id="pick-disc" type="button">choose a file</button>
-      <input id="disc-input" type="file" accept=".bin" style="display:none">
-    </div>
-    <progress id="drop-progress" value="0" max="1" style="display:none"></progress>
-    <div id="drop-error"></div>
-  </div>
-</div>
+<div id="ctr-ui"></div>
 <script>
-  // Dev page : stdout / stderr go to the console and to #log.
+  // stdout / stderr go to the console and to #log (shown with ?log ; suites read it).
   const logEl = document.getElementById('log');
   function append(line) {
     logEl.textContent += line + '\n';
@@ -59,27 +25,46 @@
   }
   window.addEventListener('error', (e) => append('[page] ' + e.message));
   window.addEventListener('unhandledrejection', (e) => append('[page] ' + e.reason));
-  // Muted unless the URL has ?sound : every source reaching the speakers goes
-  // through a zero-gain node. A test tab that cannot be muted from the page
-  // otherwise plays whatever the SPU emits.
-  if (!new URLSearchParams(location.search).has('sound')) {
+
+  // Sound : every source reaching the speakers goes through one gain node per AudioContext
+  // (`ctrMute`, the name the player suites lift for their videos). Its level is the Settings
+  // volume (web/ui, localStorage `ctr-ui.volume` / `ctr-ui.muted`), read here first so the
+  // first sample is already at the right level. Pages driven by the player harness
+  // (window.__player, injected before this script) and `?mute` start muted and never store it ;
+  // `?sound` forces the sound on.
+  (() => {
+    const query = new URLSearchParams(location.search);
+    const read = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+    const stored = parseFloat(read('ctr-ui.volume'));
+    const volume = Number.isFinite(stored) ? Math.min(1, Math.max(0, stored)) : 0.8;
+    const forcedMute = !query.has('sound') && (query.has('mute') || !!window.__player);
+    const audio = window.ctrAudio = {
+      forcedMute,
+      level: forcedMute || (read('ctr-ui.muted') === '1' && !query.has('sound')) ? 0 : volume,
+      nodes: [],
+      set(level) {
+        this.level = level;
+        for (const n of this.nodes) n.gain.value = level;
+      },
+    };
     const connect = AudioNode.prototype.connect;
     AudioNode.prototype.connect = function (dest, ...rest) {
       if (dest instanceof AudioDestinationNode) {
         const ctx = dest.context;
         if (!ctx.ctrMute) {
           ctx.ctrMute = ctx.createGain();
-          ctx.ctrMute.gain.value = 0;
+          ctx.ctrMute.gain.value = audio.level;
+          audio.nodes.push(ctx.ctrMute);
           connect.call(ctx.ctrMute, dest);
         }
         return connect.call(this, ctx.ctrMute, ...rest);
       }
       return connect.call(this, dest, ...rest);
     };
-  }
-  // Autoplay : browsers start an AudioContext suspended until the page gets a
-  // user gesture. SDL resumes it from a timer once the page has been activated,
-  // which Chrome accepts ; Safari and Firefox want the resume inside the gesture.
+  })();
+  // Autoplay : browsers start an AudioContext suspended until the page gets a user gesture. SDL
+  // resumes it from a timer once the page has been activated, which Chrome accepts ; Safari and
+  // Firefox want the resume inside the gesture.
   for (const type of ['pointerdown', 'keydown', 'touchend']) {
     window.addEventListener(type, () => {
       const ctx = Module.SDL3 && Module.SDL3.audioContext;
@@ -94,110 +79,8 @@
   };
 </script>
 <script src="preload-flag.js"></script>
-<script type="module">
-  import { probeDisc, findCachedDisc, storeDisc, forgetDisc } from './disc.js';
-
-  const bootEl = document.getElementById('boot');
-  const statusEl = document.getElementById('boot-status');
-  const dropZoneEl = document.getElementById('drop-zone');
-  const inputEl = document.getElementById('disc-input');
-  const pickEl = document.getElementById('pick-disc');
-  const progressEl = document.getElementById('drop-progress');
-  const errorEl = document.getElementById('drop-error');
-  const discBarEl = document.getElementById('disc-bar');
-  const discStatusEl = document.getElementById('disc-status');
-  const forgetEl = document.getElementById('forget-disc');
-
-  function showError(message) {
-    errorEl.textContent = message;
-  }
-
-  function showProgress(written, total) {
-    progressEl.style.display = '';
-    progressEl.value = total ? written / total : 0;
-  }
-
-  function bootGame(serial) {
-    discStatusEl.textContent = `Disc: ${serial}`;
-    discBarEl.classList.add('visible');
-    // the bar is fixed : push the canvas below it instead of covering the top of the game
-    document.body.style.paddingTop = `${discBarEl.offsetHeight}px`;
-    bootEl.classList.add('hidden');
-    const script = document.createElement('script');
-    script.src = 'ctr_native.js';
-    document.body.appendChild(script);
-  }
-
-  async function handleFile(file) {
-    showError('');
-    statusEl.textContent = `Checking ${file.name}…`;
-    const probe = await probeDisc(file);
-    if (!probe.ok) {
-      showError(probe.message);
-      statusEl.textContent = 'Drop a disc image to continue.';
-      return;
-    }
-    statusEl.textContent = 'Storing disc (this only happens once)…';
-    const stored = await storeDisc(file, showProgress);
-    globalThis.__ctrDisc = stored;
-    bootGame(probe.serial);
-  }
-
-  dropZoneEl.addEventListener('dragover', (e) => { e.preventDefault(); dropZoneEl.classList.add('dragover'); });
-  dropZoneEl.addEventListener('dragleave', () => dropZoneEl.classList.remove('dragover'));
-  dropZoneEl.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZoneEl.classList.remove('dragover');
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  });
-  pickEl.addEventListener('click', () => inputEl.click());
-  inputEl.addEventListener('change', () => {
-    const file = inputEl.files[0];
-    if (file) handleFile(file);
-  });
-  forgetEl.addEventListener('click', async () => {
-    if (!confirm('Forget the stored disc? You will need to drop it again.')) return;
-    await forgetDisc();
-    location.reload();
-  });
-
-  // Test-only hook : the host browser running the suites is a different
-  // machine from the container, so CDP's DOM.setFileInputFiles (which needs
-  // a path that exists on the browser's own filesystem) can't be used to
-  // inject a dropped file. Suites instead fetch a same-origin fixture URL
-  // and hand it to the same handleFile() a real drop/pick would call.
-  window.__ctrTestHandleFileFromUrl = async (url) => {
-    const res = await fetch(url);
-    const blob = await res.blob();
-    return handleFile(new File([blob], url.split('/').pop()));
-  };
-
-  (async () => {
-    if (window.__CTR_WEB_PRELOAD) {
-      // Dev build with assets/ctr-u.bin baked into MEMFS at link time
-      // (CTR_WEB_PRELOAD_DISC) : the drop zone has nothing to do, the
-      // native fopen() path in native_disc_image.c finds it directly.
-      bootGame('preloaded (dev build)');
-      return;
-    }
-    const cached = await findCachedDisc();
-    if (!cached) {
-      statusEl.textContent = 'Drop a disc image to continue.';
-      return;
-    }
-    statusEl.textContent = `Checking stored ${cached.name || 'ctr-u.bin'}…`;
-    const probe = await probeDisc(cached);
-    if (!probe.ok) {
-      showError(`The stored disc failed validation (${probe.message}) — drop it again.`);
-      statusEl.textContent = 'Drop a disc image to continue.';
-      await forgetDisc();
-      return;
-    }
-    globalThis.__ctrDisc = cached;
-    bootGame(probe.serial);
-  })();
-</script>
+<!-- the interface (web/ui, Svelte) : boot screen, disc drop, Settings ; it injects ctr_native.js -->
+<script type="module" src="ui/ui.js"></script>
 <script type="module" src="share/panel.js"></script>
 </body>
 </html>

@@ -163,10 +163,17 @@ export async function findCachedDisc() {
 }
 
 export async function storeDisc(file, onProgress) {
+  return storeDiscStream(file.stream(), file.size, onProgress);
+}
+
+// Streams `stream` (a dropped .bin, or the .bin inside a .zip decompressed on the fly) into OPFS,
+// never the whole image in memory. createWritable() writes to a swap file : on an error the
+// write is aborted and whatever was stored before stays as it was.
+export async function storeDiscStream(stream, size, onProgress) {
   const root = await opfsRoot();
   const handle = await root.getFileHandle(DISC_FILE_NAME, { create: true });
   const writable = await handle.createWritable();
-  const reader = file.stream().getReader();
+  const reader = stream.getReader();
   let written = 0;
   try {
     for (;;) {
@@ -174,10 +181,12 @@ export async function storeDisc(file, onProgress) {
       if (done) break;
       await writable.write(value);
       written += value.byteLength;
-      onProgress?.(written, file.size);
+      onProgress?.(written, size);
     }
   } catch (e) {
-    await writable.abort(String(e));
+    await writable.abort(String(e)).catch(() => {});
+    // nothing stored before : do not leave the empty file create:true made
+    if ((await handle.getFile()).size === 0) await root.removeEntry(DISC_FILE_NAME).catch(() => {});
     throw e;
   }
   await writable.close();
