@@ -394,6 +394,9 @@ void Platform_EndScene(void)
 	NativeRenderer_PresentVRAMRect(activeDispEnv.disp.x, activeDispEnv.disp.y, activeDispEnv.disp.w, activeDispEnv.disp.h);
 	NativeRenderer_EndGpuFrame();
 	NativeRenderer_SwapWindow();
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+	WebDebugBridge_Publish();
+#endif
 	NativePerf_EndScope(NATIVE_PERF_BUCKET_PLATFORM_END_SCENE);
 }
 
