@@ -13,6 +13,9 @@ export const MAIN_MENU = ['ADVENTURE', 'TIME TRIAL', 'ARCADE', 'VS.', 'BATTLE', 
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
+/** How often a long wait says where it is. */
+export const HEARTBEAT_MS = 10_000
+
 /** A progress line between the harness's PASS / FAIL lines, so a long wait never looks hung. */
 export const say = (...a) => console.log(`    · ${new Date().toTimeString().slice(0, 8)}`, ...a)
 
@@ -24,11 +27,17 @@ export const track = ctx => ctx.js('return window.__ctr?.track ?? null')
 
 /** Waits until `pred(__ctr)` holds ; returns that state. */
 export async function until(ctx, label, pred, { timeout = 30_000, every = 200 } = {}) {
-	const deadline = Date.now() + timeout
+	const start = Date.now()
+	const deadline = start + timeout
+	let beat = start + HEARTBEAT_MS
 	let s = null
 	while (Date.now() < deadline) {
 		s = await state(ctx)
 		if (s && pred(s)) return s
+		if (Date.now() >= beat) {
+			say(`still waiting for ${label} (${Math.round((Date.now() - start) / 1000)} s of ${Math.round(timeout / 1000)}) : ${brief(s)}`)
+			beat += HEARTBEAT_MS
+		}
 		await sleep(every)
 	}
 	throw new Error(`timed out after ${Math.round(timeout / 1000)}s waiting for ${label} (last: ${brief(s)})`)

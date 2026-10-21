@@ -30,7 +30,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { capture } from '/opt/devcontainer/base/skills/visual-loop/scripts/cdp.mjs'
 import { makePlayer, pageScript } from '/opt/devcontainer/base/skills/visual-loop/lib/player.mjs'
-import { PLAYER, recordWithSound } from './ctr.mjs'
+import { HEARTBEAT_MS, PLAYER, recordWithSound, say } from './ctr.mjs'
 
 export const meta = {
 	url: 'http://localhost:8092/index.html',
@@ -72,18 +72,29 @@ return true`
 /** The page's online state, or null before the panel is up. */
 export const online = tab => tab.js('return window.__ctrOnline ? window.__ctrOnline.state() : null')
 
+/** The page in one line, for progress and failure messages. */
+const pageLog = tab => tab.js(`return [location.href, document.visibilityState, document.getElementById('boot-status')?.textContent,
+	document.getElementById('drop-error')?.textContent, 'game script ' + !!document.querySelector('script[src="ctr_native.js"]'),
+	(document.getElementById('log')?.textContent ?? '').trim().split('\\n').slice(-4).join(' | ')].join(' ; ')`).catch(e => e.message)
+
 export async function until(tab, label, pred, timeout = 30_000, every = 250) {
-	const deadline = Date.now() + timeout
+	const start = Date.now()
+	const deadline = start + timeout
+	let beat = start + HEARTBEAT_MS
 	let s = null
 	while (Date.now() < deadline) {
 		s = await online(tab).catch(() => null)
 		if (s && pred(s)) return s
+		if (Date.now() >= beat) {
+			// a refused disc never recovers : stop now rather than at the timeout
+			const refused = await tab.js("return document.getElementById('drop-error')?.textContent ?? ''").catch(() => '')
+			if (refused) throw new Error(`${tab.name} : disc refused while waiting for ${label} : ${refused}`)
+			say(`${tab.name} : still waiting for ${label} (${Math.round((Date.now() - start) / 1000)} s of ${Math.round(timeout / 1000)}) : state ${s?.octr?.CurrState ?? 'no game yet'}${s?.error ? `, ${s.error}` : ''}`)
+			beat += HEARTBEAT_MS
+		}
 		await sleep(every)
 	}
-	const log = await tab.js(`return [location.href, document.visibilityState, document.getElementById('boot-status')?.textContent,
-		document.getElementById('drop-error')?.textContent, 'game script ' + !!document.querySelector('script[src="ctr_native.js"]'),
-		(document.getElementById('log')?.textContent ?? '').trim().split('\\n').slice(-4).join(' | ')].join(' ; ')`).catch(e => e.message)
-	throw new Error(`${tab.name} : timed out after ${Math.round(timeout / 1000)}s waiting for ${label} (last state ${s?.octr?.CurrState}, ${s?.error || s?.lastError?.message || 'no error'} ; page log : ${log})`)
+	throw new Error(`${tab.name} : timed out after ${Math.round(timeout / 1000)}s waiting for ${label} (last state ${s?.octr?.CurrState}, ${s?.error || s?.lastError?.message || 'no error'} ; page log : ${await pageLog(tab)})`)
 }
 
 /** Loads `url` in `tab` and boots the game to OnlineCTR's server menu ; stores the disc in OPFS once. */
@@ -103,12 +114,18 @@ export async function boot(tab, url) {
 		if (await tab.js('return !document.getElementById("boot").classList.contains("hidden")')) {
 			// 605 MB over the port forward the first time : start it, watch the drop zone go away
 			await tab.js(`void window.__ctrTestHandleFileFromUrl(location.origin + '/ctr-u.bin'); return true`)
+			say(`${tab.name} : storing the disc in this browser (605 MB, once per origin)`)
 			const stored = Date.now() + 900_000
+			let beat = Date.now() + HEARTBEAT_MS
 			for (;;) {
 				const s = await tab.js('return { hidden: document.getElementById("boot").classList.contains("hidden"), error: document.getElementById("drop-error").textContent }')
 				if (s.error) throw new Error(`${tab.name} : disc refused : ${s.error}`)
 				if (s.hidden) break
 				if (Date.now() > stored) throw new Error(`${tab.name} : the disc never reached OPFS`)
+				if (Date.now() >= beat) {
+					say(`${tab.name} : still storing the disc : ${await tab.js("return document.getElementById('boot-status')?.textContent ?? ''").catch(() => '')}`)
+					beat += HEARTBEAT_MS
+				}
 				await sleep(2000)
 			}
 		}
@@ -116,7 +133,8 @@ export async function boot(tab, url) {
 		const started = Date.now() + 60_000
 		while (Date.now() < started && !(await tab.js("return /\\[OnlineCTR\\]|vblank=/.test(document.getElementById('log')?.textContent ?? '')").catch(() => false))) await sleep(500)
 		if (await tab.js("return /\\[OnlineCTR\\]|vblank=/.test(document.getElementById('log')?.textContent ?? '')").catch(() => false)) break
-		if (attempt === 3) throw new Error(`${tab.name} : the game never started after ${attempt} loads`)
+		if (attempt === 3) throw new Error(`${tab.name} : the game never started after ${attempt} loads (${await pageLog(tab)})`)
+		say(`${tab.name} : no game output 60 s after load ${attempt}, reloading (${await pageLog(tab)})`)
 	}
 	// the server menu, or already past it : the page picks Private Room as soon as it has a room
 	await until(tab, 'the server menu', s => s.octr?.CurrState >= ST.PICK_SERVER, 180_000)
