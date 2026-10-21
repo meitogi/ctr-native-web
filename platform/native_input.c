@@ -692,6 +692,9 @@ internal void NativeInput_OpenController(SDL_JoystickID instanceId, s32 slot)
 	controller->analogEnabled = 1;
 	controller->switchingAnalog = 0;
 	NativeInput_MoveKeyboardOffControllerSlot(slot);
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+	printf("[CTR Web] gamepad added: slot=%d name=%s\n", slot, SDL_GetGamepadName(controller->controller));
+#endif
 }
 
 internal void NativeInput_OpenKnownControllers(void)
@@ -796,6 +799,23 @@ void Platform_InputUpdate(void)
 		NativeInput_ApplyKeyboard(slot, keyboardButtons);
 	}
 	NativeInput_WritePadBus();
+
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+	// NOTE: debug web builds log pad 0's PSX button word (active low) when it
+	// changes, so the browser suites can assert that keyboard and gamepad
+	// input reach the pad bus.
+	{
+		local_persist u16 s_loggedButtons = 0xffff;
+		const struct PlatformInputPadSnapshot *pad0 = &s_controllers[0].snapshot;
+		const u16 buttons = (u16)(pad0->buttons[0] | (pad0->buttons[1] << 8));
+
+		if (buttons != s_loggedButtons)
+		{
+			printf("[CTR Web] pad0 buttons=0x%04x\n", buttons);
+			s_loggedButtons = buttons;
+		}
+	}
+#endif
 }
 
 void Platform_InputControllerAdded(int deviceIndex)

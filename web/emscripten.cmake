@@ -18,6 +18,10 @@ target_link_options(ctr_native PRIVATE
     -sFORCE_FILESYSTEM=1
     -sEXPORTED_RUNTIME_METHODS=FS
     -lidbfs.js
+    # Decompiled code calls through function pointers whose type differs from
+    # the target's (e.g. u16 MM_Title_ThTick called as a void ThreadFunc).
+    # x86 tolerates it, wasm's call_indirect traps : emulate the casts.
+    -sEMULATE_FUNCTION_POINTER_CASTS=1
 )
 if(CTR_WEB_ASYNCIFY)
     target_link_options(ctr_native PRIVATE -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=1048576)

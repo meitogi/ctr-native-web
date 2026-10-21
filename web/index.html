@@ -77,6 +77,15 @@
       return connect.call(this, dest, ...rest);
     };
   }
+  // Autoplay : browsers start an AudioContext suspended until the page gets a
+  // user gesture. SDL resumes it from a timer once the page has been activated,
+  // which Chrome accepts ; Safari and Firefox want the resume inside the gesture.
+  for (const type of ['pointerdown', 'keydown', 'touchend']) {
+    window.addEventListener(type, () => {
+      const ctx = Module.SDL3 && Module.SDL3.audioContext;
+      if (ctx && ctx.state === 'suspended') ctx.resume();
+    }, { capture: true });
+  }
   var Module = {
     canvas: document.getElementById('canvas'),
     print(text) { console.log(text); append(text); },

@@ -163,9 +163,16 @@ internal void Platform_TakeScreenshot(void)
 {
 	u8 *pixels = (u8 *)malloc(g_windowWidth * g_windowHeight * 4);
 
+#if defined(__EMSCRIPTEN__)
+	// NOTE: WebGL2 reads back RGBA only.
+	glReadPixels(0, 0, g_windowWidth, g_windowHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+	SDL_Surface *surface = SDL_CreateSurfaceFrom(g_windowWidth, g_windowHeight, SDL_PIXELFORMAT_RGBA32, pixels, g_windowWidth * 4);
+#else
 	glReadPixels(0, 0, g_windowWidth, g_windowHeight, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
 
 	SDL_Surface *surface = SDL_CreateSurfaceFrom(g_windowWidth, g_windowHeight, SDL_PIXELFORMAT_BGRA8888, pixels, g_windowWidth * 4);
+#endif
 
 	SDL_SaveBMP(surface, "SCREENSHOT.BMP");
 	SDL_DestroySurface(surface);
@@ -191,8 +198,13 @@ internal void Platform_HandleKey(int key, char down)
 		switch (key)
 		{
 		case SDL_SCANCODE_F1:
+#if defined(__EMSCRIPTEN__)
+			// NOTE: WebGL2 has no glPolygonMode to draw the wireframe with.
+			Platform_LogWarn("[CTR Native] wireframe mode is not available in WebGL2\n");
+#else
 			g_dbg_wireframeMode ^= 1;
 			Platform_LogWarn("[CTR Native] wireframe mode: %d\n", g_dbg_wireframeMode);
+#endif
 			break;
 
 		case SDL_SCANCODE_F2:
@@ -587,24 +599,33 @@ internal void Native_EnsureVBlankTarget(void)
 	}
 }
 
+#if defined(__EMSCRIPTEN__)
+// Resolves on the next display refresh (requestAnimationFrame), or after 100 ms
+// when the page is hidden and the browser has paused requestAnimationFrame.
+EM_ASYNC_JS(void, NativeWeb_WaitAnimationFrame, (void), {
+	await new Promise((resolve) => {
+		const timer = setTimeout(resolve, 100);
+		requestAnimationFrame(() => { clearTimeout(timer); resolve(); });
+	});
+});
+#endif
+
 internal void Native_WaitUntilVBlankTarget(void)
 {
 	const u64 freq = SDL_GetPerformanceFrequency();
 #if defined(__EMSCRIPTEN__)
 	// NOTE: the browser renders, delivers input and runs audio only while the
-	// page has given control back. Sleep through ASYNCIFY, which returns to the
+	// page has given control back. Wait through ASYNCIFY, which returns to the
 	// event loop, and never spin : a spin would hold the page until the target.
+	// Waking on display refreshes, not on a timer, puts every present at the
+	// start of a refresh : timer wake-ups jitter by +-4 ms, which left 28 % of
+	// the 30 fps menu frames on screen for 3 or 5 refreshes instead of 4 at
+	// 120 Hz. The VBlank clock still paces the game ; only the wake-up moves.
+	(void)freq;
 	NativePerf_BeginScope(NATIVE_PERF_BUCKET_VSYNC_WAIT);
-	while (1)
+	while (SDL_GetPerformanceCounter() < s_nextVBlankCounter)
 	{
-		const u64 now = SDL_GetPerformanceCounter();
-
-		if (now >= s_nextVBlankCounter)
-		{
-			break;
-		}
-
-		emscripten_sleep((unsigned int)(((s_nextVBlankCounter - now) * 1000) / freq));
+		NativeWeb_WaitAnimationFrame();
 	}
 	NativePerf_EndScope(NATIVE_PERF_BUCKET_VSYNC_WAIT);
 #else

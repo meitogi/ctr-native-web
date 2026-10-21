@@ -45,7 +45,14 @@ extern SDL_Window *g_window;
 #define MAX_NUM_VERTEX_BUFFERS          (2)
 #define PSX_SCREEN_ASPECT               (240.0f / 320.0f) // PSX screen is mapped always to this aspect
 
-#if defined(CTR_INTERNAL)
+// GPU frame timers need GL_TIME_ELAPSED queries (GL 3.3 / ARB_timer_query).
+// WebGL2 only has them behind EXT_disjoint_timer_query_webgl2, which browsers
+// keep disabled, so the web build compiles them out.
+#if defined(CTR_INTERNAL) && !defined(__EMSCRIPTEN__)
+#define NATIVE_GPU_TIMERS
+#endif
+
+#if defined(NATIVE_GPU_TIMERS)
 #ifndef GL_TIME_ELAPSED
 #define GL_TIME_ELAPSED 0x88BF
 #endif
@@ -99,6 +106,9 @@ struct NativeVramState
 };
 
 global_variable struct NativeVramState s_vram;
+#if defined(__EMSCRIPTEN__)
+global_variable u8 s_vramReadbackRGBA[VRAM_WIDTH * VRAM_HEIGHT * 4];
+#endif
 
 struct NativeRenderTarget
 {
@@ -162,7 +172,7 @@ internal void NativeRenderer_EnsureRenderTarget(struct NativeRenderTarget *targe
 internal void NativeRenderer_BindMainRenderTarget(void);
 internal void NativeRenderer_DrawVRAMRegion(int x, int y, int width, int height);
 internal void NativeRenderer_LoadRenderTargetFromVRAM(struct NativeRenderTarget *target, int x, int y);
-#if defined(CTR_INTERNAL)
+#if defined(NATIVE_GPU_TIMERS)
 internal void NativeRenderer_ResolveGpuMeasurements(b32 waitForResults);
 #endif
 
@@ -260,6 +270,12 @@ int NativeRenderer_InitialiseRender(char *windowName, int width, int height, int
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 1);
+#if defined(__EMSCRIPTEN__)
+	// NOTE: the page composites a WebGL canvas with its alpha channel, and the
+	// presented VRAM carries the PS1 mask bit in alpha (mostly 0) : without
+	// this the frame shows through to the page as a half-transparent ghost.
+	SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
+#endif
 
 	if (!NativeRenderer_InitialiseGLContext(windowName, fullscreen))
 	{
@@ -295,7 +311,7 @@ void NativeRenderer_Shutdown(void)
 	glDeleteBuffers(1, &s_vramQuadVBO);
 }
 
-#if defined(CTR_INTERNAL)
+#if defined(NATIVE_GPU_TIMERS)
 internal void NativeRenderer_ResolveGpuMeasurements(b32 waitForResults)
 {
 	for (s32 i = 0; i < NATIVE_GPU_TIMER_QUERY_COUNT; i++)
@@ -338,7 +354,7 @@ void NativeRenderer_UpdateSwapIntervalState(int swapInterval)
 
 void NativeRenderer_BeginScene(void)
 {
-#if defined(CTR_INTERNAL)
+#if defined(NATIVE_GPU_TIMERS)
 	NativeRenderer_ResolveGpuMeasurements(false);
 	const u32 gpuFrameIndex = s_gpuTimerFrameIndex++;
 	if (s_gpuTimerSupported && NativePerf_IsEnabled())
@@ -385,7 +401,7 @@ void NativeRenderer_BeginScene(void)
 
 void NativeRenderer_EndGpuFrame(void)
 {
-#if defined(CTR_INTERNAL)
+#if defined(NATIVE_GPU_TIMERS)
 	if (s_gpuTimerActive)
 	{
 		glEndQuery(GL_TIME_ELAPSED);
@@ -396,7 +412,7 @@ void NativeRenderer_EndGpuFrame(void)
 
 void NativeRenderer_FinishGpuMeasurements(void)
 {
-#if defined(CTR_INTERNAL)
+#if defined(NATIVE_GPU_TIMERS)
 	NativeRenderer_EndGpuFrame();
 	if (!s_gpuTimerSupported)
 	{
@@ -905,11 +921,7 @@ internal int NativeRenderer_Shader_CheckShaderStatus(GLuint shader)
 	if (info[0] && strlen(info) > 8)
 	{
 		NATIVE_RENDERER_ERROR("%s\n", info);
-		// NOTE: the #version 140 shaders do not compile under WebGL2 yet ; the
-		// web build logs the failure and boots on without rendering.
-#if !defined(__EMSCRIPTEN__)
 		assert(0);
-#endif
 	}
 
 	return 0;
@@ -931,11 +943,7 @@ internal int NativeRenderer_Shader_CheckProgramStatus(GLuint program)
 	if (info[0] && strlen(info) > 8)
 	{
 		NATIVE_RENDERER_ERROR("%s\n", info);
-		// NOTE: the #version 140 shaders do not compile under WebGL2 yet ; the
-		// web build logs the failure and boots on without rendering.
-#if !defined(__EMSCRIPTEN__)
 		assert(0);
-#endif
 	}
 
 	return 0;
@@ -943,6 +951,28 @@ internal int NativeRenderer_Shader_CheckProgramStatus(GLuint program)
 
 internal ShaderID NativeRenderer_Shader_Compile(const char *source, bool isPsxShader)
 {
+#if defined(__EMSCRIPTEN__)
+	// NOTE: WebGL2 compiles GLSL ES 3.00, which covers everything these GLSL
+	// 1.40 shaders use. ES precision is real, unlike desktop GL : the pack and
+	// present shaders do 16-bit integer bit operations (lowp int is only
+	// guaranteed 8 bits), and the VRAM reads rebuild exact bytes from
+	// byte/255 (lowp samplers may return 8-bit-precision floats).
+	const char *GLSL_HEADER_VERT = "#version 300 es\n"
+	                               "	precision highp int;\n"
+	                               "	precision highp float;\n"
+	                               "	precision highp sampler2D;\n"
+	                               "	#define varying   out\n"
+	                               "	#define attribute in\n"
+	                               "	#define texture2D texture\n";
+
+	const char *GLSL_HEADER_FRAG = "#version 300 es\n"
+	                               "	precision highp int;\n"
+	                               "	precision highp float;\n"
+	                               "	precision highp sampler2D;\n"
+	                               "	#define varying     in\n"
+	                               "	#define texture2D   texture\n"
+	                               "	out vec4 fragColor;\n";
+#else
 	const char *GLSL_HEADER_VERT = "	#version 140\n"
 	                               "	precision lowp  int;\n"
 	                               "	precision highp float;\n"
@@ -956,6 +986,7 @@ internal ShaderID NativeRenderer_Shader_Compile(const char *source, bool isPsxSh
 	                               "	#define varying     in\n"
 	                               "	#define texture2D   texture\n"
 	                               "	out vec4 fragColor;\n";
+#endif
 
 	char extra_vs_defines[1024];
 	char extra_fs_defines[1024];
@@ -1194,7 +1225,7 @@ int NativeRenderer_InitialisePSX(void)
 	NativeRenderer_InitialisePSXShaders();
 	NativeRenderer_InitVRAMPipelines();
 
-#if defined(CTR_INTERNAL)
+#if defined(NATIVE_GPU_TIMERS)
 	GLint glMajor = 0;
 	GLint glMinor = 0;
 	glGetIntegerv(GL_MAJOR_VERSION, &glMajor);
@@ -1837,10 +1868,28 @@ internal void NativeRenderer_SyncGpuVRAMToCPU(int x, int y, int w, int h)
 	glGetIntegerv(GL_PACK_ALIGNMENT, &previousPackAlignment);
 
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_glVramFramebuffer);
+#if defined(__EMSCRIPTEN__)
+	// NOTE: WebGL2 guarantees only RGBA / UNSIGNED_BYTE readback from a
+	// normalized colour buffer ; GL_RG is an optional implementation format.
+	// Read tight RGBA rows and keep R (low byte) and G (high byte).
+	glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	glReadPixels(readRect.x, readRect.y, readRect.w, readRect.h, GL_RGBA, GL_UNSIGNED_BYTE, s_vramReadbackRGBA);
+	for (int row = 0; row < readRect.h; row++)
+	{
+		const u8 *src = s_vramReadbackRGBA + (size_t)row * readRect.w * 4;
+		u16 *dst = s_vram.cpuPixels + (size_t)(readRect.y + row) * VRAM_WIDTH + readRect.x;
+		for (int col = 0; col < readRect.w; col++)
+		{
+			dst[col] = (u16)(src[col * 4] | (src[col * 4 + 1] << 8));
+		}
+	}
+#else
 	glPixelStorei(GL_PACK_ROW_LENGTH, VRAM_WIDTH);
 	glPixelStorei(GL_PACK_ALIGNMENT, sizeof(u16));
 	glReadPixels(readRect.x, readRect.y, readRect.w, readRect.h, VRAM_FORMAT, GL_UNSIGNED_BYTE,
 	             s_vram.cpuPixels + (size_t)readRect.y * VRAM_WIDTH + readRect.x);
+#endif
 
 	for (int tileY = tileY0; tileY <= tileY1; tileY++)
 	{
@@ -2160,9 +2209,35 @@ void NativeRenderer_PresentVRAMDisplay(void)
 	NativeRenderer_PresentVRAMRect(activeDispEnv.disp.x, activeDispEnv.disp.y, activeDispEnv.disp.w, activeDispEnv.disp.h);
 }
 
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+// NOTE: WebGL reports invalid calls only through glGetError. Debug web builds
+// drain it once per frame (it is a round trip to the GPU process, so release
+// builds skip it) ; the browser suites fail on any "GL error" line.
+internal void NativeRenderer_LogGLErrors(void)
+{
+	local_persist int s_loggedErrors = 0;
+
+	for (GLenum err = glGetError(); err != GL_NO_ERROR; err = glGetError())
+	{
+		if (s_loggedErrors < 32)
+		{
+			NATIVE_RENDERER_ERROR("GL error 0x%04x\n", err);
+		}
+		else if (s_loggedErrors == 32)
+		{
+			NATIVE_RENDERER_ERROR("%s\n", "GL error: further errors not logged");
+		}
+		s_loggedErrors++;
+	}
+}
+#endif
+
 void NativeRenderer_SwapWindow(void)
 {
 	NativePerf_BeginScope(NATIVE_PERF_BUCKET_SWAP_WINDOW);
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+	NativeRenderer_LogGLErrors();
+#endif
 	SDL_GL_SwapWindow(g_window);
 	NativePerf_EndScope(NATIVE_PERF_BUCKET_SWAP_WINDOW);
 }
@@ -2258,7 +2333,13 @@ internal void NativeRenderer_SetViewPort(int x, int y, int width, int height)
 
 internal void NativeRenderer_SetWireframe(int enable)
 {
+#if defined(__EMSCRIPTEN__)
+	// NOTE: WebGL2 has no polygon mode ; the F1 wireframe toggle is refused on
+	// the web build (Platform_HandleKey), so this is never reached there.
+	(void)enable;
+#else
 	glPolygonMode(GL_FRONT_AND_BACK, enable ? GL_LINE : GL_FILL);
+#endif
 }
 
 void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices, int num_vertices)
@@ -2286,20 +2367,27 @@ void NativeRenderer_DrawTriangles(int start_vertex, int triangles)
 	NativePerf_EndScope(NATIVE_PERF_BUCKET_RENDERER_DRAW_TRIANGLES);
 }
 
+// NOTE: WebGL2 does not expose KHR_debug, so the web build has no debug groups.
 void NativeRenderer_PushDebugLabel(const char *label)
 {
+#if defined(__EMSCRIPTEN__)
+	(void)label;
+#else
 	if (!GLAD_GL_KHR_debug)
 	{
 		return;
 	}
 	glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0x8000, strlen(label), label);
+#endif
 }
 
 void NativeRenderer_PopDebugLabel(void)
 {
+#if !defined(__EMSCRIPTEN__)
 	if (!GLAD_GL_KHR_debug)
 	{
 		return;
 	}
 	glPopDebugGroup();
+#endif
 }
