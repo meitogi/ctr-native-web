@@ -1,5 +1,6 @@
-// Standalone demo of web/net : one host and one guest in this page exchange messages
-// through each transport. Configure with the page hash : #relay=ws://localhost:8787&rk=…
+// Standalone demo of web/net. Top : one host and one guest in this page exchange messages
+// through each transport. Bottom : host here and join from another device with the link.
+// Configure with the page hash : #relay=ws://localhost:8787&rk=… (a join link adds room / key).
 // window.__netDemo holds the results for automated checks.
 import { formatRoomLink, newRoom } from '../link.js';
 import { openRoom } from '../room.js';
@@ -109,3 +110,70 @@ async function run(mode) {
 $('run-auto').addEventListener('click', () => run('auto'));
 $('run-ws').addEventListener('click', () => run('ws'));
 state.run = run;
+
+// ── Two devices ─────────────────────────────────────────────────────────────
+
+const remote = { role: null, status: 'idle', joinLink: '', links: {}, log: [] };
+state.remote = remote;
+
+function renderRemote() {
+  $('remote-status').textContent = remote.status;
+  $('join-link').value = remote.joinLink;
+  const info = $('remote-info');
+  info.replaceChildren();
+  for (const id in remote.links) {
+    const l = remote.links[id];
+    const dt = document.createElement('dt');
+    dt.textContent = `${remote.role === 'host' ? 'guest' : 'host'} ${id.slice(0, 8)}`;
+    const dd = document.createElement('dd');
+    dd.innerHTML = `<span class="path"></span> ${l.backend} · received ${l.received} · sent ${l.sent}${l.closed ? ' · closed' : ''}`;
+    dd.querySelector('.path').textContent = l.path;
+    info.append(dt, dd);
+  }
+  $('remote-log').textContent = remote.log.join('\n');
+}
+
+function track(l) {
+  const entry = { path: l.path, backend: l.backend, received: 0, sent: 0, closed: false };
+  remote.links[l.peerId] = entry;
+  l.on('message', () => { entry.received++; renderRemote(); });
+  l.on('close', () => { entry.closed = true; renderRemote(); });
+  const timer = setInterval(() => {
+    if (entry.closed) return clearInterval(timer);
+    l.send(bytes(`tick ${entry.sent++}`));
+    renderRemote();
+  }, 500);
+  remote.log.push(`link ${l.peerId.slice(0, 8)} : ${l.backend}, ${l.path}`);
+  renderRemote();
+}
+
+async function startRemote(role) {
+  if (remote.role) return;
+  remote.role = role;
+  remote.status = 'connecting';
+  renderRemote();
+  try {
+    const room = role === 'host' ? newRoom({ relay: $('relay').value, rk: $('rk').value }) : location.hash.slice(1);
+    const r = await openRoom({ link: room, role, mode: $('guest-mode').value, name: `demo-${role}` });
+    r.on('warning', (w) => { remote.log.push(`warning ${w.code} : ${w.message}`); renderRemote(); });
+    r.on('close', (info) => { remote.status = `relay closed (${info.code})`; renderRemote(); });
+    if (role === 'host') {
+      remote.joinLink = formatRoomLink(location.href, room);
+      r.on('link', track);
+      remote.status = 'hosting';
+    } else {
+      remote.status = 'joining';
+      renderRemote();
+      track(await r.connect());
+      remote.status = 'joined';
+    }
+  } catch (e) {
+    remote.status = `failed : ${e.code ?? ''} ${e.message}`;
+  }
+  renderRemote();
+}
+
+$('host-room').addEventListener('click', () => startRemote('host'));
+$('join-room').disabled = !hash.get('room');
+$('join-room').addEventListener('click', () => startRemote('guest'));
+state.startRemote = startRemote;

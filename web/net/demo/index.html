@@ -22,6 +22,9 @@
   .path { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--tag); font-family: ui-monospace, monospace; font-size: 12px; }
   dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0 0 8px; }
   dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; }
+  section.remote { margin-top: 16px; }
+  .joinlink { width: 100%; box-sizing: border-box; font: 12px ui-monospace, monospace; margin-bottom: 8px; }
+  select { font: inherit; padding: 5px 6px; border: 1px solid var(--line); background: transparent; color: inherit; border-radius: 6px; }
   pre { margin: 0; max-height: 260px; overflow: auto; font: 12px/1.4 ui-monospace, monospace; background: var(--tag); padding: 8px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>
 </head>
@@ -39,6 +42,18 @@
     <section id="auto"><h2>Auto (P2P first) <span class="status">not run</span></h2><dl></dl><pre></pre></section>
     <section id="ws"><h2>Forced WebSocket <span class="status">not run</span></h2><dl></dl><pre></pre></section>
   </div>
+  <section id="remote" class="remote">
+    <h2>Two devices <span class="status" id="remote-status">idle</span></h2>
+    <p class="lead">Host here, open the join link on another device (an HTTPS page and a <code>wss://</code> relay away from localhost). Both sides send a message every 500 ms.</p>
+    <div class="bar">
+      <button id="host-room">Host a room</button>
+      <label>Guest mode <select id="guest-mode"><option value="auto">auto (P2P first)</option><option value="ws">forced WebSocket</option></select></label>
+      <button id="join-room">Join the room of this link</button>
+    </div>
+    <input id="join-link" class="joinlink" readonly placeholder="join link appears here once you host">
+    <dl id="remote-info"></dl>
+    <pre id="remote-log"></pre>
+  </section>
 </main>
 <script type="module" src="demo.js"></script>
 </body>
