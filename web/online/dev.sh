@@ -59,7 +59,7 @@ done
 curl -sf -o /dev/null "http://127.0.0.1:$page/index.html" || { echo "dev.sh: the page server did not start" >&2; exit 1; }
 curl -sf -o /dev/null "http://127.0.0.1:$relayPort/healthz" || { echo "dev.sh: the relay did not start (log $build.relay.log)" >&2; exit 1; }
 
-url="http://localhost:$page/index.html?relay=ws://localhost:$relayPort&rk=$key"
+url="http://localhost:$page/index.html?sound&relay=ws://localhost:$relayPort&rk=$key"
 cat <<EOF
 
 Ready. In VS Code's Ports panel, forward $page and $relayPort (same local numbers).
