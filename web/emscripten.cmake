@@ -27,6 +27,10 @@ target_link_options(ctr_native PRIVATE
 # DWARF through every wasm-opt pass, doubling the wasm (13.3 → 6.3 MB) and the link time. The
 # objects are still compiled with -g ; no one steps through the C in DevTools.
 target_link_options(ctr_native PRIVATE $<$<CONFIG:Debug>:-g2>)
+# Release links at -O2, after CMAKE_C_FLAGS_RELEASE's -O3 (the objects are already -O2, set in
+# CMakeLists.txt) : the link is ~2 s shorter, the wasm 2 % bigger, and the fps suite measured
+# the same presents and main-thread time per frame as -O3 (LOG 18).
+target_link_options(ctr_native PRIVATE $<$<CONFIG:Release>:-O2>)
 if(CTR_WEB_ASYNCIFY)
     # wasm-opt inlines every function that has a single caller, whatever its size : the whole
     # game loop ended up in main() (605 B → 257 KB), which ASYNCIFY must instrument, and
