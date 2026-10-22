@@ -23,6 +23,10 @@ target_link_options(ctr_native PRIVATE
     # x86 tolerates it, wasm's call_indirect traps : emulate the casts.
     -sEMULATE_FUNCTION_POINTER_CASTS=1
 )
+# Debug links keep the function names (-g2) and drop DWARF : CMAKE_C_FLAGS_DEBUG's -g carries
+# DWARF through every wasm-opt pass, doubling the wasm (13.3 → 6.3 MB) and the link time. The
+# objects are still compiled with -g ; no one steps through the C in DevTools.
+target_link_options(ctr_native PRIVATE $<$<CONFIG:Debug>:-g2>)
 if(CTR_WEB_ASYNCIFY)
     target_link_options(ctr_native PRIVATE -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=1048576)
 endif()
