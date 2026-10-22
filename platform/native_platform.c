@@ -616,12 +616,30 @@ internal void Native_EnsureVBlankTarget(void)
 }
 
 #if defined(__EMSCRIPTEN__)
-// Resolves on the next display refresh (requestAnimationFrame), or after 100 ms
-// when the page is hidden and the browser has paused requestAnimationFrame.
+// Resolves on the next display refresh (requestAnimationFrame). A hidden or
+// covered window gets no refreshes and its timers are throttled (1 s in
+// Chrome and Firefox) : woken every 100 ms – 1 s, the VBlanks came in
+// bursts and the music, sequenced on VBlanks, lurched. The audio clock keeps
+// running there (SDL's ScriptProcessorNode renders a block every ~43 ms,
+// measured 23 a second) : a hidden page resolves on the next audio block, a
+// visible one on the second audio block without a refresh (a covered window
+// still "visible").
+// The 100 ms timer is the last resort : no audio yet, or a suspended context.
 EM_ASYNC_JS(void, NativeWeb_WaitAnimationFrame, (void), {
 	await new Promise((resolve) => {
-		const timer = setTimeout(resolve, 100);
-		requestAnimationFrame(() => { clearTimeout(timer); resolve(); });
+		const playback = Module['SDL3'] && Module['SDL3']['audio_playback'];
+		const node = playback && playback['scriptProcessorNode'];
+		let blocks = 0;
+		const done = () => {
+			clearTimeout(timer);
+			cancelAnimationFrame(frame);
+			if (node) node.removeEventListener('audioprocess', onBlock);
+			resolve();
+		};
+		const onBlock = () => { if (document.hidden || ++blocks >= 2) done(); };
+		const timer = setTimeout(done, 100);
+		const frame = requestAnimationFrame(done);
+		if (node) node.addEventListener('audioprocess', onBlock);
 	});
 });
 #endif
