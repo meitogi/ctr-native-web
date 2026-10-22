@@ -207,7 +207,7 @@ function el(tag, props = {}, ...children) {
 export function attach(Module) {
   const T = /^fr\b/i.test(navigator.language ?? '') ? STRINGS.fr : STRINGS.en;
   const query = new URLSearchParams(location.search);
-  const net = createOnlineNet({ name: load('name', 'Player') });
+  const net = createOnlineNet({ name: globalThis.ctrUI?.settings.get().name || load('name', 'Player') });
   Module.ctrOnlineNet = net;
   const asGuest = location.hash.includes('room=');
 

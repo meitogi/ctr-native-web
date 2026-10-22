@@ -14,7 +14,13 @@ export const ui = $state({
   // the replace-disc / forget-disc confirmation : { text, action, run }
   confirm: null,
   settingsOpen: false,
-  tab: 'player',
+  tab: 'players',
+  // the Multiplayer tab's panel (an adopted id : 'share', 'online')
+  multi: null,
+  // Share's guest page : { slot, host, list: [{ slot, name }] } from the host's messages
+  room: null,
+  // Share's guest page : the connection as web/share/guest-page.js reports it (guest.js)
+  guest: null,
   // panels other modules hand over (web/online/page.js, web/share/panel.js) : { id, title, el }
   adopted: [],
   // { id, title, detail, family, leaving }

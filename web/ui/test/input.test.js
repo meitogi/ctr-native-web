@@ -119,3 +119,27 @@ test('key labels : names in each language, the layout map first', () => {
   assert.equal(keyLabel('KeyQ', 'fr', new Map([['KeyQ', 'a']])), 'A')
   assert.equal(keyLabel('Digit5'), '5')
 })
+
+test('« Who plays » reaches the game as 4 ints : mode, vendor, product, rank (platform/native_input.c)', async () => {
+  const { createInputHook, deviceInts } = await import('../src/lib/input-hook.js')
+  const src = readFileSync(new URL('../../../platform/native_input.c', import.meta.url), 'utf8')
+  for (const [name, v] of [['AUTO', 0], ['KEYBOARD', 1], ['GAMEPAD', 2]]) assert.match(src, new RegExp(`#define NATIVE_INPUT_WEB_DEVICE_${name}\\s+${v}\\b`))
+  assert.deepEqual(deviceInts({ mode: 'auto', pad: null }), [0, 0, 0, 0])
+  assert.deepEqual(deviceInts({ mode: 'keyboard', pad: null }), [1, 0, 0, 0])
+  assert.deepEqual(deviceInts({ mode: 'gamepad', pad: null }), [2, 0, 0, 0])
+  assert.deepEqual(deviceInts({ mode: 'gamepad', pad: { id: 'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)', nth: 1 } }), [2, 0x045e, 0x0b13, 1])
+  assert.deepEqual(deviceInts({ mode: 'gamepad', pad: { id: '054c-0ce6-Wireless Controller', nth: 0 } }), [2, 0x054c, 0x0ce6, 0])
+  assert.deepEqual(deviceInts({ mode: 'gamepad', pad: { id: 'Pro Controller', nth: 0 } }), [2, 0, 0, 0], 'no ids (Safari) : the first pad')
+
+  let s = { keyboard: DEFAULT_KEYBOARD, gamepad: DEFAULT_GAMEPAD, keyboardRight: DEFAULT_KEYBOARD, keyboardLeft: DEFAULT_KEYBOARD, duo: false, skipIntro: true, device: { mode: 'keyboard', pad: null } }
+  const hook = createInputHook({ get: () => s }, { blocked: () => false })
+  const heap = new Int32Array(64)
+  hook.pull(heap, 0, 16, 32, 48, 52)
+  assert.deepEqual([...heap.subarray(52, 56)], [1, 0, 0, 0])
+  s = { ...s, device: { mode: 'gamepad', pad: { id: 'x (Vendor: 057e Product: 2009)', nth: 0 } } }
+  hook.pull(heap, 0, 16, 32, 48, 52)
+  assert.deepEqual([...heap.subarray(52, 56)], [2, 0x057e, 0x2009, 0])
+  const old = new Int32Array(64).fill(7)
+  hook.pull(old, 0, 16, 32, 48) // a game without the device pointer : nothing written there
+  assert.deepEqual([...old.subarray(52, 56)], [7, 7, 7, 7])
+})

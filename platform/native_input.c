@@ -327,9 +327,11 @@ internal void NativeInput_ApplyRemotePads(void)
 // not remapped here. No page hook = the defaults below, as on native.
 // Couch mode (web/ui, Settings › Players) adds a second keyboard key set (keyboard2, same layout)
 // and *duo : 1 while two players share the keyboard (s_keyboard2ControllerSlot, below).
-EM_JS(void, NativeInput_WebPullMappings, (s32 *keyboard, s32 *keyboard2, s32 *gamepad, s32 *duo), {
+// « Who plays » (Settings › Players) adds *device : 4 s32, mode (NATIVE_INPUT_WEB_DEVICE_*), then
+// the chosen gamepad's USB vendor, product and rank among the pads with that pair (0 = any).
+EM_JS(void, NativeInput_WebPullMappings, (s32 *keyboard, s32 *keyboard2, s32 *gamepad, s32 *duo, s32 *device), {
 	const input = Module['ctrInput'];
-	if (input) input.pull(HEAP32, keyboard >> 2, gamepad >> 2, keyboard2 >> 2, duo >> 2);
+	if (input) input.pull(HEAP32, keyboard >> 2, gamepad >> 2, keyboard2 >> 2, duo >> 2, device >> 2);
 });
 
 // include/platform/native_web_ui.h : 1 when the page saw a press for « Skip intro » (consumed).
@@ -387,6 +389,90 @@ internal void NativeInput_WebBlockLocalInput(void)
 global_variable struct NativeInputKeyboardMapping s_keyboardMapping2;
 global_variable s32 s_keyboard2ControllerSlot = -1;
 global_variable s32 s_webDuo;
+
+// « Who plays » on this page — the page's choice, so one machine opening the game and Share's guest
+// page can give the keyboard to one and a controller to the other (one controller seen by both
+// windows drove two players at once). Auto : as native, every pad and the keyboard. Keyboard : no
+// pad is opened, the keyboard is P1. Gamepad : only the chosen pad (else the first) is opened, as
+// P1, and the keyboard drives no player. A change closes every local pad and reopens per the mode.
+#define NATIVE_INPUT_WEB_DEVICE_AUTO     0
+#define NATIVE_INPUT_WEB_DEVICE_KEYBOARD 1
+#define NATIVE_INPUT_WEB_DEVICE_GAMEPAD  2
+global_variable s32 s_webDevice[4];
+global_variable s32 s_webDeviceApplied[4];
+
+internal void NativeInput_CloseController(s32 slot);
+internal void NativeInput_OpenKnownControllers(void);
+
+// The pad « Gamepad » mode plays with : the chosen vendor / product at that rank, else the first.
+internal SDL_JoystickID NativeInput_WebChosenPad(void)
+{
+	s32 count = 0;
+	s32 rank = 0;
+	SDL_JoystickID first = 0;
+	SDL_JoystickID chosen = 0;
+	SDL_JoystickID *gamepads = SDL_GetGamepads(&count);
+
+	for (s32 i = 0; i < count; i++)
+	{
+		if (first == 0)
+		{
+			first = gamepads[i];
+		}
+		if ((chosen == 0) && (s_webDevice[1] != 0) && (SDL_GetGamepadVendorForID(gamepads[i]) == s_webDevice[1]) &&
+		    (SDL_GetGamepadProductForID(gamepads[i]) == s_webDevice[2]) && (rank++ == s_webDevice[3]))
+		{
+			chosen = gamepads[i];
+		}
+	}
+	SDL_free(gamepads);
+	return chosen != 0 ? chosen : first;
+}
+
+internal s32 NativeInput_WebPadAllowed(SDL_JoystickID instanceId)
+{
+	if (s_webDevice[0] == NATIVE_INPUT_WEB_DEVICE_KEYBOARD)
+	{
+		return 0;
+	}
+	if (s_webDevice[0] == NATIVE_INPUT_WEB_DEVICE_GAMEPAD)
+	{
+		return instanceId == NativeInput_WebChosenPad();
+	}
+
+	return 1;
+}
+
+internal s32 NativeInput_WebKeyboardPlays(void)
+{
+	return s_webDevice[0] != NATIVE_INPUT_WEB_DEVICE_GAMEPAD;
+}
+
+internal void NativeInput_WebApplyDevice(void)
+{
+	if (memcmp(s_webDevice, s_webDeviceApplied, sizeof(s_webDevice)) == 0)
+	{
+		return;
+	}
+
+	memcpy(s_webDeviceApplied, s_webDevice, sizeof(s_webDevice));
+	for (s32 slot = 0; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+	{
+		NativeInput_CloseController(slot);
+		s_controllerToSlotMapping[slot] = -1;
+	}
+	s_keyboardControllerSlot = NATIVE_INPUT_DEFAULT_KEYBOARD_SLOT;
+	NativeInput_OpenKnownControllers();
+}
+
+// A pad came or went while « Gamepad » plays : the chosen one may have just arrived or left.
+internal void NativeInput_WebDeviceHotplug(void)
+{
+	if (s_webDevice[0] == NATIVE_INPUT_WEB_DEVICE_GAMEPAD)
+	{
+		s_webDeviceApplied[0] = -1;
+	}
+}
 
 EM_JS(int, NativeInput_WebPullPlayerCommand, (void), {
 	const input = Module['ctrInput'];
@@ -510,11 +596,11 @@ internal void NativeInput_WebReportPlayers(void)
 			out[4] = SDL_GetGamepadProduct(controller->controller);
 			out[5] = (s32)(size_t)(joystick != NULL ? SDL_GetJoystickName(joystick) : SDL_GetGamepadName(controller->controller));
 		}
-		if (slot == s_keyboardControllerSlot)
+		if ((slot == s_keyboardControllerSlot) && NativeInput_WebKeyboardPlays())
 		{
 			flags |= NATIVE_INPUT_WEB_SLOT_KEYBOARD;
 		}
-		if (slot == s_keyboard2ControllerSlot)
+		if ((slot == s_keyboard2ControllerSlot) && NativeInput_WebKeyboardPlays())
 		{
 			flags |= NATIVE_INPUT_WEB_SLOT_KEYBOARD2;
 		}
@@ -971,6 +1057,12 @@ internal void NativeInput_OpenController(SDL_JoystickID instanceId, s32 slot)
 	{
 		return;
 	}
+#if defined(__EMSCRIPTEN__)
+	if (!NativeInput_WebPadAllowed(instanceId))
+	{
+		return;
+	}
+#endif
 
 	controller->controller = SDL_OpenGamepad(instanceId);
 	if (controller->controller == NULL)
@@ -1082,10 +1174,12 @@ void Platform_InputUpdate(void)
 
 	SDL_PumpEvents();
 #if defined(__EMSCRIPTEN__)
-	NativeInput_WebPullMappings(&s_keyboardMapping.kc_square, &s_keyboardMapping2.kc_square, &s_controllerMapping.gc_square, &s_webDuo);
+	NativeInput_WebPullMappings(&s_keyboardMapping.kc_square, &s_keyboardMapping2.kc_square, &s_controllerMapping.gc_square, &s_webDuo, s_webDevice);
+	NativeInput_WebApplyDevice();
 	NativeInput_WebApplyPlayerCommands();
 	NativeInput_WebPlaceKeyboard2();
 	u16 keyboard2Buttons = (NativeInput_KeyboardSuppressed() || (s_keyboard2ControllerSlot < 0)) ? 0xffff : NativeInput_ReadKeyboardMapping(&s_keyboardMapping2);
+	const s32 keyboardPlays = NativeInput_WebKeyboardPlays();
 #endif
 	u16 keyboardButtons = NativeInput_KeyboardSuppressed() ? 0xffff : NativeInput_ReadKeyboard();
 
@@ -1093,9 +1187,14 @@ void Platform_InputUpdate(void)
 	{
 		NativeInput_ResetSnapshot(slot);
 		NativeInput_ApplyController(slot);
-		NativeInput_ApplyKeyboard(slot, keyboardButtons);
 #if defined(__EMSCRIPTEN__)
-		NativeInput_ApplyKeyboardTo(slot, s_keyboard2ControllerSlot, keyboard2Buttons);
+		if (keyboardPlays)
+		{
+			NativeInput_ApplyKeyboard(slot, keyboardButtons);
+			NativeInput_ApplyKeyboardTo(slot, s_keyboard2ControllerSlot, keyboard2Buttons);
+		}
+#else
+		NativeInput_ApplyKeyboard(slot, keyboardButtons);
 #endif
 	}
 #if defined(__EMSCRIPTEN__)
@@ -1140,6 +1239,7 @@ void Platform_InputControllerAdded(int deviceIndex)
 			return;
 		}
 	}
+	NativeInput_WebDeviceHotplug();
 #endif
 
 	s32 slot = NativeInput_FindSlotForDeviceIndex(deviceIndex);
@@ -1151,6 +1251,9 @@ void Platform_InputControllerAdded(int deviceIndex)
 
 void Platform_InputControllerRemoved(int instanceId)
 {
+#if defined(__EMSCRIPTEN__)
+	NativeInput_WebDeviceHotplug();
+#endif
 	for (s32 slot = 0; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
 	{
 		if (s_controllers[slot].instanceId == (SDL_JoystickID)instanceId)

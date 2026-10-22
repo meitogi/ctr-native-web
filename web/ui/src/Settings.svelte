@@ -1,39 +1,43 @@
 <script>
-  // The Settings sidebar (design B) : tabs on top — Profile, Players, Controls, Sound, Disc, then the panels
-  // other modules hand over (Online : web/online/page.js, Share : web/share/panel.js), About.
-  // The game keeps running beside it, re-centred in what is left ; while it is open the game
-  // gets no local input (Module.ctrInput.blocked).
+  // The Settings sidebar (design B) : four tabs (user, 2026-10-22 : eight were too many) —
+  //   Players      the player name, « Who plays » on this page, P1–P4 (couch mode)
+  //   Controls     keyboard and gamepad remapping
+  //   Multiplayer  the panels other modules hand over, one segment each (Share : web/share/panel.js,
+  //                Online : web/online/page.js) — shown when there is one
+  //   System       volume, skip intro, the game data, about
+  // Share's guest page (profile 'guest') : Players (name, who plays, who is in the game), Controls,
+  // System (volume, about). The game keeps running beside it, re-centred in what is left ; while it
+  // is open the game gets no local input (Module.ctrInput.blocked).
   import Controls from './Controls.svelte'
   import Players from './Players.svelte'
+  import RoomPlayers from './RoomPlayers.svelte'
+  import WhoPlays from './WhoPlays.svelte'
   import { NAME_LEN } from './lib/settings.js'
   import { T } from './lib/strings.js'
   import { ui } from './state.svelte.js'
   import { live, settings } from './store.js'
 
-  let { forgetStoredDisc, layout = null, onclose } = $props()
+  let { forgetStoredDisc = () => {}, layout = null, onclose, profile = 'host' } = $props()
+  const guest = $derived(profile === 'guest')
 
   const s = $derived(live.current)
 
   const ICONS = {
     player: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    multi: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+    system: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
     players: '<circle cx="8.5" cy="8" r="3.2"/><circle cx="16.5" cy="9" r="2.6"/><path d="M2.5 20a6 6 0 0 1 12 0M14 14.6a5 5 0 0 1 7.5 4.4"/>',
     controls: '<path d="M7 6h10c3 0 4.5 2 5 5l.5 4c.3 2.5-2 4-4 2l-2.5-2.5h-8L5.5 17c-2 2-4.3.5-4-2L2 11c.5-3 2-5 5-5z"/>',
-    sound: '<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
-    disc: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/>',
-    online: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
-    share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
-    about: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
   }
   const tabs = $derived([
-    { id: 'player', title: T.tabs.player },
     { id: 'players', title: T.tabs.players },
     { id: 'controls', title: T.tabs.controls },
-    { id: 'sound', title: T.tabs.sound },
-    { id: 'disc', title: T.tabs.disc },
-    ...ui.adopted.map((a) => ({ id: a.id, title: T.tabs[a.id] ?? a.title, el: a.el })),
-    { id: 'about', title: T.tabs.about },
+    ...(!guest && ui.adopted.length ? [{ id: 'multi', title: T.tabs.multi }] : []),
+    { id: 'system', title: T.tabs.system },
   ])
   const current = $derived(tabs.find((t) => t.id === ui.tab) ?? tabs[0])
+  const panels = $derived(ui.adopted.map((a) => ({ id: a.id, title: T.tabs[a.id] ?? a.title, el: a.el })))
+  const panel = $derived(panels.find((a) => a.id === ui.multi) ?? panels[0])
 
   // an adopted panel is moved (not copied) into its tab while the tab shows
   function host(node, el) {
@@ -54,14 +58,14 @@
   <div class="tabs" role="tablist">
     {#each tabs as t}
       <button type="button" role="tab" data-tab={t.id} aria-selected={current.id === t.id} class:on={current.id === t.id} onclick={() => { ui.tab = t.id; ui.listening = null }}>
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">{@html ICONS[t.id] ?? ICONS.about}</svg>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">{@html ICONS[t.id]}</svg>
         <span>{t.title}</span>
       </button>
     {/each}
   </div>
 
   <div class="body" role="tabpanel">
-    {#if current.id === 'player'}
+    {#if current.id === 'players'}
       <div class="label">{T.playerName}</div>
       <label class="field">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">{@html ICONS.player}</svg>
@@ -70,16 +74,22 @@
         <span class="count">{s.name.length} / {NAME_LEN}</span>
       </label>
       <p class="help">{T.playerNameHelp(NAME_LEN)}</p>
-      <div class="label">{T.start}</div>
-      <label class="setrow">
-        <span>{T.skipIntro}<small>{T.skipIntroHelp}</small></span>
-        <input id="ctr-skip-intro" type="checkbox" role="switch" class="switch" checked={s.skipIntro} onchange={(e) => settings.patch({ skipIntro: e.currentTarget.checked })} />
-      </label>
-    {:else if current.id === 'players'}
-      <Players />
+      <WhoPlays />
+      <div class="gap"></div>
+      {#if guest}<RoomPlayers />{:else}<Players />{/if}
     {:else if current.id === 'controls'}
       <Controls {layout} />
-    {:else if current.id === 'sound'}
+    {:else if current.id === 'multi' && panel}
+      {#if panels.length > 1}
+        <div class="seg" role="tablist">
+          {#each panels as a}
+            <button type="button" role="tab" data-multi={a.id} aria-selected={panel.id === a.id} class:on={panel.id === a.id} onclick={() => { ui.multi = a.id }}>{a.title}</button>
+          {/each}
+        </div>
+      {/if}
+      <!-- keyed : from one panel to another, the old one is parked and the new one moved in -->
+      {#key panel.id}<div class="adopted" data-panel={panel.id} use:host={panel.el}></div>{/key}
+    {:else if current.id === 'system'}
       <div class="label">{T.volume}</div>
       <div class="setrow">
         <button type="button" class="mute" aria-pressed={s.muted} title={s.muted ? T.unmute : T.mute} onclick={() => settings.patch({ muted: !s.muted })}>
@@ -92,23 +102,26 @@
           oninput={(e) => settings.patch({ volume: e.currentTarget.value / 100, muted: false })} />
         <span class="count">{s.muted ? 0 : Math.round(s.volume * 100)}</span>
       </div>
-    {:else if current.id === 'disc'}
-      <div class="label">{T.discStored}</div>
-      <div class="setrow">
-        <span>{ui.disc ? T.found(ui.disc.serial.replace('_', '-').replace('.', '')) : T.discNone}{#if ui.disc?.size}<small>{T.discSize(mb(ui.disc.size))}</small>{/if}</span>
-      </div>
-      <div class="actions">
-        <button type="button" class="btn" onclick={pickAnother}>{T.discChange}</button>
-        <button type="button" id="forget-disc" class="btn danger" disabled={!ui.disc} onclick={forgetStoredDisc}>{T.discForget}</button>
-      </div>
-    {:else if current.id === 'about'}
+      {#if !guest}
+        <div class="label">{T.start}</div>
+        <label class="setrow">
+          <span>{T.skipIntro}<small>{T.skipIntroHelp}</small></span>
+          <input id="ctr-skip-intro" type="checkbox" role="switch" class="switch" checked={s.skipIntro} onchange={(e) => settings.patch({ skipIntro: e.currentTarget.checked })} />
+        </label>
+        <div class="label">{T.gameData}</div>
+        <div class="setrow">
+          <span>{ui.disc ? T.found(ui.disc.serial.replace('_', '-').replace('.', '')) : T.discNone}{#if ui.disc?.size}<small>{T.discSize(mb(ui.disc.size))}</small>{/if}</span>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn" onclick={pickAnother}>{T.discChange}</button>
+          <button type="button" id="forget-disc" class="btn danger" disabled={!ui.disc} onclick={forgetStoredDisc}>{T.discForget}</button>
+        </div>
+      {/if}
+      <div class="label">{T.about}</div>
       <p class="about">{T.aboutText}</p>
       <div class="label">{T.licences}</div>
       <ul class="lic">{#each T.licenceLines as l}<li>{l}</li>{/each}</ul>
       <p class="help">{T.keysHint}</p>
-    {:else if current.el}
-      <!-- keyed : from one adopted tab to another, the old panel is parked and the new one moved in -->
-      {#key current.id}<div class="adopted" use:host={current.el}></div>{/key}
     {/if}
   </div>
 </aside>
@@ -144,6 +157,10 @@
   .switch:checked::after { left: 21px; }
   .mute { width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, 0.08); display: grid; place-items: center; cursor: pointer; flex: none; }
   input[type=range] { flex: 1; accent-color: #fff; }
+  .gap { height: 14px; }
+  .seg { display: flex; padding: 4px; border-radius: 12px; gap: 4px; background: rgba(255, 255, 255, 0.06); margin-bottom: 8px; }
+  .seg button { flex: 1; padding: 8px 10px; border: 0; border-radius: 9px; background: none; font-weight: 600; font-size: 13px; cursor: pointer; color: var(--ink-dim); }
+  .seg button.on { background: #fff; color: #111; }
   .actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
   .btn { padding: 10px 16px; border: 0; border-radius: 12px; background: rgba(255, 255, 255, 0.08); font-weight: 600; font-size: 14px; cursor: pointer; }
   .btn:hover { background: rgba(255, 255, 255, 0.14); }

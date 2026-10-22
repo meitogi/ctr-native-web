@@ -2,23 +2,21 @@
 // code : web/net/ for the link, guest.js for the protocol. Opened from the host's link
 // (share/guest.html#room=…&key=…&relay=…&rk=…).
 //
-// Input : the first connected gamepad (Gamepad API, standard mapping) and the keyboard, with the
-// host's key mapping (arrows, C Cross, V Circle, X Square, Z Triangle, Enter Start, Space
-// Select, shifts L1 / R1, ctrls L2 / R2) ; F toggles « my view » (our part of the split screen).
+// The page's interface is the site's (web/ui src/guest.js, loaded first : globalThis.ctrUI) — the
+// speaker and its volume drive the <video>, Settings holds the player name (sent to the host),
+// « Who plays » and the Controls mapping (read here for every pad sent), the screens show the
+// connection. Without it (ui/ not built) the page still plays, with the defaults and one line of
+// text. F toggles « my view » (our part of the split screen).
 // window.__ctrShareGuest.state() / .stats() / rec*() are for the player suites.
 import { parseRoomLink } from '../net/link.js';
 import { openRoom } from '../net/room.js';
 import { createShareGuest } from './guest.js';
 import { minimisePlayout } from './media.js';
-import { KEYS, mergePads, padFromGamepad, padFromKeys, viewOf } from './protocol.js';
+import { pickPad, viewOf } from './protocol.js';
 
 const $ = (id) => document.getElementById(id);
 const video = $('video');
-const overlay = $('overlay');
-const overlayText = $('overlay-text');
-const statusEl = $('status');
-const padEl = $('pad');
-const cropButton = $('crop');
+const ui = globalThis.ctrUI ?? null;
 const wall = () => performance.timeOrigin + performance.now();
 
 const stream = new MediaStream();
@@ -27,62 +25,76 @@ let guest = null;
 let playout = null;
 let crop = false;
 let sound = false;
+let nolink = false;
 let lastButtons = 0xffff;
 let lastChange = null; // {buttons, at} : when we first sent a new button word
 const delays = []; // expectedDisplayTime − captureTime of the last frames (ms)
+const settings = () => ui?.settings.get() ?? null;
 
-function show(text, isError = false) {
-  overlayText.textContent = text;
-  overlayText.className = isError ? 'error' : '';
-  overlay.classList.remove('hidden');
-}
-
+// ---- the interface : our state in, its buttons out ----
+let fallback = null;
 function render() {
   const g = guest;
-  if (!g) return;
-  if (g.state === 'connected') statusEl.textContent = `P${g.slot + 1 || '?'} · ${g.path} · ${video.videoWidth}×${video.videoHeight}${sound ? '' : ' · muted'}`;
-  else if (g.state === 'connecting') statusEl.textContent = 'Connecting…';
-  else statusEl.textContent = g.message || g.state;
-  if (g.state === 'refused' || g.state === 'closed') show(g.message || 'Disconnected.', true);
-  else if (g.state === 'connected' && !sound && stream.getTracks().length) show('Click to play with sound.');
-  const v = crop && g.slot ? viewOf(g.slot, g.players) : null;
+  const v = crop && g?.slot ? viewOf(g.slot, g.players) : null;
   video.style.objectViewBox = v && v.w < 1 ? `inset(${v.y * 100}% ${(1 - v.x - v.w) * 100}% ${(1 - v.y - v.h) * 100}% ${v.x * 100}%)` : '';
-  cropButton.textContent = `My view : ${crop ? 'on' : 'off'}`;
+  const state = nolink ? 'nolink' : g?.state ?? 'connecting';
+  const fields = { state, code: g?.code ?? null, message: g?.message ?? '', slot: g?.slot ?? 0, players: g?.players ?? 0, list: g?.list ?? [],
+    host: g?.host ?? null, path: g?.path ?? null, stream: stream.getTracks().length > 0, sound, crop };
+  if (ui) return ui.guest.set(fields);
+  // no interface : a line of text, a click anywhere for sound
+  fallback ??= document.body.appendChild(Object.assign(document.createElement('p'), { id: 'fallback' }));
+  fallback.textContent = state === 'connected'
+    ? `P${fields.slot + 1} · ${fields.path} · ${video.videoWidth}×${video.videoHeight}${sound ? '' : ' · click for sound'}`
+    : fields.message || state;
 }
-
-overlay.addEventListener('click', () => {
+function unlock() {
   if (guest?.state !== 'connected') return;
   sound = true;
-  video.muted = false;
+  applySound();
   video.play().catch(() => {});
-  overlay.classList.add('hidden');
   render();
+}
+function toggleCrop() { crop = !crop; render(); }
+ui?.guest.bind({ unlock, crop: toggleCrop });
+if (!ui) document.addEventListener('click', unlock);
+
+// the speaker / volume of the site (settings) : the <video> plays muted until a click
+function applySound() {
+  const s = settings();
+  video.muted = !sound || !!s?.muted;
+  video.volume = s ? Math.min(1, Math.max(0, s.volume)) : 1;
+}
+ui?.settings.subscribe((s) => {
+  applySound();
+  guest?.setName(s.name);
 });
-cropButton.addEventListener('click', () => { crop = !crop; render(); });
 
 // ---- input ----
-const gamepad = () => {
-  for (const gp of navigator.getGamepads?.() ?? []) if (gp?.connected) return gp;
-  return null;
-};
 function sendPad() {
-  const gp = gamepad();
-  const pad = mergePads(padFromKeys(held), gp ? padFromGamepad(gp) : null);
-  padEl.textContent = gp ? `pad : ${gp.id.slice(0, 24)}` : 'keyboard';
-  if (pad.buttons !== lastButtons) {
-    lastButtons = pad.buttons;
-    lastChange = { buttons: pad.buttons, at: wall() };
+  const s = settings();
+  const pad = ui?.guest.blocked() ? null : pickPad(s?.device, held, navigator.getGamepads?.() ?? [], ui?.guestInput());
+  const word = pad ? pad.buttons : 0xffff;
+  if (word !== lastButtons) {
+    lastButtons = word;
+    lastChange = { buttons: word, at: wall() };
   }
-  guest?.sendPad(pad);
+  if (pad) guest?.sendPad(pad);
+  else guest?.sendPad({ id: 0x41, buttons: 0xffff, analog: [0x80, 0x80, 0x80, 0x80] });
 }
+const typing = () => {
+  const a = document.activeElement;
+  return !!a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT' || a.tagName === 'SELECT' || !!a.closest?.('#ctr-settings'));
+};
 for (const type of ['keydown', 'keyup']) {
   window.addEventListener(type, (e) => {
-    if (type === 'keydown' && e.code === 'KeyF' && !e.repeat) { crop = !crop; render(); return; }
-    if (!KEYS[e.code]) return;
-    e.preventDefault();
+    if (type === 'keydown' && typing()) return;
+    if (type === 'keydown' && e.code === 'KeyF' && !e.repeat) { toggleCrop(); return; }
+    const keys = ui?.guestInput().keys;
+    const mine = keys ? keys[e.code] : true;
     held[e.code] = type === 'keydown';
+    if (mine && e.code !== 'Escape') e.preventDefault();
     sendPad();
-  }, { capture: true });
+  });
 }
 window.addEventListener('blur', () => { for (const k in held) held[k] = false; sendPad(); });
 // ~60 pads a second while the tab is in front (latest wins on the host) ; a hidden tab's rAF
@@ -106,17 +118,22 @@ async function main() {
   try {
     link = parseRoomLink(location.hash);
   } catch {
-    show('This page needs the Share link from the host (…/share/guest.html#room=…).', true);
+    nolink = true;
+    render();
     return;
   }
   // ?mode=ws : forces the relay's WebSocket path — a test knob, to see the Online-mode refusal
   const mode = new URLSearchParams(location.search).get('mode') === 'ws' ? 'ws' : 'auto';
+  // 'guest' : the relay's signaling name, in clear — never the player's name (that one goes end
+  // to end in Share's HELLO)
   const room = await openRoom({ link, role: 'guest', mode, name: 'guest' }).catch((e) => {
-    show(`${e.code ?? 'error'} : ${e.message}`, true);
+    guest = { state: 'closed', code: e.code ?? 'error', message: `${e.code ?? 'error'} : ${e.message}` };
+    render();
     return null;
   });
   if (!room) return;
   guest = createShareGuest(room, {
+    name: settings()?.name ?? '',
     onTrack(e) {
       stream.addTrack(e.track);
       playout = minimisePlayout(e.receiver) ?? playout;
@@ -128,6 +145,8 @@ async function main() {
   await guest.connect();
   render();
 }
+applySound();
+render();
 video.addEventListener('resize', render);
 setInterval(render, 1000);
 main();
@@ -144,6 +163,7 @@ window.__ctrShareGuest = {
     return {
       state: guest?.state ?? 'idle', slot: guest?.slot ?? 0, players: guest?.players ?? 0, path: guest?.path ?? null,
       code: guest?.code ?? null, message: guest?.message ?? '', tracks: stream.getTracks().map((t) => t.kind),
+      name: guest?.name ?? null, host: guest?.host ?? null, list: guest?.list ?? [], volume: video.volume, ui: !!ui,
       video: [video.videoWidth, video.videoHeight], playing: !video.paused, muted: video.muted, playout, crop,
       lastChange, displayDelayMs: median(delays), delaySamples: delays.length,
     };

@@ -5,6 +5,7 @@
 //   ctrUI.adopt(id, title, el)  put another module's panel in a Settings tab (web/online/page.js,
 //                             web/share/panel.js) ; returns { open(), close() }
 //   ctrUI.toast(title, detail)
+//   ctrUI.text                 the strings (lib/strings.js, EN / FR) — Share's join / leave toasts
 //   ctrUI.players              couch mode (lib/players.js) : slots as the game reports them, swap(a, b)
 // and Module.ctrInput for the game (lib/input-hook.js, pulled by platform/native_input.c).
 import { mount } from 'svelte'
@@ -155,12 +156,12 @@ function adopt(id, title, el) {
   parking.appendChild(el)
   ui.adopted = [...ui.adopted.filter((a) => a.id !== id), { id, title, el }]
   return {
-    open: () => { ui.tab = id; ui.settingsOpen = true },
+    open: () => { ui.tab = 'multi'; ui.multi = id; ui.settingsOpen = true },
     close: () => { ui.settingsOpen = false },
   }
 }
 
-globalThis.ctrUI = { settings, adopt, toast, handleFile, players }
+globalThis.ctrUI = { settings, adopt, toast, handleFile, players, text: T }
 
 // Test-only hook (session 3) : the agent browser runs on another machine than the files, so CDP's
 // DOM.setFileInputFiles cannot point at them ; suites fetch a same-origin fixture into the same

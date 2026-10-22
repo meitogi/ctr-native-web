@@ -1,11 +1,12 @@
 <script>
   // Over the game, top right : the speaker (click = mute / unmute, hover or long press = the
   // volume slider) and the Settings gear. Fades out while the mouse rests, back on any move.
+  // `extra` : buttons a page adds before them (Share's guest page : « My view »).
   import { T } from './lib/strings.js'
   import { ui } from './state.svelte.js'
   import { live, settings } from './store.js'
 
-  let { onsettings } = $props()
+  let { onsettings, extra = null } = $props()
   const s = $derived(live.current)
 
   let awake = $state(true)
@@ -33,6 +34,7 @@
 </script>
 
 <div class="hud" class:awake={awake || ui.volumeOpen || ui.settingsOpen}>
+  {@render extra?.()}
   <div class="speaker" role="group" onpointerenter={openVolume} onpointerleave={closeVolume}>
     <button type="button" id="ctr-sound" class="hbtn" aria-pressed={level === 0} title={level === 0 ? T.unmute : T.mute}
       onclick={toggle} onfocus={openVolume} onblur={closeVolume}>

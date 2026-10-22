@@ -1,30 +1,23 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-page="share-guest">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CTR Native Web — Share guest</title>
+<!-- the site's interface (web/ui : src/guest.js, built into ui/ beside share/) -->
+<link rel="stylesheet" href="../ui/ui.css">
 <style>
-  html, body { margin: 0; height: 100%; background: #000; color: #ccc; font: 12px/1.4 monospace; overflow: hidden; }
-  #video { position: fixed; inset: 0 0 24px 0; width: 100%; height: calc(100% - 24px); object-fit: contain; background: #000; }
-  #bar { position: fixed; left: 0; right: 0; bottom: 0; height: 24px; display: flex; gap: 12px; align-items: center;
-    padding: 0 8px; background: #111; border-top: 1px solid #333; white-space: nowrap; overflow: hidden; }
-  #bar button { font: inherit; background: #222; color: #ccc; border: 1px solid #444; cursor: pointer; }
-  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
-    background: rgba(0, 0, 0, .75); z-index: 10; cursor: pointer; }
-  #overlay.hidden { display: none; }
-  #overlay p { max-width: 520px; padding: 16px; }
-  #overlay .error { color: #f66; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  /* the host's game, beside Settings when it is open (--sidebar, ui.css) */
+  #video { position: fixed; top: 0; left: 0; width: calc(100% - var(--sidebar, 0px)); height: 100%; object-fit: contain; background: #000; transition: width 220ms ease; }
+  /* without the interface (ui/ not built) : one line of text */
+  #fallback { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; padding: 6px 10px; font: 12px/1.4 monospace; color: #ccc; background: #111; }
 </style>
 </head>
 <body>
 <video id="video" autoplay playsinline muted></video>
-<div id="overlay"><p id="overlay-text">Connecting to the host…</p></div>
-<div id="bar">
-  <span id="status">Connecting…</span>
-  <span id="pad">keyboard</span>
-  <button id="crop" type="button" title="F : show only your part of the split screen">My view : off</button>
-</div>
+<div id="ctr-ui"></div>
+<script type="module" src="../ui/guest.js"></script>
 <script type="module" src="guest-page.js"></script>
 </body>
 </html>

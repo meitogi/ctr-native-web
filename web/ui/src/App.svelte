@@ -15,9 +15,10 @@
   import Hud from './Hud.svelte'
   import Settings from './Settings.svelte'
   import Toasts from './Toasts.svelte'
-  import { refusal, scancodeOf } from './lib/keys.js'
-  import { bind, BUTTONS, STANDARD_TO_SDL } from './lib/mappings.js'
-  import { parsePadId } from './lib/pads.js'
+  import { scancodeOf } from './lib/keys.js'
+  import { bindKey, bindPadButton } from './lib/binding.js'
+  import { BUTTONS, STANDARD_TO_SDL } from './lib/mappings.js'
+  import { watchPadConnections } from './lib/pad-events.js'
   import { keyboardSets } from './lib/settings.js'
   import { T } from './lib/strings.js'
   import { watchPads } from './lib/input-hook.js'
@@ -103,20 +104,6 @@
   }
 
   // ---- keyboard ----
-  function bindKey(e) {
-    const why = refusal(e.code)
-    if (why === 'cancel') { ui.listening = null; return }
-    if (why) {
-      const name = /^F\d+$/.test(e.code) ? e.code : (e.key && e.key.length === 1 ? e.key.toUpperCase() : e.code)
-      ui.notice = why === 'debug' ? T.refusedDebug(name) : T.refusedKey(name)
-      return
-    }
-    ui.notice = ''
-    const s = settings.get()
-    const field = ui.listening.device === 'keyboard2' ? 'keyboardRight' : s.duo ? 'keyboardLeft' : 'keyboard'
-    settings.patch({ [field]: bind(s[field], ui.listening.button, scancodeOf(e.code)) })
-    ui.listening = null
-  }
   const focusables = () => [...document.querySelectorAll('#ctr-settings button:not([disabled]), #ctr-settings input, #ctr-settings textarea, #ctr-settings [tabindex="0"]')].filter((n) => n.offsetParent !== null)
   function moveFocus(step) {
     const list = focusables()
@@ -169,7 +156,7 @@
     if (ui.listening && ui.listening.device !== 'gamepad') {
       e.preventDefault()
       e.stopImmediatePropagation()
-      if (e.type === 'keydown' && !e.repeat) bindKey(e)
+      if (e.type === 'keydown' && !e.repeat) bindKey(e, ui, settings, T)
       return
     }
     if (e.type !== 'keydown') return // keyup always reaches SDL : no key stays down in the game
@@ -193,21 +180,6 @@
   }
 
   // ---- gamepads ----
-  function padInfo(gp) {
-    const p = parsePadId(gp.id)
-    return { index: gp.index, id: gp.id, family: p.family, name: p.name }
-  }
-  function onPadConnected(e) {
-    const info = padInfo(e.gamepad)
-    ui.pads = [...ui.pads.filter((p) => p.index !== info.index), info].sort((a, b) => a.index - b.index)
-    const n = ui.pads.findIndex((p) => p.index === info.index) + 1
-    ctrToast(T.padConnected, `${info.name} · ${T.families[info.family]} · ${T.player(n)}`, info.family)
-  }
-  function onPadDisconnected(e) {
-    const gone = ui.pads.find((p) => p.index === e.gamepad.index) ?? padInfo(e.gamepad)
-    ui.pads = ui.pads.filter((p) => p.index !== e.gamepad.index)
-    ctrToast(T.padDisconnected, gone.name, gone.family)
-  }
   const ctrToast = (...a) => globalThis.ctrUI?.toast(...a)
 
   function onPadDown(index, button) {
@@ -219,9 +191,7 @@
     input.press() // « Skip intro »
     if (button === 16 && running) { setOpen(!ui.settingsOpen); return }
     if (ui.listening?.device === 'gamepad') {
-      if (button === 16) return
-      settings.patch({ gamepad: bind(settings.get().gamepad, ui.listening.button, STANDARD_TO_SDL[button] ?? -1) })
-      ui.listening = null
+      bindPadButton(button, ui, settings)
       return
     }
     if (ui.confirm) {
@@ -246,8 +216,7 @@
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('dragleave', onDragLeave)
     window.addEventListener('drop', onDrop)
-    window.addEventListener('gamepadconnected', onPadConnected)
-    window.addEventListener('gamepaddisconnected', onPadDisconnected)
+    const stopPads = watchPadConnections(ui, ctrToast, T)
     const canvas = document.getElementById('canvas')
     // a click on the game folds Settings away and gives the game the keys
     const focusGame = () => { if (ui.settingsOpen) setOpen(false); else canvas?.focus() }
@@ -260,8 +229,7 @@
       window.removeEventListener('dragover', onDragOver)
       window.removeEventListener('dragleave', onDragLeave)
       window.removeEventListener('drop', onDrop)
-      window.removeEventListener('gamepadconnected', onPadConnected)
-      window.removeEventListener('gamepaddisconnected', onPadDisconnected)
+      stopPads()
       canvas?.removeEventListener('pointerdown', focusGame)
       stop()
     }

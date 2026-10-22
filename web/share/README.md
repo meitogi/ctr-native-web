@@ -16,11 +16,21 @@ relay URL and key (remembered ; `?relay=&rk=` in the page URL prefill them), **S
 guest link**, the video bitrate per guest (0.5–6 Mbit/s, default 2.5). The guest link is
 `…/share/guest.html#room=…&key=…&relay=…&rk=…` : everything after `#`, never sent to a server.
 
-On the guest page : click once for sound. Keys as on the host — arrows, C Cross, V Circle, X
-Square, Z Triangle, Enter Start, Space Select, shifts L1 / R1, ctrls L2 / R2 — or the first
-gamepad (standard mapping). **F** shows only our part of the split screen (2 players : top /
-bottom halves, 3–4 : quadrants). `?mode=ws` forces the relay path : a test knob, to see the
-refusal.
+On the guest page — the site's interface (`web/ui`, `src/guest.js`, built into `ui/` beside
+`share/`) : click once for sound, then the speaker (mute, volume) and the gear. Settings ›
+**Players** : the player name (sent to the host, shown to everyone), **Who plays** on this page
+(Auto : keyboard and gamepad · Keyboard · Gamepad, and which one) and who is in the game ;
+**Controls** : the keyboard and gamepad mapping, the native defaults (arrows, C Cross, V Circle,
+X Square, Z Triangle, Enter Start, Space Select, shifts L1 / R1, ctrls L2 / R2) until changed ;
+**System** : volume, about. **F** or « My view » shows only our part of the split screen
+(2 players : top / bottom halves, 3–4 : quadrants). `?mode=ws` forces the relay path : a test
+knob, to see the refusal.
+
+**One machine, two windows** (the game and a guest, e.g. to try Share alone) : a controller is
+seen by both windows and would drive two players. Set Who plays to Keyboard on one page and to
+Gamepad on the other — each page keeps its own choice (`ctr-ui.device`, `ctr-share.guest-device`).
+
+The host sees who joins and leaves (a toast, names in Settings › Multiplayer › Share).
 
 ## How it works
 
@@ -43,8 +53,10 @@ refusal.
   so nothing is gathered again and the identity proof `web/net/` checked over both DTLS
   fingerprints covers the media : SRTP keys come from that DTLS session.
 - **Messages** (`protocol.js` header) : `PAD` on the unreliable `game` channel, ~60 a second,
-  latest wins by a u16 sequence number ; `OFFER` / `ANSWER` / `WELCOME {slot}` / `REFUSE {code,
-  message}` / `PLAYERS {players}` on `ctl`. The host sends nothing before the guest's first pad :
+  latest wins by a u16 sequence number ; `OFFER` / `ANSWER` / `WELCOME {slot, host}` / `REFUSE
+  {code, message}` / `PLAYERS {players, list}` / `HELLO {name}` (guest → host) on `ctl`. Player
+  names travel only there, end to end ; the relay's `hello` keeps the fixed signaling names
+  `host` / `guest`. A guest page without names still plays and shows as `P<n>`. The host sends nothing before the guest's first pad :
   a link's handlers exist only once `connect()` resolved.
 - **Pads into the game** : `platform/native_input.c` pulls the guests' pads once per input
   update (`Module.ctrShare.readPads`, an `EM_JS`), after the SDL / keyboard pass, into slots 1–3

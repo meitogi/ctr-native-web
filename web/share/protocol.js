@@ -7,13 +7,19 @@
 //            [6..9] analog : right X, right Y, left X, left Y (0x80 = centre)
 //   OFFER / ANSWER   ctl (reliable) : the media renegotiation of the link's own
 //            RTCPeerConnection, host offers — [0] tag, then UTF-8 JSON {sdp}
-//   WELCOME  ctl, host → guest : {slot} (1–3 : the game's P2–P4)
+//   WELCOME  ctl, host → guest : {slot, host} — slot 1–3 (the game's P2–P4), the host's player
+//            name (absent from a host before session 20)
 //   REFUSE   ctl, host → guest : {code, message} — 'online-mode' (no direct path : Share
 //            never streams through the relay), 'full' (three guests already)
-//   PLAYERS  ctl, host → guests : {players} — pads plugged in (host + guests), on every change :
-//            the split-screen layout a guest crops its own view from
+//   PLAYERS  ctl, host → guests : {players, list} — pads plugged in (host + guests) : the
+//            split-screen layout a guest crops its own view from ; `list` [{slot, name}] who is
+//            who (slot 0 = the host). Sent on every change of either.
+//   HELLO    ctl, guest → host : {name} — the guest's player name, once connected and again on
+//            every rename. A guest that never sends one (a page before session 20) is « P<n> ».
+//            Names travel only here, end to end over the link's DTLS : the relay's own `hello`
+//            (web/net/) carries the fixed signaling names 'host' / 'guest', in clear.
 
-export const TAG = { pad: 1, offer: 0x10, answer: 0x11, welcome: 0x12, refuse: 0x13, players: 0x14 };
+export const TAG = { pad: 1, offer: 0x10, answer: 0x11, welcome: 0x12, refuse: 0x13, players: 0x14, hello: 0x15 };
 export const PAD_BYTES = 10;
 
 /** PSX pad ids : digital pad, analog (DualShock) pad. */
@@ -74,7 +80,7 @@ export function encodeControl(tag, body) {
 /** {tag, body} of a control message, or null when `bytes` is not one. */
 export function decodeControl(bytes) {
   const tag = bytes[0];
-  if (tag < TAG.offer || tag > TAG.players) return null;
+  if (tag < TAG.offer || tag > TAG.hello) return null;
   try {
     return { tag, body: JSON.parse(fromUtf8.decode(bytes.subarray(1))) };
   } catch {
@@ -93,6 +99,15 @@ export function viewOf(slot, players) {
   return { x: 0, y: 0, w: 1, h: 1 };
 }
 
+/** A player name as the game takes it : printable ASCII, at most 9 (web/ui settings.js cleanName). */
+export const NAME_LEN = 9;
+export function cleanName(name) {
+  return String(name ?? '').replace(/[^\x20-\x7e]/g, '').slice(0, NAME_LEN);
+}
+
+/** A player's name for display : their own, else « P<slot + 1> ». */
+export const nameOf = (slot, name) => cleanName(name).trim() || `P${slot + 1}`;
+
 /** Why a guest on the relay is refused (ROLLOUT : Share is P2P only, no TURN). */
 export const ONLINE_MODE = 'No direct connection to the host : Share streams video peer to peer only. Use Online mode (each player with their own disc) to play together over the relay.';
 
@@ -108,17 +123,20 @@ export function axisByte(v) {
 
 // W3C standard mapping → PSX, the same pairs as native_input.c's SDL gamepad mapping
 // (south = Cross, east = Circle, west = Square, north = Triangle, back = Select).
-const STANDARD = [
+export const STANDARD = [
   [0, BTN.cross], [1, BTN.circle], [2, BTN.square], [3, BTN.triangle],
   [4, BTN.l1], [5, BTN.r1], [6, BTN.l2], [7, BTN.r2],
   [8, BTN.select], [9, BTN.start], [10, BTN.l3], [11, BTN.r3],
   [12, BTN.up], [13, BTN.down], [14, BTN.left], [15, BTN.right],
 ];
 
-/** A standard-mapping Gamepad (or its shape) → {id: analog, buttons, analog}. */
-export function padFromGamepad(gp) {
+/**
+ * A standard-mapping Gamepad (or its shape) → {id: analog, buttons, analog}. `map` : [[standard
+ * button index, PSX bits]] — the player's own (web/ui guest-input.js), else the native defaults.
+ */
+export function padFromGamepad(gp, map = STANDARD) {
   let buttons = 0xffff;
-  for (const [index, bit] of STANDARD) {
+  for (const [index, bit] of map) {
     const b = gp.buttons[index];
     if (b && (b.pressed || b.value > 0.5)) buttons &= ~bit;
   }
@@ -138,10 +156,10 @@ export const KEYS = {
   Space: BTN.select, Enter: BTN.start,
 };
 
-/** The held key codes → a digital pad. */
-export function padFromKeys(held) {
+/** The held key codes → a digital pad. `keys` : code → PSX bits, the player's own or KEYS. */
+export function padFromKeys(held, keys = KEYS) {
   let buttons = 0xffff;
-  for (const code in held) if (held[code] && KEYS[code]) buttons &= ~KEYS[code];
+  for (const code in held) if (held[code] && keys[code]) buttons &= ~keys[code];
   return { id: PAD_ID.digital, buttons, analog: [0x80, 0x80, 0x80, 0x80] };
 }
 
@@ -150,4 +168,31 @@ export function mergePads(a, b) {
   if (!a) return b;
   if (!b) return a;
   return { id: a.id === PAD_ID.analog || b.id === PAD_ID.analog ? PAD_ID.analog : PAD_ID.digital, buttons: a.buttons & b.buttons, analog: a.id === PAD_ID.analog ? a.analog : b.analog };
+}
+
+/**
+ * The gamepad this page plays with, from navigator.getGamepads() : the chosen one ({id, nth} : the
+ * nth connected pad with that id), else the first with the standard mapping, else the first.
+ */
+export function choosePad(gamepads, chosen = null) {
+  const list = [];
+  for (const gp of gamepads ?? []) if (gp?.connected) list.push(gp);
+  if (chosen) {
+    let n = 0;
+    for (const gp of list) if (gp.id === chosen.id && n++ === chosen.nth) return gp;
+  }
+  return list.find((gp) => gp.mapping === 'standard') ?? list[0] ?? null;
+}
+
+/**
+ * The guest's pad under its « Who plays » choice (web/ui settings.js `device`) : 'auto' = the
+ * keyboard and the gamepad merged, 'keyboard' = the keys only, 'gamepad' = the chosen pad only.
+ * One machine opening the host and the guest page splits its devices this way : a controller seen
+ * by both windows no longer drives two players. `maps` : {keys, buttons} (web/ui guest-input.js).
+ */
+export function pickPad(device, held, gamepads, maps = {}) {
+  const mode = device?.mode ?? 'auto';
+  const keys = mode === 'gamepad' ? null : padFromKeys(held, maps.keys);
+  const gp = mode === 'keyboard' ? null : choosePad(gamepads, mode === 'gamepad' ? device.pad : null);
+  return mergePads(keys, gp ? padFromGamepad(gp, maps.buttons) : null) ?? NEUTRAL;
 }

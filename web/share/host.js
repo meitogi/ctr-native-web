@@ -5,7 +5,7 @@
 // came through the relay's WebSocket path is told to use Online mode and dropped.
 import { Emitter } from '../net/events.js';
 import { offerMedia, tuneVideo } from './media.js';
-import { ONLINE_MODE, TAG, encodeControl } from './protocol.js';
+import { ONLINE_MODE, TAG, cleanName, decodeControl, encodeControl, nameOf } from './protocol.js';
 import { createSlots } from './slots.js';
 
 export const BITRATE = { min: 500_000, max: 6_000_000, default: 2_500_000 };
@@ -17,25 +17,38 @@ export const BITRATE = { min: 500_000, max: 6_000_000, default: 2_500_000 };
  * @param {number} [o.maxBitrate] - video, bits per second, per guest
  * @param {number} [o.scale=1] - video scale-down from the canvas (≥ 1)
  * @param {ReturnType<typeof createSlots>} [o.slots]
- * @returns {Emitter & {slots, guests: object, maxBitrate: number, setBitrate(bps: number): Promise<void>,
- *   setScale(scale: number): Promise<void>, close(): void}}
- *   `guests` : peerId → {slot, path, backend, state ('joining' | 'streaming' | 'failed'), error?,
- *   senders?, link} ; `refusals` : the last 8 {peerId, code, path} ; events 'change'.
+ * @param {string} [o.hostName] - the host's player name (WELCOME, PLAYERS)
+ * @returns {Emitter & {slots, guests: object, maxBitrate: number, hostName: string, setBitrate(bps: number): Promise<void>,
+ *   setScale(scale: number): Promise<void>, setHostName(name: string): void, players(): {slot, name}[], close(): void}}
+ *   `guests` : peerId → {slot, name (null until its HELLO), path, backend, state ('joining' |
+ *   'streaming' | 'failed'), error?, senders?, link} ; `refusals` : the last 8 {peerId, code, path} ;
+ *   events 'change', 'join' (guest : streaming), 'leave' (guest).
  */
-export function createShareHost({ room, stream, maxBitrate = BITRATE.default, scale = 1, slots = createSlots() }) {
+export function createShareHost({ room, stream, maxBitrate = BITRATE.default, scale = 1, slots = createSlots(), hostName = '' }) {
   const host = new Emitter();
   host.slots = slots;
   host.guests = Object.create(null);
   host.refusals = [];
   host.maxBitrate = maxBitrate;
+  host.hostName = cleanName(hostName);
   let currentScale = scale;
-  let players = 0;
+  let sent = ''; // the PLAYERS body the guests have
+  /** Who is who : the host in slot 0, then each guest by slot. */
+  host.players = () => {
+    const list = [{ slot: 0, name: nameOf(0, host.hostName) }];
+    for (const id in host.guests) list.push({ slot: host.guests[id].slot, name: nameOf(host.guests[id].slot, host.guests[id].name) });
+    return list.sort((a, b) => a.slot - b.slot);
+  };
+  const playersBody = () => {
+    const list = host.players();
+    return { players: list.length, list };
+  };
   const change = () => {
-    let n = 1;
-    for (const id in host.guests) n++;
-    if (n !== players) {
-      players = n;
-      for (const id in host.guests) if (host.guests[id].listening) host.guests[id].link.send(encodeControl(TAG.players, { players }), { reliable: true });
+    const body = playersBody();
+    const json = JSON.stringify(body);
+    if (json !== sent) {
+      sent = json;
+      for (const id in host.guests) if (host.guests[id].listening) host.guests[id].link.send(encodeControl(TAG.players, body), { reliable: true });
     }
     host.emit('change', host.guests);
   };
@@ -62,17 +75,26 @@ export function createShareHost({ room, stream, maxBitrate = BITRATE.default, sc
     if (link.backend !== 'webrtc' || !link.pc) return refuse(link, 'online-mode', ONLINE_MODE);
     const slot = slots.take(link.peerId);
     if (!slot) return whenListening(link, () => refuse(link, 'full', 'Three guests are already playing : Share drives P2 to P4.'));
-    const guest = { slot, path: link.path, backend: link.backend, state: 'joining', link };
+    const guest = { slot, name: null, path: link.path, backend: link.backend, state: 'joining', link };
     host.guests[link.peerId] = guest;
-    link.on('message', (bytes) => { if (bytes[0] === TAG.pad) slots.receive(link.peerId, bytes); });
+    link.on('message', (bytes) => {
+      if (bytes[0] === TAG.pad) slots.receive(link.peerId, bytes);
+      else if (bytes[0] === TAG.hello) {
+        const name = cleanName(decodeControl(bytes)?.body?.name).trim();
+        if (host.guests[link.peerId] !== guest || !name || name === guest.name) return;
+        guest.name = name;
+        change();
+      }
+    });
     whenListening(link, () => {
       guest.listening = true;
-      link.send(encodeControl(TAG.welcome, { slot }), { reliable: true });
-      link.send(encodeControl(TAG.players, { players }), { reliable: true });
+      link.send(encodeControl(TAG.welcome, { slot, host: nameOf(0, host.hostName) }), { reliable: true });
+      link.send(encodeControl(TAG.players, playersBody()), { reliable: true });
       offerMedia(link, stream, { maxBitrate: host.maxBitrate, scale: currentScale }).then((senders) => {
         if (host.guests[link.peerId] !== guest) return;
         guest.senders = senders;
         guest.state = 'streaming';
+        host.emit('join', guest);
         change();
       }, (e) => {
         if (host.guests[link.peerId] !== guest) return;
@@ -89,6 +111,7 @@ export function createShareHost({ room, stream, maxBitrate = BITRATE.default, sc
     if (!guest || guest.link !== link) return;
     slots.release(link.peerId);
     delete host.guests[link.peerId];
+    host.emit('leave', guest);
     change();
   });
 
@@ -108,6 +131,10 @@ export function createShareHost({ room, stream, maxBitrate = BITRATE.default, sc
     if (s === currentScale) return Promise.resolve();
     currentScale = s;
     return retune();
+  };
+  host.setHostName = (name) => {
+    host.hostName = cleanName(name);
+    change();
   };
   host.close = () => {
     offLink();

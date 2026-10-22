@@ -10,6 +10,7 @@ import { formatRoomLink, newRoom } from '../net/link.js';
 import { openRoom } from '../net/room.js';
 import { createCapture } from './capture.js';
 import { BITRATE, createShareHost } from './host.js';
+import { nameOf } from './protocol.js';
 import { createSlots } from './slots.js';
 
 const DEFAULT_RELAY = 'wss://ctr-relay.suuuper.app';
@@ -41,6 +42,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wall = () => performance.timeOrigin + performance.now();
 
 const Module = globalThis.Module;
+// the page's interface (web/ui) : the player name, toasts and their words ; absent = a bare page
+const ui = globalThis.ctrUI ?? null;
+const hostName = () => ui?.settings.get().name ?? '';
 const slots = createSlots();
 let capture = null;
 let host = null;
@@ -112,11 +116,15 @@ async function start() {
     // the guest page, without this page's query : a relay key there only travels after #
     const base = new URL('share/guest.html', location.href);
     linkText = formatRoomLink(base.href, link);
+    // 'host' : the relay's signaling name, in clear — the player's name goes end to end (WELCOME)
     const room = await openRoom({ link, role: 'host', name: 'host' });
     room.on('warning', (w) => { error = `${w.code}: ${w.message}`; render(); });
     room.on('close', () => { error = 'relay: the relay closed the room'; render(); });
-    host = createShareHost({ room, stream: capture.stream, maxBitrate: Number(bitrate.value), scale: capture.scale, slots });
+    host = createShareHost({ room, stream: capture.stream, maxBitrate: Number(bitrate.value), scale: capture.scale, slots, hostName: hostName() });
     host.on('change', render);
+    // the host is told who comes and goes, Settings open or not
+    host.on('join', (g) => ui?.toast(ui.text.joined(nameOf(g.slot, g.name), g.slot + 1)));
+    host.on('leave', (g) => ui?.toast(ui.text.left(nameOf(g.slot, g.name), g.slot + 1)));
   } catch (e) {
     error = `${e.code ? `${e.code}: ` : ''}${e.message ?? e}`;
     capture?.stop();
@@ -135,6 +143,8 @@ function stop() {
   render();
 }
 
+ui?.settings.subscribe((s) => { if (host && s.name !== host.hostName) host.setHostName(s.name); });
+
 startButton.addEventListener('click', start);
 stopButton.addEventListener('click', stop);
 copyButton.addEventListener('click', () => navigator.clipboard?.writeText(linkText));
@@ -148,7 +158,7 @@ function guests() {
   const out = [];
   for (const peerId in host?.guests ?? {}) {
     const g = host.guests[peerId];
-    out.push({ peerId, slot: g.slot, path: g.path, state: g.state, error: g.error ?? null });
+    out.push({ peerId, slot: g.slot, name: g.name, path: g.path, state: g.state, error: g.error ?? null });
   }
   return out.sort((a, b) => a.slot - b.slot);
 }
@@ -163,7 +173,7 @@ function render() {
   else {
     lines.push(`Sharing${capture?.audio ? ' (video + sound)' : ' (video only)'}, ${capture?.frames ?? 0} frames`);
     const list = guests();
-    lines.push(list.length ? list.map((g) => `P${g.slot + 1} ${g.path} ${g.state}`).join('\n') : 'Waiting for guests');
+    lines.push(list.length ? list.map((g) => `P${g.slot + 1} ${nameOf(g.slot, g.name)} · ${g.path} · ${g.state}`).join('\n') : 'Waiting for guests');
     for (const r of host.refusals.slice(-2)) lines.push(`refused (${r.code}) : ${r.path}`);
   }
   status.textContent = lines.join('\n');
@@ -211,6 +221,7 @@ window.__ctrShare = {
       capture: capture && { frames: capture.frames, scale: capture.scale, display: capture.display, audio: capture.audio,
         canvas: [Module.canvas.width, Module.canvas.height] },
       guests: guests(),
+      hostName: host?.hostName ?? null,
       refusals: host?.refusals ?? [],
       pads: seen.map((p, s) => (p ? { slot: s, ...p } : null)),
       error,
