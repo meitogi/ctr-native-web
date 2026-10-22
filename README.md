@@ -45,7 +45,7 @@ no dates. no versions. trust the process.
 |---|---|---|
 | cooking | **smoother racing** | keeps its pace while you alt-tab to Discord, no more stutter when the first track loads |
 | next | **Share, upgraded** | guests get the full menu (volume, settings, their own controls) ; everyone gets a name — think `Mad Roo` — so the host knows who joined (and who rammed who) ; pick keyboard *or* gamepad so a drifting stick stops speedrunning the menus |
-| in the oven | **Online** | Mario Kart–style netplay ported from OnlineCTR, right from the game's own multiplayer menus : everyone races on their own screen with their own disc, private room, invite by link. end-to-end encrypted, so nobody sees your skill issue. except the other racers. wifi dies, you come back, the race remembers you |
+| in the oven | **LAN / Online** | Mario Kart–style netplay ported from OnlineCTR, right from the game's own multiplayer menus : everyone on their own screen, full screen, with their own disc — same house or across the internet. private room, invite by link. end-to-end encrypted, so nobody sees your skill issue. except the other racers. wifi dies, you come back, the race remembers you |
 | in the oven | **one game, one link** | one link for everything ; no disc = you land in Share automatically |
 | in the oven | **couch + online** | sofa vs. sofa. 2v2. bring snacks |
 | in the oven | **your screen, your shape** | full window resolution + widescreen. 240p was a vibe in 1999, it's 2026 |
