@@ -1,37 +1,74 @@
 # CTR Native Web
 
-A fork of [CTR Native](https://github.com/CTR-tools/ctr-native) that adds a browser target : WebAssembly, WebGL2, your own NTSC-U disc image dropped into the page, and online play over WebRTC. Work in progress ; the sections below describe the upstream native port, which this fork keeps building.
+**Crash Team Racing, in your browser.** Bring your own disc, grab a pad, and race —
+alone, on the sofa with friends, or online with someone across town.
 
-## Play in the browser
+> **[Play at ctr.suuuper.app](https://ctr.suuuper.app/)**
 
-**[ctr.suuuper.app](https://ctr.suuuper.app/)**
+No install, no emulator, no plugin : the decompiled PS1 game, rebuilt for the web
+(WebAssembly, WebGL2, Web Audio). This is a fork of
+[CTR Native](https://github.com/CTR-tools/ctr-native), the native PC port — its own
+notes are further down.
 
-Bring your own NTSC-U disc image (`ctr-u.bin`, raw `MODE2/2352`, the format a
-CD ripper gives you, not a cooked 2048-byte `.iso`). Drop it on the page once
-: it is copied into your browser's own storage (OPFS) and stays there —
-nothing is uploaded anywhere, no game data is ever hosted on this site. A
-reload boots straight from it.
+## Bring your own disc
 
-- **Solo** — the root page. Keyboard or a gamepad ; couch play (several
-  players on one machine, two on one keyboard) is in the section below.
-- **Share** — the panel on the page : a guest opens the link you're given
-  with **no disc of their own**, and plays as P2–P4 over a live video stream
-  of your game (WebRTC).
-- **[Online](https://ctr.suuuper.app/online/)** — Mario Kart–style netcode :
-  each player needs their own copy of the disc, and runs the race on their
-  own screen.
-- **Hosting (Share or Online) needs a relay** : the page defaults to
-  `wss://ctr-relay.suuuper.app`, which only works with a key — ask for one,
-  or run your own (`relay/README.md`, a one-line cloud-init droplet). The
-  Online page can also fall back to a public MQTT broker or manual
-  copy-paste as a meeting point, but defaults to the relay only ; the Share
-  panel only offers the relay.
+You need your own **NTSC-U** copy of the game as a raw disc image (`ctr-u.bin`,
+`MODE2/2352` — what a CD ripper gives you, not a cooked 2048-byte `.iso`), loose or
+inside a `.zip`. Drop it anywhere on the page **once** : it is copied into your
+browser's own storage and stays there. Nothing is uploaded, and no game data is ever
+hosted here. Next time, the game is ready — press the button on screen and go.
 
-### In the browser : couch play, and the game on a TV
+## What's already on the track
 
-- **Several players on one machine** : plug in one gamepad per player (a pad shows up once you press one of its buttons), then pick VS. or Arcade with 2–4 players in the game's own menus — the split screen of the original. Settings › Players shows who is P1–P4, swaps them, and puts two players on one keyboard (left half : WASD and the keys around G ; right half : the arrows and the keys around L ; both changeable in Settings › Controls).
-- **The stick** : every pad starts in analog mode (ANA) — the left stick steers and moves through every menu. Select + Start together switches a pad to digital (DIG, stick ignored) and back, like the PlayStation's Analog button.
-- **AirPlay to an Apple TV** : Safari cannot send the game alone. A page can only AirPlay a `<video>`, and the game's picture would be a live stream (`canvas.captureStream()`), which WebKit refuses for AirPlay — its MediaStream player says « This engine does not support wireless playback » (`MediaPlayerPrivateMediaStreamAVFObjC::supportsType`). What works on a Mac : Control Center › Screen Mirroring › the Apple TV › **Use As Separate Display**, drag the browser window to that display and make it full screen (Ctrl + Cmd + F), and pick the Apple TV as the sound output (Control Center › Sound). The pads stay connected to the Mac.
+- **The whole game, in a tab** — menus, races, the music and the voices, your saves
+  kept in the browser.
+- **Your controls, your way** — keyboard or any gamepad, every button remappable in
+  Settings, the right button icons for your pad, « Skip intro » to get straight to the
+  menu. English or French, following your browser.
+- **Couch party** — 2 to 4 players on one machine in the original split screen, one
+  pad each, or two players on one keyboard (left half : WASD ; right half : the
+  arrows). Settings › Players shows who is P1–P4 and swaps them. Pads start in analog
+  mode (ANA) ; Select + Start toggles digital (DIG), like the PlayStation's Analog button.
+- **Share** — send a link, and your friends play as P2–P4 **without a disc** : they
+  get your game as live video and sound, you get their pads, peer to peer.
+- **[Online](https://ctr.suuuper.app/online/)** — Mario Kart–style netplay ported from
+  OnlineCTR : everyone races on their own screen with their own disc, in a private room
+  you share by link. Direct connections first, a relay when there is no other way,
+  and everything end-to-end encrypted.
+- **Your own relay, if you like** — hosting a Share or Online room goes through a
+  small relay ; the default one needs a key, or run yours in minutes : a Docker image,
+  a one-file setup for a throwaway cloud VM with automatic HTTPS, or a drop-in behind
+  Traefik, HAProxy or Caddy ([relay/README.md](relay/README.md)). Online can also meet
+  through a public MQTT broker, or by copy-pasting a code.
+- **The game on a TV (Mac)** — Safari won't AirPlay the game alone ; use Control
+  Center › Screen Mirroring › your Apple TV › **Use As Separate Display**, move the
+  window there in full screen, and pick the Apple TV as the sound output.
+
+## Next laps
+
+Coming up, in no particular order and with no promised date :
+
+- **Share, upgraded** — guests get the full menu too (volume, settings, their own
+  controls), every player gets a name (a silly CTR one to start with), and the host
+  sees who just joined. Pick keyboard *or* gamepad, so a lazy stick stops wandering
+  through the menus.
+- **One game, one link** — Online straight from the game's own multiplayer menus, no
+  separate page ; one link to share whatever the mode, and a friend without a disc
+  lands in Share on their own.
+- **Smoother racing** — no hiccup when a level loads, and a steady pace even when the
+  tab is in the background.
+- **Sturdier online** — dropping out and rejoining a room, smoother remote karts.
+- **Couch + online together** — two on the sofa against two somewhere else.
+- **Your screen, your shape** — the game drawn at your window's own resolution, and
+  widescreen.
+- **A proper home page** — pick Solo, Share or Online from one place.
+- **Race the DuckStation crowd** — join the public OnlineCTR servers and race players
+  on the original game.
+- **Your disc from your own server** — load it from a machine on your home network
+  instead of dropping it again on every device.
+- **Maybe, one day** — PAL discs (the French version first).
+
+## Under the hood : CTR Native
 
 CTR Native is a native PC port of Crash Team Racing (PS1, 1999), built on top of the [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) decompilation project.
 
