@@ -3,7 +3,9 @@
 // keyboard (room, track, laps, character ; the page picks « Private Room » itself) into a race, both hold Cross, and
 // each side must see the other's kart move. Once over WebRTC (P2P), once with the guest
 // forced onto the relay's WebSocket path (openRoom mode: ws). Then a whole race in an item
-// room : both karts follow the racing line and fire their items, both screens filmed.
+// room : both karts follow the racing line and fire their items, both screens filmed with
+// their sound and put side by side. The guest runs in a second agent browser when the run
+// has one (instance b, its own Chromium and CDP connection), else in a second tab.
 //
 // RUN
 //   Build : web/build-web.sh debug -DCTR_ONLINE=ON -DCTR_WEB_PRELOAD_DISC=OFF
@@ -13,10 +15,11 @@
 //           python3 web/test/player/serve.py build-web-debug 8092
 //   Relay : (cd relay && npm ci && RELAY_KEY=<key> PORT=8787 node relay.js)
 //   Play  : bash plans/ctr-native-web/tools/play.sh online <session> 8092 -- \
-//             --set relay=ws://localhost:8787 --set rk=<key> --set proofs=plans/ctr-native-web/proofs/<session>
-//           (proofs : the same root play.sh gives e2e.mjs ; the item race files the guest's
-//           screen there and puts both screens side by side)
-//   Both ports in AGENT_BROWSER_ORIGINS and forwarded. Browser : the agent browser.
+//             --set relay=ws://localhost:8787 --set rk=<key>
+//           (play.sh adds --set proofs=<its proofs root> — the item race files the guest's
+//           screen there — and, when agent browser b answers, --set guestCdp=<its endpoint>)
+//   Both ports in AGENT_BROWSER_ORIGINS and forwarded. Browsers : the agent browser (host)
+//   and its instance b (guest ; `agent-browser -i b`, host:9224 in the firewall).
 // Not a node --test file : `node --test web/test/*.test.js` never loads it.
 //
 // State : window.__ctrOnline.state() (web/online/page.js : octr, links, per-slot kart samples
@@ -26,9 +29,12 @@
 // R7 — the guest's held Cross, sampled on the host after its own pad polling.
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
-import { capture } from '/opt/devcontainer/base/skills/visual-loop/scripts/cdp.mjs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { hostname } from 'node:os'
+import { dirname, join } from 'node:path'
+import { lookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
+import { capture, connect, fetchBrowserWsUrl } from '/opt/devcontainer/base/skills/visual-loop/scripts/cdp.mjs'
 import { makePlayer, pageScript } from '/opt/devcontainer/base/skills/visual-loop/lib/player.mjs'
 import { HEARTBEAT_MS, PLAYER, recordWithSound, say } from './ctr.mjs'
 
@@ -186,36 +192,39 @@ async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}
 	if (hs.role !== 'host' || hs.backend !== 'relay') throw new Error(`host : no room on the relay (${hs.error})`)
 	if (/[?&](key|rk)=/.test(hs.link.split('#')[0])) throw new Error('host : a secret left the # part of the link')
 
-	// The guest's own tab, in a window of its own : a background tab would stop painting. It
-	// opens on a small same-origin file (the agent browser's proxy refuses about:blank), so the
-	// player's page script is in place before the game page loads.
-	const { targetId } = await ctx.conn.send('Target.createTarget', { url: `${origin}/preload-flag.js`, newWindow: true })
+	// The guest : a second browser when the run has one (--set guestCdp=<host:port>, play.sh
+	// passes `agent-browser -i b env`), its own Chromium, CDP connection and recorder ; else a
+	// second tab of this browser, in a window of its own (a background tab would stop
+	// painting). Either way its page opens on a small same-origin file (the agent browser's
+	// proxy refuses about:blank), so the player's page script is in place before the game loads.
+	const guestBrowser = await openGuest(ctx, `${origin}/preload-flag.js`)
+	const { targetId, conn: gc } = guestBrowser
 	// The guest's session, re-attached when the agent browser's proxy stops knowing it (it
 	// refuses « session is not one of this page » mid-run, with no detach event) ; every guest
 	// command goes through gconn, so the player harness follows the new session.
 	const gs = { sid: null, reattached: 0 }
 	const attachGuest = async () => {
-		gs.sid = (await ctx.conn.send('Target.attachToTarget', { targetId, flatten: true })).sessionId
-		await ctx.conn.send('Page.enable', {}, gs.sid)
-		await ctx.conn.send('Runtime.enable', {}, gs.sid)
-		await ctx.conn.send('Inspector.enable', {}, gs.sid).catch(() => {})
+		gs.sid = (await gc.send('Target.attachToTarget', { targetId, flatten: true })).sessionId
+		await gc.send('Page.enable', {}, gs.sid)
+		await gc.send('Runtime.enable', {}, gs.sid)
+		await gc.send('Inspector.enable', {}, gs.sid).catch(() => {})
 	}
 	// What happens to the guest's target, for the failure message.
 	gs.events = []
-	ctx.conn.on('Inspector.targetCrashed', (p, sid) => { if (sid === gs.sid) gs.events.push(`crashed at ${new Date().toISOString()}`) })
-	ctx.conn.on('Inspector.detached', (p, sid) => { if (sid === gs.sid) gs.events.push(`inspector detached : ${p.reason}`) })
-	ctx.conn.on('Runtime.executionContextsCleared', (p, sid) => { if (sid === gs.sid) gs.events.push('contexts cleared (navigation or crash)') })
-	ctx.conn.on('Page.frameNavigated', (p, sid) => { if (sid === gs.sid && !p.frame.parentId) gs.events.push(`navigated ${p.frame.url.slice(0, 60)}`) })
+	const at = () => new Date().toISOString().slice(11, 23)
+	gc.on('Inspector.targetCrashed', (p, sid) => { if (sid === gs.sid) gs.events.push(`crashed at ${at()}`) })
+	gc.on('Inspector.detached', (p, sid) => { if (sid === gs.sid) gs.events.push(`inspector detached : ${p.reason} at ${at()}`) })
+	gc.on('Page.frameNavigated', (p, sid) => { if (sid === gs.sid && !p.frame.parentId) gs.events.push(`navigated ${p.frame.url.slice(0, 60)} at ${at()}`) })
 	const gconn = {
-		on: (...a) => ctx.conn.on(...a),
+		on: (...a) => gc.on(...a),
 		send: async (method, params) => {
 			try {
-				return await ctx.conn.send(method, params, gs.sid)
+				return await gc.send(method, params, gs.sid)
 			} catch (e) {
 				if (!/session is not one of this page|No session with given id/.test(e.message) || gs.reattached >= 5) throw e
 				gs.reattached++
 				await attachGuest()
-				return ctx.conn.send(method, params, gs.sid)
+				return gc.send(method, params, gs.sid)
 			}
 		},
 	}
@@ -223,11 +232,13 @@ async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}
 	try {
 		await gconn.send('Page.addScriptToEvaluateOnNewDocument', { source: pageScript(PLAYER) })
 		const gjs = expression => ctx.evaluate(gconn, gs.sid, `(async () => { ${expression} })()`)
+		const guestOwnBrowser = gc !== ctx.conn
 		const gp = makePlayer({ conn: gconn, sid: null, js: gjs, capture, dir: '', current: () => ({ id: 'guest', proofs: [] }), pressFrames: PLAYER.pressFrames })
-		const guest = { name: 'guest', gs, gconn, js: gjs, press: gp.press, frames: gp.frames, navigate: url => gconn.send('Page.navigate', { url }) }
-		// The guest's name before its page loads : it connects as soon as its room opens (one
-		// origin, one localStorage : the host's name is already taken by then).
-		await ctx.js(`localStorage.setItem('ctr-online.name', 'Guest'); return true`)
+		const guest = { name: 'guest', gs, gconn, own: guestOwnBrowser, js: gjs, press: gp.press, frames: gp.frames, navigate: url => gconn.send('Page.navigate', { url }) }
+		// The guest's name before its page loads : it connects as soon as its room opens. One
+		// browser = one localStorage for both (the host's name is already taken by then) ; the
+		// second browser has its own, written from the guest's same-origin first page.
+		await (guestOwnBrowser ? gjs : ctx.js)(`localStorage.setItem('ctr-online.name', 'Guest'); return true`)
 		await boot(guest, hs.link)
 		const vis = [await ctx.js('return document.visibilityState'), await gjs('return document.visibilityState')]
 		if (vis.join() !== 'visible,visible') throw new Error(`a tab is not painting : visibility ${vis.join(' / ')}`)
@@ -237,10 +248,9 @@ async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}
 		const gl = (await online(guest)).links[0]
 		const hl = (await online(host)).links[0]
 		if (mode !== 'ws' && gl?.backend === 'ws') {
-			// The agent browser resolves only its origins (--host-resolver-rules) : WebRTC's
-			// mDNS host candidates (….local) never resolve, ICE fails, the guest falls back to
-			// the relay. Not this build's fault ; the sandbox's Chromium flags need
-			// --disable-features=WebRtcHideLocalIpsWithMdns, as ctr-browser.sh has.
+			// An agent browser older than the sandbox's WebRtcHideLocalIpsWithMdns flag resolves
+			// only its origins (--host-resolver-rules) : WebRTC's mDNS host candidates (….local)
+			// never resolve, ICE fails, the guest falls back to the relay. Not this build's fault.
 			const why = (await online(guest)).error || 'WebRTC attempt failed'
 			ctx.skip(`no WebRTC path in this browser (${why}) : the guest fell back to the relay`)
 		}
@@ -274,7 +284,9 @@ async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}
 		}
 		for (const tab of [host, guest]) await until(tab, 'the race (SG_STARTRACE)', s => s.octr.CurrState === ST.START_RACE, 180_000, 500)
 
-		if (itemRace) return itemRaceOn(ctx, { host, guest, gp, gjs })
+		// `return await` : a bare `return <promise>` would run the finally below — closing the
+		// guest's tab — as soon as the race starts (« Render process gone », LOG T4).
+		if (itemRace) return await itemRaceOn(ctx, { host, guest, gp, gjs })
 
 		// Race : both hold Cross ; the host's tab is filmed, its sound unmuted for the video
 		const samples = { host: [], guest: [] }
@@ -302,8 +314,52 @@ async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}
 		const ctr = await ctx.js('return window.__ctr ? { screen: window.__ctr.screen, fps: window.__ctr.fps } : null')
 		return `${gl.backend}/${gl.path} · moved ${JSON.stringify(m)} · R7 ${crossHeld}/${r7.length} · R6 bridge calls/s by state ${JSON.stringify(r6)} · __ctr ${JSON.stringify(ctr)}`
 	} finally {
-		await ctx.conn.send('Target.closeTarget', { targetId }).catch(() => {})
+		await guestBrowser.close()
 	}
+}
+
+/**
+ * The guest's page target : in the second browser (`--set guestCdp=<host:port>`) the page
+ * `agent-browser -i b up` opened, navigated to `url`, over a CDP connection of its own ; else
+ * a new window of this browser. Returns { conn, targetId, close }.
+ */
+async function openGuest(ctx, url) {
+	if (!ctx.args.guestCdp) {
+		const { targetId } = await ctx.conn.send('Target.createTarget', { url, newWindow: true })
+		return { conn: ctx.conn, targetId, close: () => ctx.conn.send('Target.closeTarget', { targetId }).catch(() => {}) }
+	}
+	const [host, port] = ctx.args.guestCdp.split(':')
+	const release = lockBrowser(host, port)
+	const ip = isIP(host) ? host : (await lookup(host, { family: 4 })).address
+	const conn = await connect(await fetchBrowserWsUrl({ ip, port: Number(port), httpBase: `http://${ip}:${port}` }))
+	const { targetInfos } = await conn.send('Target.getTargets')
+	const page = targetInfos.find(t => t.type === 'page')
+	if (!page) throw new Error(`guest browser ${ctx.args.guestCdp} : no page (agent-browser -i b up <url> first)`)
+	const { sessionId } = await conn.send('Target.attachToTarget', { targetId: page.targetId, flatten: true })
+	await conn.send('Page.navigate', { url }, sessionId)
+	await conn.send('Target.detachFromTarget', { sessionId })
+	return { conn, targetId: page.targetId, close: () => { conn.close(); release() } }
+}
+
+/**
+ * Claims the guest's browser in cdp.mjs's lock format (/tmp/cdp/.cdp-lock-<host>-<port>.json,
+ * `expires` refreshed every 10 s), so another session's play.sh waits instead of restarting it
+ * under this run. e2e.mjs only locks the browser it drives. Returns the release.
+ */
+function lockBrowser(host, port) {
+	const file = `${process.env.CDP_LOCK_DIR || '/tmp/cdp'}/.cdp-lock-${host}-${port}.json`
+	const claim = () => JSON.stringify({ pid: process.pid, host: hostname(), owner: 'online.suite.mjs guest', at: new Date().toISOString(), expires: Date.now() + 30_000 })
+	mkdirSync(dirname(file), { recursive: true })
+	try {
+		writeFileSync(file, claim(), { flag: 'wx' })
+	} catch {
+		const held = JSON.parse(readFileSync(file, 'utf8'))
+		if (held.expires > Date.now() && held.pid !== process.pid) throw new Error(`guest browser ${host}:${port} is held by another session (${held.owner}, ${file}) — wait and re-run`)
+		writeFileSync(file, claim())
+	}
+	const beat = setInterval(() => writeFileSync(file, claim()), 10_000)
+	beat.unref()
+	return () => { clearInterval(beat); rmSync(file, { force: true }) }
 }
 
 /**
@@ -407,7 +463,7 @@ function runDirOf(root, file) {
 async function itemRaceOn(ctx, { host, guest, gp, gjs }) {
 	const shot = await ctx.shot('item-race-start')
 	const dir = runDirOf(ctx.args.proofs, shot.file)
-	const guestCur = { id: 'ONLINE-ITEM-RACE-guest', proofs: [] }
+	const guestCur = { id: 'ONLINE-ITEM-RACE', proofs: [] }
 	const gRec = dir ? makePlayer({ conn: guest.gconn, sid: null, js: gjs, capture, dir, current: () => guestCur, pressFrames: PLAYER.pressFrames }) : null
 	const deadline = Date.now() + 240_000
 	const race = () => Promise.all([
@@ -427,17 +483,22 @@ async function itemRaceOn(ctx, { host, guest, gp, gjs }) {
 		const who = sid === guest.gs.sid ? 'guest' : sid === ctx.sid ? 'host' : `session ${sid}`
 		throw new Error(`${e.message} [${method} on ${who}]`)
 	})
+	// Both screens with their sound, each tab's own in-page recorder (its own browser's when
+	// the guest has one). The guest's starts first and stops last ; `lag` is how much later
+	// the host's started, cut from the guest's video so the two line up side by side.
+	let lag = 0
 	try {
 		if (!gRec) hostVideo = await recordWithSound(ctx, 'host-screen', async () => { results = await race() })
 		else {
-			// The guest's recorder starts first : once the host's records, the proxy has refused
-			// the guest's session (see LOG 9).
-			// The guest is filmed by the CDP screencast, not an in-page recorder : starting a
-			// second MediaRecorder in the guest's tab has killed its renderer (« Render process
-			// gone ») at every try (LOG 9). Silent ; the side-by-side carries the host's sound.
-			guestCur.video = await gRec.record('guest-screen', async () => {
-				hostVideo = await recordWithSound(ctx, 'host-screen', async () => { results = await race() })
-			}, { screencast: true })
+			const guestRec = { js: gjs, record: gRec.record, args: ctx.args }
+			let t0 = 0
+			guestCur.video = await recordWithSound(guestRec, 'guest-screen', async () => {
+				t0 = Date.now()
+				hostVideo = await recordWithSound(ctx, 'host-screen', async () => {
+					lag = (Date.now() - t0) / 1000
+					results = await race()
+				})
+			})
 		}
 	} catch (e) {
 		throw new Error(`${e.message}${gone.length ? ` (${gone.join(', ')})` : ' (no session detached or crashed)'} · guest events : ${guest.gs.events.join(' | ') || 'none'}`)
@@ -452,13 +513,18 @@ async function itemRaceOn(ctx, { host, guest, gp, gjs }) {
 	let both = 'no proofs root (--set proofs=<root>) : guest screen not filmed'
 	if (dir && guestCur.video) {
 		const out = join(dir, '99-online-item-race-both-screens.mp4')
-		const r = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', join(dir, hostVideo.file), '-i', join(dir, guestCur.video.file),
-			'-filter_complex', '[0:v]scale=640:480,setsar=1[a];[1:v]scale=640:480,setsar=1[b];[a][b]hstack=inputs=2,fps=30[v]',
-			'-map', '[v]', '-map', '0:a?', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'libmp3lame', '-b:a', '192k', '-movflags', '+faststart', out])
-		both = r.status === 0 ? `both screens : ${out}` : `side-by-side failed : ${r.stderr}`
+		// Host left, guest right ; both sounds mixed (each side hears its own kart and items).
+		const r = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', join(dir, hostVideo.file), '-ss', String(lag), '-i', join(dir, guestCur.video.file),
+			'-filter_complex', '[0:v]scale=640:480,setsar=1[a];[1:v]scale=640:480,setsar=1[b];[a][b]hstack=inputs=2,fps=30[v];[0:a][1:a]amix=inputs=2:duration=shortest:normalize=0[s]',
+			'-map', '[v]', '-map', '[s]', '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'libmp3lame', '-b:a', '192k', '-movflags', '+faststart', out])
+		both = r.status === 0 ? `both screens : ${out} (host ${hostVideo.file}, guest ${guestCur.video.file}, guest cut by ${lag} s)` : `side-by-side failed : ${r.stderr}`
 	}
 	if (!(h.fired > 0 && g.fired > 0)) throw new Error('nobody pressed fire')
-	return `guest session re-attached ${guest.gs.reattached}× · host ${h.finished ? `finished, rank ${h.rank}` : 'did not finish'} · guest ${g.finished ? `finished, rank ${g.rank}` : 'did not finish'} · weapon messages ${JSON.stringify(fired)} · ${both}`
+	// Each side's items reached the other : the host's server got the guest's, the guest got the host's.
+	if (!(fired.hostSent > 0 && fired.guestGot > 0)) throw new Error(`no weapon crossed between the players : ${JSON.stringify(fired)}`)
+	if (!(h.finished && g.finished)) throw new Error(`the race did not end for both : host ${JSON.stringify(h)}, guest ${JSON.stringify(g)}`)
+	if (dir && !/^both screens/.test(both)) throw new Error(both)
+	return `${guest.own ? 'two browsers' : 'two tabs'} · guest session re-attached ${guest.gs.reattached}× · host ${h.finished ? `finished, rank ${h.rank}` : 'did not finish'} · guest ${g.finished ? `finished, rank ${g.rank}` : 'did not finish'} · weapon messages ${JSON.stringify(fired)} · ${both}`
 }
 
 export default async ctx => {
@@ -466,9 +532,6 @@ export default async ctx => {
 	await ctx.scenario('ONLINE-2TAB-WS', () => twoTabs(ctx, 'ws'))
 	// the hold race of ONLINE-2TAB-WS in an item room : runs on a release build too (no __ctr)
 	await ctx.scenario('ONLINE-ITEM-ROOM', () => twoTabs(ctx, 'ws', { itemRoom: true }))
-	// Opt-in (--set itemRace=1) : on the headless agent browser the guest's renderer dies
-	// (« Render process gone ») as this race starts, filmed or not ; under investigation.
-	await ctx.scenario('ONLINE-ITEM-RACE', () => ctx.args.itemRace
-		? twoTabs(ctx, 'ws', { itemRace: true })
-		: ctx.skip('opt-in : --set itemRace=1 (the guest tab crashes at the start of this race on the agent browser, see LOG 9)'))
+	// A whole race, both driving and firing, both screens filmed ; over WebRTC when it pairs.
+	await ctx.scenario('ONLINE-ITEM-RACE', () => twoTabs(ctx, 'auto', { itemRace: true }))
 }
