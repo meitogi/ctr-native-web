@@ -15,6 +15,8 @@ config=${1:-release}
 page=${2:-8094}
 relayPort=${3:-8789}
 tree=$(cd "$(dirname "$0")/../.." && pwd)
+# shellcheck source=../build-progress.sh
+source "$tree/web/build-progress.sh"
 build="$tree/build-web-$config"
 
 case "$config" in debug|release) ;; *) echo "usage: $0 [debug|release] [page-port] [relay-port]" >&2; exit 2 ;; esac
@@ -29,8 +31,7 @@ done
 
 if [ "${ONLINE_DEV_NO_BUILD:-}" != 1 ]; then
   echo "== building the $config CTR_ONLINE client in $build (a few minutes the first time)"
-  "$tree/web/build-web.sh" "$config" -DCTR_ONLINE=ON -DCTR_WEB_PRELOAD_DISC=OFF > "$build.log" 2>&1 \
-    || { tail -20 "$build.log"; echo "dev.sh: build failed, full log $build.log" >&2; exit 1; }
+  build_with_progress "$build.log" "$tree/web/build-web.sh" "$config" -DCTR_ONLINE=ON -DCTR_WEB_PRELOAD_DISC=OFF || exit 1
 fi
 [ -f "$build/online/page.js" ] || { echo "dev.sh: $build has no online/page.js — not a CTR_ONLINE build" >&2; exit 1; }
 # the disc the fake guest (web/online/bot.sh) stores in its browser, never copied

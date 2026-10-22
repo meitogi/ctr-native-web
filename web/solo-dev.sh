@@ -14,6 +14,8 @@ set -euo pipefail
 config=${1:-release}
 page=${2:-8095}
 tree=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=build-progress.sh
+source "$tree/web/build-progress.sh"
 build="$tree/build-web-$config-solo"
 case "$config" in debug) type=Debug ;; release) type=Release ;; *) echo "usage: $0 [debug|release] [page-port]" >&2; exit 2 ;; esac
 
@@ -30,9 +32,10 @@ if [ "${SOLO_DEV_NO_BUILD:-}" != 1 ]; then
   source "$EMSDK/emsdk_env.sh" >/dev/null 2>&1
   [ -x /workspace/.tmp/cmake/bin/cmake ] && PATH="/workspace/.tmp/cmake/bin:$PATH"
   echo "== building the $config single-player client in $build (a few minutes the first time)"
-  { emcmake cmake -S "$tree" -B "$build" -DCMAKE_BUILD_TYPE="$type" -DBUILD_TESTING=OFF -DCTR_ONLINE=OFF -DCTR_WEB_PRELOAD_DISC=OFF \
-    && cmake --build "$build" -j"$(nproc)"; } > "$build.log" 2>&1 \
-    || { tail -20 "$build.log"; echo "solo-dev.sh: build failed, full log $build.log" >&2; exit 1; }
+  build() {
+    emcmake cmake -S "$tree" -B "$build" -DCMAKE_BUILD_TYPE="$type" -DBUILD_TESTING=OFF -DCTR_ONLINE=OFF -DCTR_WEB_PRELOAD_DISC=OFF && cmake --build "$build" -j"$(nproc)"
+  }
+  build_with_progress "$build.log" build || exit 1
 fi
 [ -f "$build/ctr_native.wasm" ] || { echo "solo-dev.sh: no build in $build" >&2; exit 1; }
 

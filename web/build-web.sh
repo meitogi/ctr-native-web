@@ -37,5 +37,8 @@ emcmake cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE="$build_type" -DBUILD_TE
 cmake --build "$build" -j"$(nproc)"
 
 echo ""
+# shellcheck source=build-progress.sh
+source "$root/web/build-progress.sh"
+echo "built in $(build_duration "$SECONDS")"
 ls -l "$build"/index.html "$build"/ctr_native.js "$build"/ctr_native.wasm "$build"/ctr_native.data 2>/dev/null || true
 echo "Serve with: web/serve.sh $config"

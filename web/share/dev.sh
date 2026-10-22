@@ -17,6 +17,8 @@ config=${1:-release}
 page=${2:-8096}
 relayPort=${3:-8791}
 tree=$(cd "$(dirname "$0")/../.." && pwd)
+# shellcheck source=../build-progress.sh
+source "$tree/web/build-progress.sh"
 build="$tree/build-web-$config-solo" # web/solo-dev.sh's : CTR_ONLINE off, never the online build
 case "$config" in debug) type=Debug ;; release) type=Release ;; *) echo "usage: $0 [debug|release] [page-port] [relay-port]" >&2; exit 2 ;; esac
 for p in "$page" "$relayPort"; do
@@ -34,9 +36,10 @@ if [ "${SHARE_DEV_NO_BUILD:-}" != 1 ]; then
   source "$EMSDK/emsdk_env.sh" >/dev/null 2>&1
   [ -x /workspace/.tmp/cmake/bin/cmake ] && PATH="/workspace/.tmp/cmake/bin:$PATH"
   echo "== building the $config single-player client in $build (a few minutes the first time)"
-  { emcmake cmake -S "$tree" -B "$build" -DCMAKE_BUILD_TYPE="$type" -DBUILD_TESTING=OFF -DCTR_ONLINE=OFF -DCTR_WEB_PRELOAD_DISC=OFF \
-    && cmake --build "$build" -j"$(nproc)"; } > "$build.log" 2>&1 \
-    || { tail -20 "$build.log"; echo "dev.sh: build failed, full log $build.log" >&2; exit 1; }
+  build() {
+    emcmake cmake -S "$tree" -B "$build" -DCMAKE_BUILD_TYPE="$type" -DBUILD_TESTING=OFF -DCTR_ONLINE=OFF -DCTR_WEB_PRELOAD_DISC=OFF && cmake --build "$build" -j"$(nproc)"
+  }
+  build_with_progress "$build.log" build || exit 1
 fi
 [ -f "$build/share/panel.js" ] || { echo "dev.sh: $build has no share/panel.js — build it first" >&2; exit 1; }
 if [ ! -d "$tree/relay/node_modules" ]; then
