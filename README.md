@@ -45,27 +45,20 @@ hosted here. Next time, the game is ready — press the button on screen and go.
 
 ## Next laps
 
-Coming up, in no particular order and with no promised date :
+What's coming, with no promised date :
 
-- **Share, upgraded** — guests get the full menu too (volume, settings, their own
-  controls), every player gets a name (a silly CTR one to start with), and the host
-  sees who just joined. Pick keyboard *or* gamepad, so a lazy stick stops wandering
-  through the menus.
-- **One game, one link** — Online straight from the game's own multiplayer menus, no
-  separate page ; one link to share whatever the mode, and a friend without a disc
-  lands in Share on their own.
-- **Smoother racing** — no hiccup when a level loads, and a steady pace even when the
-  tab is in the background.
-- **Sturdier online** — dropping out and rejoining a room, smoother remote karts.
-- **Couch + online together** — two on the sofa against two somewhere else.
-- **Your screen, your shape** — the game drawn at your window's own resolution, and
-  widescreen.
-- **A proper home page** — pick Solo, Share or Online from one place.
-- **Race the DuckStation crowd** — join the public OnlineCTR servers and race players
-  on the original game.
-- **Your disc from your own server** — load it from a machine on your home network
-  instead of dropping it again on every device.
-- **Maybe, one day** — PAL discs (the French version first).
+| | Feature | What you get |
+|---|---|---|
+| In the pit lane | **Smoother racing** | No hiccup when a level loads, a steady pace even when the tab is in the background |
+| Next up | **Share, upgraded** | Guests get the full menu too (volume, settings, their own controls) ; every player gets a name — a silly CTR one to start with — and the host sees who just joined ; pick keyboard *or* gamepad, so a lazy stick stops wandering through the menus |
+| Planned | **One game, one link** | Online straight from the game's own multiplayer menus, no separate page ; one link whatever the mode, and a friend without a disc lands in Share on their own |
+| Planned | **Sturdier online** | Drop out and rejoin a room, smoother remote karts |
+| Planned | **Couch + online together** | Two on the sofa against two somewhere else |
+| Planned | **Your screen, your shape** | The game drawn at your window's own resolution, and widescreen |
+| Planned | **A proper home page** | Pick Solo, Share or Online from one place |
+| Planned | **Race the DuckStation crowd** | Join the public OnlineCTR servers and race players on the original game |
+| Planned | **Your disc from your own server** | Load it from a machine on your home network instead of dropping it again on every device |
+| Maybe, one day | **PAL discs** | The French version first |
 
 ## Under the hood : CTR Native
 
