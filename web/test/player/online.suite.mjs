@@ -81,6 +81,7 @@ export const online = tab => tab.js('return window.__ctrOnline ? window.__ctrOnl
 /** The page in one line, for progress and failure messages. */
 const pageLog = tab => tab.js(`return [location.href, document.visibilityState, document.getElementById('boot-status')?.textContent,
 	document.getElementById('drop-error')?.textContent, 'game script ' + !!document.querySelector('script[src="ctr_native.js"]'),
+	'focus ' + (document.activeElement?.tagName + '#' + (document.activeElement?.id || '') + (document.activeElement?.closest?.('#ctr-settings') ? ' in settings' : '')) + ', settings ' + (document.getElementById('ctr-settings')?.checkVisibility?.() ? 'open' : 'closed') + ', focused ' + document.hasFocus(),
 	(document.getElementById('log')?.textContent ?? '').trim().split('\\n').slice(-4).join(' | ')].join(' ; ')`).catch(e => e.message)
 
 export async function until(tab, label, pred, timeout = 30_000, every = 250) {
@@ -113,9 +114,15 @@ export async function boot(tab, url) {
 		await sleep(1000)
 		await tab.navigate(url)
 		const deadline = Date.now() + 30_000
+		let loaded = true
 		while (!(await tab.js('return document.readyState === "complete" && typeof window.__ctrTestHandleFileFromUrl === "function"').catch(() => false))) {
-			if (Date.now() > deadline) throw new Error(`${tab.name} : the page never loaded (${await tab.js('return location.href').catch(e => e.message)})`)
+			if (Date.now() > deadline) { loaded = false; break }
 			await sleep(250)
+		}
+		// The same stall can hit the page itself (its load never completes) : another load.
+		if (!loaded) {
+			if (attempt === 3) throw new Error(`${tab.name} : the page never loaded after ${attempt} loads (${await tab.js('return location.href').catch(e => e.message)})`)
+			continue
 		}
 		// the stored disc found : the boot screen waits for the player's press (#press-start)
 		const screen = Date.now() + 30_000
@@ -264,10 +271,17 @@ async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}
 			await tab.press('ArrowDown')
 			await tab.frames(8)
 		}
-		await host.press(CROSS)
+		// A press landing on a frame the menu does not read is lost : press again, up to 3 times.
+		for (let i = 0; i < 3 && (await online(host)).octr.CurrState === ST.PICK_ROOM; i++) {
+			await host.press(CROSS)
+			await sleep(1500)
+		}
 		await until(host, 'the track pick', s => s.octr.CurrState === ST.HOST_TRACK_PICK, 15_000)
 		if ((await online(host)).octr.serverRoom !== room) throw new Error(`host joined room ${(await online(host)).octr.serverRoom}, not ${room}`)
-		await guest.press(CROSS)
+		for (let i = 0; i < 3 && (await online(guest)).octr.CurrState === ST.PICK_ROOM; i++) {
+			await guest.press(CROSS)
+			await sleep(1500)
+		}
 		await until(guest, 'the track wait', s => s.octr.CurrState === ST.GUEST_TRACK_WAIT, 15_000)
 		await until(host, 'two drivers', s => s.octr.NumDrivers === 2 && s.octr.names[1] === 'Guest', 15_000)
 		await until(guest, 'two drivers', s => s.octr.NumDrivers === 2 && s.octr.names[1] === 'Host', 15_000)
@@ -405,6 +419,10 @@ export async function drive(p, js, deadline) {
 	let maxSpeed = 0
 	let lastPos = null
 	let end = null
+	// Progress along the line : a kart grinding along a wall moves, yet gets nowhere. No new
+	// line point for 4 s is stuck too ; each recovery in a row reverses longer, wheel alternating.
+	let best = { at: -1, since: Date.now() }
+	let recoveries = 0
 	await p.hold(ACCEL)
 	try {
 		while (Date.now() < deadline) {
@@ -421,11 +439,18 @@ export async function drive(p, js, deadline) {
 			lastPos = k.pos
 			if ((maxSpeed > 0 && k.speed < maxSpeed / 5) || moved < 5) slowSince ||= Date.now()
 			else slowSince = 0
-			if (slowSince && Date.now() - slowSince > 1000) {
+			if (near !== best.at && (near - best.at + n) % n < n / 2) {
+				if ((near - best.at + n) % n > 5) recoveries = 0
+				best = { at: near, since: Date.now() }
+			}
+			if ((slowSince && Date.now() - slowSince > 1000) || Date.now() - best.since > 4000) {
+				const away = err > 0 ? 'ArrowRight' : 'ArrowLeft'
 				await p.release(ACCEL)
-				await steer(err > 0 ? 'ArrowRight' : 'ArrowLeft')
+				await steer(recoveries % 2 ? (away === 'ArrowRight' ? 'ArrowLeft' : 'ArrowRight') : away)
 				await p.hold(REVERSE)
-				await sleep(1100)
+				await sleep(Math.min(1100 + 600 * recoveries, 3000))
+				recoveries++
+				best.since = Date.now()
 				await p.release(REVERSE)
 				await steer(null)
 				await p.hold(ACCEL)
