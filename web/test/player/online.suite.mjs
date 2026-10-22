@@ -242,10 +242,12 @@ async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}
 		const guestOwnBrowser = gc !== ctx.conn
 		const gp = makePlayer({ conn: gconn, sid: null, js: gjs, capture, dir: '', current: () => ({ id: 'guest', proofs: [] }), pressFrames: PLAYER.pressFrames })
 		const guest = { name: 'guest', gs, gconn, own: guestOwnBrowser, js: gjs, press: gp.press, frames: gp.frames, navigate: url => gconn.send('Page.navigate', { url }) }
-		// The guest's name before its page loads : it connects as soon as its room opens. One
-		// browser = one localStorage for both (the host's name is already taken by then) ; the
-		// second browser has its own, written from the guest's same-origin first page.
-		await (guestOwnBrowser ? gjs : ctx.js)(`localStorage.setItem('ctr-online.name', 'Guest'); return true`)
+		// The guest's name and path before its page loads : it connects as soon as its room opens.
+		// One browser = one localStorage for both (the host's name is already taken by then) ; the
+		// second browser has its own, written from the guest's same-origin first page — the forced
+		// path too, or a guest in its own browser stays on auto and pairs over WebRTC.
+		await (guestOwnBrowser ? gjs : ctx.js)(`localStorage.setItem('ctr-online.name', 'Guest')
+			localStorage.setItem('ctr-online.path', ${JSON.stringify(mode === 'ws' ? 'relay' : 'auto')}); return true`)
 		await boot(guest, hs.link)
 		const vis = [await ctx.js('return document.visibilityState'), await gjs('return document.visibilityState')]
 		if (vis.join() !== 'visible,visible') throw new Error(`a tab is not painting : visibility ${vis.join(' / ')}`)
