@@ -125,6 +125,11 @@ export async function handleFile(file) {
   await storeAndBoot(found, { reload: false })
 }
 
+/** The ready screen's press (a key, a pad button, the Play button) : boots the stored disc. */
+export function startGame() {
+  if (ui.phase === 'ready') bootGame(ui.disc.serial)
+}
+
 export function forgetStoredDisc() {
   ui.confirm = {
     text: T.forgetAsk,
@@ -166,7 +171,7 @@ globalThis.__ctrTestHandleFileFromUrl = async (url) => {
   return handleFile(new File([blob], url.split('/').pop()))
 }
 
-mount(App, { target: document.getElementById('ctr-ui'), props: { input, handleFile, forgetStoredDisc } })
+mount(App, { target: document.getElementById('ctr-ui'), props: { input, handleFile, forgetStoredDisc, startGame } })
 
 ;(async () => {
   if (globalThis.__CTR_WEB_PRELOAD) {
@@ -191,7 +196,10 @@ mount(App, { target: document.getElementById('ctr-ui'), props: { input, handleFi
     await forgetDisc()
     return
   }
+  // the boot screen stays : the game starts on the player's press (Boot.svelte, App.svelte), which
+  // also lets the page's audio start with sound
   ui.disc = { serial: probe.serial, size: cached.size }
   globalThis.__ctrDisc = cached
-  bootGame(probe.serial)
+  ui.phase = 'ready'
+  ui.status = ''
 })()

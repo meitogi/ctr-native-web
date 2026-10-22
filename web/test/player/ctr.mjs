@@ -68,7 +68,14 @@ export async function bootToMenu(ctx) {
 	for (let attempt = 1; ; attempt++) {
 		if (!(await state(ctx))) say(`waiting for the game to boot (window.__ctr)${attempt > 1 ? `, attempt ${attempt}` : ''}`)
 		const deadline = Date.now() + 120_000
-		while (Date.now() < deadline && !(await state(ctx)) && !/network error/.test(await log())) await sleep(1000)
+		// a build without the preloaded disc, the disc stored : the boot screen waits for a press
+		while (Date.now() < deadline && !(await state(ctx)) && !/network error/.test(await log())) {
+			if (await ctx.js("return !!document.getElementById('press-start')").catch(() => false)) {
+				say('disc ready in this browser : pressing Enter')
+				await ctx.press('Enter')
+			}
+			await sleep(1000)
+		}
 		if (await state(ctx)) break
 		const text = await log()
 		if (attempt === 3 || /vblank=/.test(text)) {

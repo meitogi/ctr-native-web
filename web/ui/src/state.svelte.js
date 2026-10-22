@@ -2,8 +2,8 @@
 // by main.js's boot / drop flow.
 
 export const ui = $state({
-  // 'checking' (looking for a stored disc) · 'boot' (drop screen) · 'preparing' (copy into OPFS)
-  // · 'starting' (game script injected) · 'running'
+  // 'checking' (looking for a stored disc) · 'boot' (drop screen) · 'ready' (a stored disc, waiting
+  // for the player's press) · 'preparing' (copy into OPFS) · 'starting' (game script injected) · 'running'
   phase: 'checking',
   status: '',
   error: '',

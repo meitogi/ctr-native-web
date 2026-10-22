@@ -7,14 +7,16 @@
   //                keeps a key stuck) and arrows move the focus ; a key being bound is taken here ;
   //   gamepads     connect / disconnect toasts with the pad's family, a rAF poll of the buttons
   //                for the Home button (Settings), the panel's navigation and the binding of a
-  //                pad button.
+  //                pad button ;
+  //   ready        with a stored disc, the boot screen waits : Enter, Space, the keys or pad
+  //                buttons bound to Cross / Start start the game.
   import Boot from './Boot.svelte'
   import Glyph from './Glyph.svelte'
   import Hud from './Hud.svelte'
   import Settings from './Settings.svelte'
   import Toasts from './Toasts.svelte'
   import { refusal, scancodeOf } from './lib/keys.js'
-  import { bind, STANDARD_TO_SDL } from './lib/mappings.js'
+  import { bind, BUTTONS, STANDARD_TO_SDL } from './lib/mappings.js'
   import { parsePadId } from './lib/pads.js'
   import { keyboardSets } from './lib/settings.js'
   import { T } from './lib/strings.js'
@@ -23,7 +25,7 @@
   import { ui } from './state.svelte.js'
   import { settings } from './store.js'
 
-  let { input, handleFile, forgetStoredDisc } = $props()
+  let { input, handleFile, forgetStoredDisc, startGame } = $props()
 
   const running = $derived(ui.phase === 'running' || ui.phase === 'starting')
   let layout = $state(null)
@@ -147,7 +149,19 @@
     const sc = scancodeOf(e.code)
     if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space' || /^Arrow/.test(e.code) || (sc >= 0 && claimed(settings.get()).some((m) => m.includes(sc)))) e.preventDefault()
   }
+  // the ready screen : the PSX buttons that start the game, as indices into a mapping
+  const START_BUTTONS = [BUTTONS.indexOf('cross'), BUTTONS.indexOf('start')]
+  function startKey(e) {
+    if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') return true
+    const sc = scancodeOf(e.code)
+    return sc >= 0 && claimed(settings.get()).some((m) => START_BUTTONS.some((b) => m[b] === sc))
+  }
   function onKeyCapture(e) {
+    if (ui.phase === 'ready' && e.type === 'keydown' && !e.repeat && !ui.confirm && !onAControl() && !e.metaKey && !e.ctrlKey && !e.altKey && startKey(e)) {
+      e.preventDefault()
+      startGame()
+      return
+    }
     if (e.type === 'keydown') {
       input.onKey(e) // « Skip intro » counts presses
       claimKey(e)
@@ -197,6 +211,11 @@
   const ctrToast = (...a) => globalThis.ctrUI?.toast(...a)
 
   function onPadDown(index, button) {
+    if (ui.phase === 'ready' && !ui.confirm) {
+      const gamepad = settings.get().gamepad
+      if (START_BUTTONS.some((b) => gamepad[b] === STANDARD_TO_SDL[button])) startGame()
+      return
+    }
     input.press() // « Skip intro »
     if (button === 16 && running) { setOpen(!ui.settingsOpen); return }
     if (ui.listening?.device === 'gamepad') {
@@ -250,7 +269,7 @@
 </script>
 
 <div id="boot" class:hidden={running && !ui.progress}>
-  <Boot {handleFile} />
+  <Boot {handleFile} {startGame} {layout} />
 </div>
 
 {#if running}

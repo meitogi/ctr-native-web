@@ -111,7 +111,17 @@ export async function boot(tab, url) {
 			if (Date.now() > deadline) throw new Error(`${tab.name} : the page never loaded (${await tab.js('return location.href').catch(e => e.message)})`)
 			await sleep(250)
 		}
-		if (await tab.js('return !document.getElementById("boot").classList.contains("hidden")')) {
+		// the stored disc found : the boot screen waits for the player's press (#press-start)
+		const screen = Date.now() + 30_000
+		let shown
+		while (!(shown = await tab.js('return document.getElementById("press-start") ? "ready" : document.getElementById("drop-zone") && !document.getElementById("boot-status").textContent ? "drop" : document.getElementById("boot").classList.contains("hidden") ? "running" : ""').catch(() => ''))) {
+			if (Date.now() > screen) throw new Error(`${tab.name} : no boot screen after 30 s (${await pageLog(tab)})`)
+			await sleep(250)
+		}
+		if (shown === 'ready') {
+			say(`${tab.name} : disc ready in this browser, pressing Enter`)
+			await tab.press('Enter')
+		} else if (shown === 'drop') {
 			// 605 MB over the port forward the first time : start it, watch the drop zone go away
 			await tab.js(`void window.__ctrTestHandleFileFromUrl(location.origin + '/ctr-u.bin'); return true`)
 			say(`${tab.name} : storing the disc in this browser (605 MB, once per origin)`)
