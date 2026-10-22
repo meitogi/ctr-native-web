@@ -28,7 +28,13 @@ target_link_options(ctr_native PRIVATE
 # objects are still compiled with -g ; no one steps through the C in DevTools.
 target_link_options(ctr_native PRIVATE $<$<CONFIG:Debug>:-g2>)
 if(CTR_WEB_ASYNCIFY)
-    target_link_options(ctr_native PRIVATE -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=1048576)
+    # wasm-opt inlines every function that has a single caller, whatever its size : the whole
+    # game loop ended up in main() (605 B → 257 KB), which ASYNCIFY must instrument, and
+    # optimizing that one function was ~18 s of the 23 s release link. Capped at 1000 IR nodes :
+    # link 23 → 5 s, wasm +0.7 %, the same main-thread time per frame. (Narrowing the
+    # instrumented set with ASYNCIFY_IGNORE_INDIRECT gained no link time : LOG 18.)
+    target_link_options(ctr_native PRIVATE -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=1048576
+        -sBINARYEN_EXTRA_PASSES=--one-caller-inline-max-function-size=1000)
 endif()
 
 if(CTR_WEB_PRELOAD_DISC)
