@@ -49,7 +49,6 @@ no dates. no versions. trust the process.
 | in the oven | **one game, one link** | one link for everything ; no disc = you land in Share automatically |
 | in the oven | **couch + online** | sofa vs. sofa. 2v2. bring snacks |
 | in the oven | **your screen, your shape** | full window resolution + widescreen. 240p was a vibe in 1999, it's 2026 |
-| in the oven | **a proper home page** | Solo, Share, Online, one place |
 | in the oven | **race the DuckStation crowd** | public OnlineCTR servers, players on the original game. they've been grinding since 1999. gl hf |
 | in the oven | **disc from your own server** | load it from a box on your home network. drop it once per house, not once per device |
 | trust me bro | **PAL discs** | French version first. 50 Hz and all |
