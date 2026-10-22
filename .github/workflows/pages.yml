@@ -1,0 +1,86 @@
+name: Pages
+
+# Builds the browser client (Solo + Share at the root, Online under /online/,
+# web/pages/assemble.sh) and publishes it to GitHub Pages — custom domain
+# ctr.suuuper.app, set in Settings > Pages (see TEST-PLAN-13.md, this
+# workflow never writes it). web/pages/guard.sh is the last lock : it fails
+# the deploy if any game data would leave this repo.
+
+on:
+  push:
+    branches: [web/main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  EMSDK_VERSION: 6.0.13
+  EMSDK: ${{ github.workspace }}/.emsdk
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache emsdk ${{ env.EMSDK_VERSION }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.EMSDK }}
+          key: emsdk-${{ env.EMSDK_VERSION }}-${{ runner.os }}
+
+      - name: Install and activate emsdk ${{ env.EMSDK_VERSION }}
+        run: |
+          if [ ! -d "$EMSDK/.git" ]; then
+            git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$EMSDK"
+          fi
+          cd "$EMSDK"
+          ./emsdk install "$EMSDK_VERSION"
+          ./emsdk activate "$EMSDK_VERSION"
+
+      # web/build-web.sh sources $EMSDK/emsdk_env.sh itself (emcc, emcmake and
+      # emsdk's own node on PATH for the duration of that script only) ; cmake
+      # is already on ubuntu-latest's PATH. The build dir name is the config
+      # name ("release" here, fixed by build-web.sh's own case statement), so
+      # the two builds are kept apart by moving the first out of the way
+      # before building the second — no edit to build-web.sh.
+      - name: Build OFF (Solo + Share)
+        run: |
+          web/build-web.sh release -DCTR_WEB_PRELOAD_DISC=OFF -DCTR_ONLINE=OFF
+          mv build-web-release build-web-release-off
+
+      - name: Build ON (Online)
+        run: |
+          web/build-web.sh release -DCTR_WEB_PRELOAD_DISC=OFF -DCTR_ONLINE=ON
+          mv build-web-release build-web-release-online
+
+      - name: Assemble the site
+        run: web/pages/assemble.sh build-web-release-off build-web-release-online site
+
+      - name: Guard — no game data, ever
+        run: web/pages/guard.sh site
+
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

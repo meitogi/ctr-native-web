@@ -2,6 +2,31 @@
 
 A fork of [CTR Native](https://github.com/CTR-tools/ctr-native) that adds a browser target : WebAssembly, WebGL2, your own NTSC-U disc image dropped into the page, and online play over WebRTC. Work in progress ; the sections below describe the upstream native port, which this fork keeps building.
 
+## Play in the browser
+
+**[ctr.suuuper.app](https://ctr.suuuper.app/)**
+
+Bring your own NTSC-U disc image (`ctr-u.bin`, raw `MODE2/2352`, the format a
+CD ripper gives you, not a cooked 2048-byte `.iso`). Drop it on the page once
+: it is copied into your browser's own storage (OPFS) and stays there —
+nothing is uploaded anywhere, no game data is ever hosted on this site. A
+reload boots straight from it.
+
+- **Solo** — the root page. Keyboard or a gamepad ; couch play (several
+  players on one machine, two on one keyboard) is in the section below.
+- **Share** — the panel on the page : a guest opens the link you're given
+  with **no disc of their own**, and plays as P2–P4 over a live video stream
+  of your game (WebRTC).
+- **[Online](https://ctr.suuuper.app/online/)** — Mario Kart–style netcode :
+  each player needs their own copy of the disc, and runs the race on their
+  own screen.
+- **Hosting (Share or Online) needs a relay** : the page defaults to
+  `wss://ctr-relay.suuuper.app`, which only works with a key — ask for one,
+  or run your own (`relay/README.md`, a one-line cloud-init droplet). The
+  Online page can also fall back to a public MQTT broker or manual
+  copy-paste as a meeting point, but defaults to the relay only ; the Share
+  panel only offers the relay.
+
 ### In the browser : couch play, and the game on a TV
 
 - **Several players on one machine** : plug in one gamepad per player (a pad shows up once you press one of its buttons), then pick VS. or Arcade with 2–4 players in the game's own menus — the split screen of the original. Settings › Players shows who is P1–P4, swaps them, and puts two players on one keyboard (left half : WASD and the keys around G ; right half : the arrows and the keys around L ; both changeable in Settings › Controls).
