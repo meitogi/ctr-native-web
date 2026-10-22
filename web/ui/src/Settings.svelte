@@ -95,7 +95,7 @@
     {:else if current.id === 'disc'}
       <div class="label">{T.discStored}</div>
       <div class="setrow">
-        <span>{ui.disc ? `Crash Team Racing · ${ui.disc.serial}` : T.discNone}{#if ui.disc?.size}<small>{T.discSize(mb(ui.disc.size))}</small>{/if}</span>
+        <span>{ui.disc ? T.found(ui.disc.serial.replace('_', '-').replace('.', '')) : T.discNone}{#if ui.disc?.size}<small>{T.discSize(mb(ui.disc.size))}</small>{/if}</span>
       </div>
       <div class="actions">
         <button type="button" class="btn" onclick={pickAnother}>{T.discChange}</button>
