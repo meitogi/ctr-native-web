@@ -10,9 +10,9 @@ import { fakeStream, guestRoom, hostRoom, pair, tick } from './fake.mjs';
 
 const controls = (log, from) => log.filter((m) => m.from === from && m.bytes[0] !== TAG.pad).map((m) => ({ ...decodeControl(m.bytes), reliable: m.reliable }));
 
-async function joined(room, id, { tracks = [], name } = {}) {
+async function joined(room, id, { tracks = [], name, bot } = {}) {
   const p = pair(id);
-  const guest = createShareGuest(guestRoom({ link: p.guest }), { onTrack: (e) => tracks.push(e.track.kind), name });
+  const guest = createShareGuest(guestRoom({ link: p.guest }), { onTrack: (e) => tracks.push(e.track.kind), name, bot });
   room.add(p.host); // the host's end of a link is up before the guest's (web/net/transport.js)
   await guest.connect();
   await tick(20);
@@ -208,4 +208,66 @@ test('an old host (WELCOME {slot}, PLAYERS {players}) : the new guest still gets
   assert.equal(guest.players, 2);
   assert.equal(guest.host, null);
   assert.deepEqual(guest.list, []);
+});
+
+// ---- session 19 : the bot's own kart ----
+
+/** A debug host's window.__ctr : P1 and P2 in a race on Crash Cove. */
+const debugGame = (lap = 0) => ({
+  screen: 'race', levelID: 3, players: 2, charSelect: null, menu: null,
+  kart: { lap: 2, pos: { x: 1, y: 2, z: 3 } },
+  karts: [{ lap: 2, pos: { x: 1, y: 2, z: 3 } }, { lap, speed: 900, rank: 1, finished: false, pos: { x: 10, y: 0, z: -40 }, angle: 1024, checkpoint: 4, target: { x: 12, z: -60 }, toFinish: 5000 }],
+  track: { levelID: 3, path: [{ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 5 }] },
+});
+
+test('BOT : a debug host sends the bot its own kart (KART, game channel) and the racing line once (TRACK, ctl)', async () => {
+  const room = hostRoom();
+  let game = debugGame(0);
+  const host = createShareHost({ room, stream: fakeStream(), game: () => game });
+  const a = await joined(room, 'g1', { bot: true });
+  assert.ok(host.guests.g1.bot, 'the host knows its bot');
+  const bot = controls(a.p.log, 'guest').filter((m) => m.tag === TAG.bot);
+  assert.equal(bot.length, 1);
+  assert.equal(bot[0].reliable, true);
+
+  host.frame();
+  game = debugGame(1);
+  host.frame();
+  await tick(10);
+  const fromHost = controls(a.p.log, 'host');
+  const tracks = fromHost.filter((m) => m.tag === TAG.track);
+  const karts = fromHost.filter((m) => m.tag === TAG.kart);
+  assert.equal(tracks.length, 1, 'the line once per level');
+  assert.deepEqual(tracks[0], { tag: TAG.track, body: game.track, reliable: true });
+  assert.equal(karts.length, 2);
+  assert.ok(karts.every((m) => !m.reliable), 'kart states on the unreliable channel');
+  assert.deepEqual(karts[1].body, { screen: 'race', levelID: 3, players: 2, charSelect: null, kart: game.karts[1] }, 'P2 = drivers[1], not P1');
+  assert.deepEqual(a.guest.game, karts[1].body);
+  assert.deepEqual(a.guest.track, game.track);
+
+  // a new level : the new line, then its karts
+  game = { ...debugGame(0), levelID: 7, track: { levelID: 7, path: [{ x: 9, y: 9, z: 9 }] } };
+  host.frame();
+  await tick(10);
+  assert.deepEqual(controls(a.p.log, 'host').filter((m) => m.tag === TAG.track).map((m) => m.body.levelID), [3, 7]);
+});
+
+test('no BOT, no kart : an ordinary guest gets no KART / TRACK, and a release host (no __ctr) sends none', async () => {
+  const room = hostRoom();
+  const host = createShareHost({ room, stream: fakeStream(), game: () => debugGame() });
+  const a = await joined(room, 'g1');
+  host.frame();
+  await tick(10);
+  assert.equal(host.guests.g1.bot, undefined);
+  assert.deepEqual(controls(a.p.log, 'host').filter((m) => m.tag >= TAG.bot).map((m) => m.tag), []);
+  assert.equal(a.guest.game, null);
+
+  const room2 = hostRoom();
+  const release = createShareHost({ room: room2, stream: fakeStream(), game: () => null });
+  const b = await joined(room2, 'g2', { bot: true });
+  release.frame();
+  await tick(10);
+  assert.ok(release.guests.g2.bot);
+  assert.deepEqual(controls(b.p.log, 'host').filter((m) => m.tag >= TAG.bot).map((m) => m.tag), []);
+  assert.equal(b.guest.game, null, 'the bot falls back to Cross held');
 });

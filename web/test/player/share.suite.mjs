@@ -56,7 +56,7 @@ async function waitIn(js, label, expr, timeout = 30_000, every = 250) {
 const hostLog = ctx => ctx.js("return document.getElementById('log')?.textContent ?? ''")
 
 /** Starts sharing from the panel, as a player would ; returns the guest link. */
-async function share(ctx) {
+export async function share(ctx) {
 	const { relay, rk = '' } = ctx.args
 	if (!relay) ctx.skip('no relay : --set relay=ws://localhost:8788 --set rk=<key> (a local ctr-relay, see RUN)')
 	// guests start on « Who plays : Auto » (their key, one storage with this page : a run cut short

@@ -18,8 +18,18 @@
 //            every rename. A guest that never sends one (a page before session 20) is « P<n> ».
 //            Names travel only here, end to end over the link's DTLS : the relay's own `hello`
 //            (web/net/) carries the fixed signaling names 'host' / 'guest', in clear.
+//   BOT      ctl, guest → host : {} — a scripted guest (web/share/bot.sh) asks for its own kart.
+//            Sent on WELCOME. Only a debug host answers (it reads window.__ctr) ; a release host,
+//            or one before session 19, ignores it and the bot falls back to Cross held.
+//   KART     game channel, host → that guest, once per present : {screen, levelID, players,
+//            charSelect, kart} — window.__ctr's fields, `kart` = karts[slot] : the guest's own
+//            driver (P2 = drivers[1]), the position and racing-line target the bot steers by.
+//   TRACK    ctl, host → that guest : {levelID, path} — window.__ctr.track, the level's racing
+//            line, once per level (before the first KART on it).
+//   Debug-only in effect : no ordinary guest sends BOT, so no ordinary guest gets KART / TRACK —
+//   and a guest before session 19 drops them anyway (decodeControl's range).
 
-export const TAG = { pad: 1, offer: 0x10, answer: 0x11, welcome: 0x12, refuse: 0x13, players: 0x14, hello: 0x15 };
+export const TAG = { pad: 1, offer: 0x10, answer: 0x11, welcome: 0x12, refuse: 0x13, players: 0x14, hello: 0x15, bot: 0x16, kart: 0x17, track: 0x18 };
 export const PAD_BYTES = 10;
 
 /** PSX pad ids : digital pad, analog (DualShock) pad. */
@@ -80,7 +90,7 @@ export function encodeControl(tag, body) {
 /** {tag, body} of a control message, or null when `bytes` is not one. */
 export function decodeControl(bytes) {
   const tag = bytes[0];
-  if (tag < TAG.offer || tag > TAG.hello) return null;
+  if (tag < TAG.offer || tag > TAG.track) return null;
   try {
     return { tag, body: JSON.parse(fromUtf8.decode(bytes.subarray(1))) };
   } catch {

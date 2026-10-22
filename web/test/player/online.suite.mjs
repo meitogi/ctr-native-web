@@ -381,16 +381,18 @@ function lockBrowser(host, port) {
 /**
  * Drives one tab's kart along the level's racing line until its race ends (pure pursuit on
  * window.__ctr, as time-trial.suite.mjs does), firing whatever item it holds every 1.5 s.
- * `p` : that tab's player (hold / release / press), `js` : its evaluate.
+ * `p` : that tab's player (hold / release / press), `js` : its evaluate, `state` : the page
+ * expression shaped like window.__ctr ({screen, kart, track}) — Share's bot steers by its guest
+ * page's copy of the host's (web/share/guest-page.js `bot()`).
  */
-export async function drive(p, js, deadline) {
+export async function drive(p, js, deadline, state = 'window.__ctr') {
 	const ACCEL = 'c'
 	const REVERSE = 'x'
-	const read = () => js('if (!window.__ctr) return null; const { track, ...s } = window.__ctr; return s')
-	const line = await js('return window.__ctr?.track ?? null')
+	const read = () => js(`const c = ${state}; if (!c) return null; const { track, ...s } = c; return s`)
+	const line = await js(`return (${state})?.track ?? null`)
 	const path = line?.path ?? []
 	const n = path.length
-	if (n < 10) throw new Error('no racing line in window.__ctr (debug build ?)')
+	if (n < 10) throw new Error(`no racing line in ${state} (debug build ?)`)
 	const seg = path.map((q, i) => Math.hypot(path[(i + 1) % n].x - q.x, path[(i + 1) % n].z - q.z))
 	const spacing = [...seg].sort((a, b) => a - b)[n >> 1]
 	const wrap = a => Math.atan2(Math.sin(a), Math.cos(a))
@@ -430,6 +432,7 @@ export async function drive(p, js, deadline) {
 		while (Date.now() < deadline) {
 			const s = await read()
 			const k = s?.kart
+			if (s?.gone) break // Share's bot : the host left
 			if (!k) { await sleep(100); continue }
 			if (s.screen === 'finished' || k.finished) { end = s; break }
 			maxSpeed = Math.max(maxSpeed, k.speed)

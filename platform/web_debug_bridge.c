@@ -47,8 +47,12 @@
 //                DRAW_NEXT_MENU_IN_HIERARCHY is set : Arcade › Single / Cup, VS ›
 //                2P / 3P / 4P…), same fields as `menu`, null when none
 //   players      gGT->numPlyrCurrGame, the screens of the split screen
-//   karts        [{ speed, lap, angle }] of gGT->drivers[0 .. players-1] (as in
-//                `kart`), null entries for missing drivers
+//   karts        gGT->drivers[0 .. players-1], each with the same fields as `kart`
+//                (karts[1] = P2 : Share's bot steers it), null entries for missing
+//                drivers
+//   charSelect   while the character select is the active menu (D230.menuCharacterSelect) :
+//                { locked } = sdata->characterSelectFlags, bit n set once player n
+//                locked a character (MM_Characters.c) ; null otherwise
 //   track        level1->LevNavTable[0], the racing line the AI drives
 //                (BOTS.c ; magic 0xECFD, NAVHEADER_GETFRAME) : { levelID,
 //                path: [{x, y, z}] } in world units, published once per level
@@ -126,17 +130,22 @@ EM_JS(void, WebDebugBridge_PushPathJS, (int levelID, const s16 *frames, int coun
 
 // Runs right after WebDebugBridge_PushJS, on the object it just wrote.
 EM_JS(void, WebDebugBridge_PushMoreJS,
-      (int hasSub, const char *subTitle, int subRow, const char *subLabel, int subState, int players, const s32 *karts),
+      (int hasSub, const char *subTitle, int subRow, const char *subLabel, int subState, int players, const s32 *karts, int charSelect),
 {
 	const c = globalThis.__ctr;
 	if (!c) return;
 	const str = p => (p ? UTF8ToString(p) : null);
 	c.sub = hasSub ? { title: str(subTitle), row: subRow, label: str(subLabel), state: subState >>> 0, input: !(subState & 0x20) } : null;
 	c.players = players;
+	c.charSelect = charSelect < 0 ? null : { locked: charSelect };
 	c.karts = [];
 	for (let i = 0; i < players; i++) {
-		const at = (karts >> 2) + i * 4;
-		c.karts.push(HEAP32[at] ? { speed: HEAP32[at + 1], lap: HEAP32[at + 2], angle: HEAP32[at + 3] } : null);
+		const k = HEAP32.subarray((karts >> 2) + i * 13, (karts >> 2) + (i + 1) * 13);
+		c.karts.push(k[0] ? {
+			lap: k[1], speed: k[2], rank: k[3], finished: !!k[4],
+			pos: { x: k[5], y: k[6], z: k[7] }, angle: k[8],
+			checkpoint: k[9], target: k[9] < 0 ? null : { x: k[10], z: k[11] }, toFinish: k[12] >>> 0,
+		} : null);
 	}
 });
 
@@ -148,6 +157,33 @@ internal const char *WebDebugBridge_String(s16 stringIndex)
 	}
 
 	return sdata->lngStrings[(u16)stringIndex & ~MENU_ROW_LOCKED];
+}
+
+// A point on the track ahead of driver `d` : the restart point two nodes past its checkpoint.
+// Returns the checkpoint index, -1 (and no point) when the level has none.
+internal int WebDebugBridge_Target(struct GameTracker *gGT, struct Driver *d, int *x, int *z)
+{
+	struct Level *level = gGT->level1;
+	struct CheckpointNode *nodes;
+	int next;
+
+	if ((level == NULL) || (level->ptr_restart_points == NULL) || (d->checkpoint.currentIndex >= level->cnt_restart_points))
+	{
+		return -1;
+	}
+	nodes = level->ptr_restart_points;
+	next = nodes[d->checkpoint.currentIndex].nextIndex_forward;
+	if (next < level->cnt_restart_points)
+	{
+		next = nodes[next].nextIndex_forward;
+	}
+	if (next >= level->cnt_restart_points)
+	{
+		return -1;
+	}
+	*x = nodes[next].pos.x;
+	*z = nodes[next].pos.z;
+	return d->checkpoint.currentIndex;
 }
 
 internal void WebDebugBridge_Publish(void)
@@ -202,24 +238,7 @@ internal void WebDebugBridge_Publish(void)
 	d = gGT->drivers[0];
 	if (d != NULL)
 	{
-		struct Level *level = gGT->level1;
-
-		if ((level != NULL) && (level->ptr_restart_points != NULL) && (d->checkpoint.currentIndex < level->cnt_restart_points))
-		{
-			struct CheckpointNode *nodes = level->ptr_restart_points;
-			int next = nodes[d->checkpoint.currentIndex].nextIndex_forward;
-
-			if (next < level->cnt_restart_points)
-			{
-				next = nodes[next].nextIndex_forward;
-			}
-			if (next < level->cnt_restart_points)
-			{
-				checkpoint = d->checkpoint.currentIndex;
-				targetX = nodes[next].pos.x;
-				targetZ = nodes[next].pos.z;
-			}
-		}
+		checkpoint = WebDebugBridge_Target(gGT, d, &targetX, &targetZ);
 	}
 
 	WebDebugBridge_PushJS(VSync(-1), gGT->gameMode1, gGT->gameMode2, gGT->levelID, gGT->numLaps, gGT->trafficLightsTimer,
@@ -232,7 +251,7 @@ internal void WebDebugBridge_Publish(void)
 		struct RectMenu *sub = NULL;
 		const char *subTitle = NULL;
 		const char *subLabel = NULL;
-		s32 karts[4 * 4];
+		s32 karts[4 * 13];
 		int players = gGT->numPlyrCurrGame;
 
 		for (struct RectMenu *m = menu; (m != NULL) && (m->state & DRAW_NEXT_MENU_IN_HIERARCHY) && (m->ptrNextBox_InHierarchy != NULL);
@@ -255,12 +274,29 @@ internal void WebDebugBridge_Publish(void)
 		for (int i = 0; i < players; i++)
 		{
 			struct Driver *k = gGT->drivers[i];
+			s32 *o = &karts[i * 13];
+			int tx = 0;
+			int tz = 0;
 
-			karts[i * 4] = k != NULL;
-			karts[i * 4 + 1] = k ? k->speedApprox : 0;
-			karts[i * 4 + 2] = k ? k->lapIndex : 0;
-			karts[i * 4 + 3] = k ? (k->angle & 0xfff) : 0;
+			o[0] = k != NULL;
+			if (k == NULL)
+			{
+				continue;
+			}
+			o[9] = WebDebugBridge_Target(gGT, k, &tx, &tz);
+			o[1] = k->lapIndex;
+			o[2] = k->speedApprox;
+			o[3] = k->driverRank;
+			o[4] = (k->actionsFlagSet & ACTION_RACE_FINISHED) != 0;
+			o[5] = k->posCurr.x >> 8;
+			o[6] = k->posCurr.y >> 8;
+			o[7] = k->posCurr.z >> 8;
+			o[8] = k->angle & 0xfff;
+			o[10] = tx;
+			o[11] = tz;
+			o[12] = (s32)k->distanceToFinish_curr;
 		}
-		WebDebugBridge_PushMoreJS(sub != NULL, subTitle, sub ? sub->rowSelected : -1, subLabel, sub ? (int)sub->state : 0, players, karts);
+		WebDebugBridge_PushMoreJS(sub != NULL, subTitle, sub ? sub->rowSelected : -1, subLabel, sub ? (int)sub->state : 0, players, karts,
+		                          menu == &D230.menuCharacterSelect ? (int)(sdata->characterSelectFlags & 0xf) : -1);
 	}
 }

@@ -28,7 +28,7 @@ const RACE_MS = 360_000
 export async function bot(ctx) {
 	const link = ctx.args.link
 	if (!link) throw new Error("no room link : --set link='<the link from your Online panel>'")
-	const tab = { name: 'bot', js: ctx.js, navigate: url => ctx.conn.send('Page.navigate', { url }, ctx.sid) }
+	const tab = { name: 'bot', js: ctx.js, press: ctx.press, navigate: url => ctx.conn.send('Page.navigate', { url }, ctx.sid) }
 
 	// One origin, one localStorage : the name is read when the room connects. A small
 	// same-origin file first : a fresh tab has no storage of its own yet.

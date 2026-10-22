@@ -14,12 +14,14 @@ const LEAVE_MS = 1000;
  * @param {object} [o]
  * @param {(event: RTCTrackEvent) => void} [o.onTrack]
  * @param {string} [o.name] - our player name, sent to the host (HELLO)
+ * @param {boolean} [o.bot] - a scripted guest (web/share/bot.sh) : asks a debug host for its own
+ *   kart (BOT), kept in `game` (the last KART) and `track` (the last TRACK)
  * @returns {Emitter & {state: string, slot: number, players: number, list: {slot, name}[], host: string|null,
- *   path: string|null, code: string|null, message: string, link: object|null, connect(): Promise<void>,
+ *   path: string|null, code: string|null, message: string, link: object|null, game: object|null, track: object|null, connect(): Promise<void>,
  *   sendPad(pad): void, setName(name: string): void, close(): void}}
  *   `state` : 'idle' → 'connecting' → 'connected' | 'refused' | 'closed' ; events 'change'.
  */
-export function createShareGuest(room, { onTrack = () => {}, name = '' } = {}) {
+export function createShareGuest(room, { onTrack = () => {}, name = '', bot = false } = {}) {
   const g = new Emitter();
   g.state = 'idle';
   g.slot = 0;
@@ -31,6 +33,8 @@ export function createShareGuest(room, { onTrack = () => {}, name = '' } = {}) {
   g.code = null;
   g.message = '';
   g.link = null;
+  g.game = null;
+  g.track = null;
   let seq = 0;
   let stopMedia = null;
   const set = (fields) => {
@@ -70,7 +74,10 @@ export function createShareGuest(room, { onTrack = () => {}, name = '' } = {}) {
         set({ slot: Number(msg.body.slot) || 0, host: msg.body.host == null ? null : cleanName(msg.body.host) });
         // the host listens for sure by now : a HELLO sent before its link handlers existed is not lost
         sendName();
+        if (bot) link.send(encodeControl(TAG.bot, {}), { reliable: true });
       }
+      else if (msg?.tag === TAG.kart) g.game = msg.body; // ~30 a second : no 'change'
+      else if (msg?.tag === TAG.track) g.track = msg.body;
       else if (msg?.tag === TAG.players) {
         const list = Array.isArray(msg.body.list) ? msg.body.list.map((p) => ({ slot: Number(p?.slot) || 0, name: cleanName(p?.name) })) : [];
         set({ players: Number(msg.body.players) || 0, list });

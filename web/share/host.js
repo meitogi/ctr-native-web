@@ -18,13 +18,15 @@ export const BITRATE = { min: 500_000, max: 6_000_000, default: 2_500_000 };
  * @param {number} [o.scale=1] - video scale-down from the canvas (≥ 1)
  * @param {ReturnType<typeof createSlots>} [o.slots]
  * @param {string} [o.hostName] - the host's player name (WELCOME, PLAYERS)
+ * @param {() => object|null} [o.game] - the game's debug state (window.__ctr, debug builds) : what
+ *   a bot guest (BOT) is sent of its own kart ; null = nothing to send (release build)
  * @returns {Emitter & {slots, guests: object, maxBitrate: number, hostName: string, setBitrate(bps: number): Promise<void>,
- *   setScale(scale: number): Promise<void>, setHostName(name: string): void, players(): {slot, name}[], close(): void}}
+ *   setScale(scale: number): Promise<void>, setHostName(name: string): void, players(): {slot, name}[], frame(): void, close(): void}}
  *   `guests` : peerId → {slot, name (null until its HELLO), path, backend, state ('joining' |
- *   'streaming' | 'failed'), error?, senders?, link} ; `refusals` : the last 8 {peerId, code, path} ;
+ *   'streaming' | 'failed'), error?, senders?, bot?, link} ; `refusals` : the last 8 {peerId, code, path} ;
  *   events 'change', 'join' (guest : streaming), 'leave' (guest).
  */
-export function createShareHost({ room, stream, maxBitrate = BITRATE.default, scale = 1, slots = createSlots(), hostName = '' }) {
+export function createShareHost({ room, stream, maxBitrate = BITRATE.default, scale = 1, slots = createSlots(), hostName = '', game = () => null }) {
   const host = new Emitter();
   host.slots = slots;
   host.guests = Object.create(null);
@@ -85,6 +87,10 @@ export function createShareHost({ room, stream, maxBitrate = BITRATE.default, sc
         guest.name = name;
         change();
       }
+      else if (bytes[0] === TAG.bot && host.guests[link.peerId] === guest) {
+        guest.bot = { levelID: null };
+        change();
+      }
     });
     whenListening(link, () => {
       guest.listening = true;
@@ -135,6 +141,23 @@ export function createShareHost({ room, stream, maxBitrate = BITRATE.default, sc
   host.setHostName = (name) => {
     host.hostName = cleanName(name);
     change();
+  };
+  /** Once per present : each bot guest gets its own kart (KART), and the racing line (TRACK) on a new level. */
+  host.frame = () => {
+    let s = null;
+    for (const id in host.guests) {
+      const g = host.guests[id];
+      if (!g.bot || !g.listening) continue;
+      s ??= game();
+      if (!s) return;
+      const track = s.track;
+      if (track && track.levelID !== g.bot.levelID) {
+        g.bot.levelID = track.levelID;
+        g.link.send(encodeControl(TAG.track, { levelID: track.levelID, path: track.path }), { reliable: true });
+      }
+      g.link.send(encodeControl(TAG.kart, { screen: s.screen, levelID: s.levelID, players: s.players, charSelect: s.charSelect ?? null,
+        kart: s.karts?.[g.slot] ?? null }));
+    }
   };
   host.close = () => {
     offLink();

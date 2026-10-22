@@ -7,6 +7,8 @@
 // « Who plays » and the Controls mapping (read here for every pad sent), the screens show the
 // connection. Without it (ui/ not built) the page still plays, with the defaults and one line of
 // text. F toggles « my view » (our part of the split screen).
+// ?bot (web/share/bot.sh) : a scripted guest, « Bot » — the keyboard only, the default keys, and a
+// debug host's state of our own kart (BOT / KART / TRACK) for the bot to steer by.
 // window.__ctrShareGuest.state() / .stats() / rec*() are for the player suites.
 import { parseRoomLink } from '../net/link.js';
 import { openRoom } from '../net/room.js';
@@ -30,6 +32,7 @@ let lastButtons = 0xffff;
 let lastChange = null; // {buttons, at} : when we first sent a new button word
 const delays = []; // expectedDisplayTime − captureTime of the last frames (ms)
 const settings = () => ui?.settings.get() ?? null;
+const bot = new URLSearchParams(location.search).has('bot');
 
 // ---- the interface : our state in, its buttons out ----
 let fallback = null;
@@ -66,13 +69,14 @@ function applySound() {
 }
 ui?.settings.subscribe((s) => {
   applySound();
-  guest?.setName(s.name);
+  if (!bot) guest?.setName(s.name);
 });
 
 // ---- input ----
 function sendPad() {
   const s = settings();
-  const pad = ui?.guest.blocked() ? null : pickPad(s?.device, held, navigator.getGamepads?.() ?? [], ui?.guestInput());
+  const pad = bot ? pickPad({ mode: 'keyboard' }, held, [])
+    : ui?.guest.blocked() ? null : pickPad(s?.device, held, navigator.getGamepads?.() ?? [], ui?.guestInput());
   const word = pad ? pad.buttons : 0xffff;
   if (word !== lastButtons) {
     lastButtons = word;
@@ -133,7 +137,8 @@ async function main() {
   });
   if (!room) return;
   guest = createShareGuest(room, {
-    name: settings()?.name ?? '',
+    name: bot ? 'Bot' : settings()?.name ?? '',
+    bot,
     onTrack(e) {
       stream.addTrack(e.track);
       playout = minimisePlayout(e.receiver) ?? playout;
@@ -167,6 +172,15 @@ window.__ctrShareGuest = {
       video: [video.videoWidth, video.videoHeight], playing: !video.paused, muted: video.muted, playout, crop,
       lastChange, displayDelayMs: median(delays), delaySamples: delays.length,
     };
+  },
+  /**
+   * ?bot : our kart as the host's game sees it, shaped like window.__ctr (`kart` = ours, `track`
+   * = the racing line) ; null until a debug host's first KART, {gone} once the link is down.
+   */
+  bot() {
+    if (guest?.state === 'closed' || guest?.state === 'refused') return { gone: true, screen: guest.state, kart: null };
+    const s = guest?.game;
+    return s ? { ...s, track: guest.track } : null;
   },
   /** The receiver side : frames, jitter buffer, decode, audio energy, round trip. */
   async stats() {

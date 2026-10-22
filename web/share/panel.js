@@ -57,6 +57,7 @@ const seen = [null, null, null, null];
 Module.ctrShare = {
   present(displayW, displayH, viewportW, viewportH) {
     capture?.present(displayW, displayH, viewportW, viewportH);
+    host?.frame(); // a bot guest's own kart (debug builds : window.__ctr)
   },
   readPads(heap, dst) {
     const mask = slots.read(heap, dst);
@@ -120,7 +121,8 @@ async function start() {
     const room = await openRoom({ link, role: 'host', name: 'host' });
     room.on('warning', (w) => { error = `${w.code}: ${w.message}`; render(); });
     room.on('close', () => { error = 'relay: the relay closed the room'; render(); });
-    host = createShareHost({ room, stream: capture.stream, maxBitrate: Number(bitrate.value), scale: capture.scale, slots, hostName: hostName() });
+    host = createShareHost({ room, stream: capture.stream, maxBitrate: Number(bitrate.value), scale: capture.scale, slots, hostName: hostName(),
+      game: () => globalThis.__ctr ?? null });
     host.on('change', render);
     // the host is told who comes and goes, Settings open or not
     host.on('join', (g) => ui?.toast(ui.text.joined(nameOf(g.slot, g.name), g.slot + 1)));

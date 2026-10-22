@@ -57,7 +57,10 @@ The host sees who joins and leaves (a toast, names in Settings › Multiplayer �
   {code, message}` / `PLAYERS {players, list}` / `HELLO {name}` (guest → host) on `ctl`. Player
   names travel only there, end to end ; the relay's `hello` keeps the fixed signaling names
   `host` / `guest`. A guest page without names still plays and shows as `P<n>`. The host sends nothing before the guest's first pad :
-  a link's handlers exist only once `connect()` resolved.
+  a link's handlers exist only once `connect()` resolved. For the bot only (below) : `BOT {}`
+  (guest → host, ctl), then `TRACK {levelID, path}` (ctl, once per level) and `KART {screen,
+  levelID, players, charSelect, kart}` (the `game` channel, once per present) back — sent by a
+  debug host only, to a guest that asked only.
 - **Pads into the game** : `platform/native_input.c` pulls the guests' pads once per input
   update (`Module.ctrShare.readPads`, an `EM_JS`), after the SDL / keyboard pass, into slots 1–3
   only ; slot 0 stays the host's. A held slot reads as plugged in : the game's player count
@@ -77,6 +80,24 @@ The host sees who joins and leaves (a toast, names in Settings › Multiplayer �
 `web/share/dev.sh [debug|release] [page-port] [relay-port]` (or `wtf ctr shared` in the
 workspace) : builds, serves, starts a local relay with a fresh key, prints the host address.
 
+## Bot : a second player to test with alone
+
+`web/share/bot.sh '<guest link>'` (or `wtf ctr share-bot '<guest link>'` in the workspace) opens
+the guest link in the agent browser in bot mode (`guest.html?bot`) : it joins as « Bot » in the
+next free slot (P2), browses the characters at each character select and locks one at random,
+drives each race along the racing line and fires its item every 1.5 s, until the host stops
+sharing (or Ctrl-C). Its keys go to the host as the guest's pad over the Share link, like a
+player's ; nothing reaches the game any other way.
+
+It steers by its own kart as the host's game sees it : on `BOT`, a **debug** host (it has
+`window.__ctr`, `platform/web_debug_bridge.c`, where `karts[i]` carries `drivers[i]` in full)
+sends that guest its `karts[slot]` with every present, and the level's racing line once. A release
+host has no `__ctr` and sends nothing : the bot then holds Cross (accelerates, locks its
+character) and does not steer. Host on two ports the agent browser opens
+(`AGENT_BROWSER_ORIGINS`) : `web/share/dev.sh debug 8091 8788`. `BOT_INSTANCE=b` runs it on agent
+browser b. The steering is `drive()` of `web/test/player/online.suite.mjs`, the one Online's bot
+uses, reading `window.__ctrShareGuest.bot()` instead of `window.__ctr`.
+
 ## Tests and demo
 
 ```
@@ -91,4 +112,6 @@ relay (`RELAY_KEY=… PORT=8788 node relay/relay.js`), open
 `http://localhost:8790/web/share/demo/index.html#relay=ws://localhost:8788&rk=…`, press Share and
 open the guest link in another window.
 
-The game in two windows : `web/test/player/share.suite.mjs` (its header has the run).
+The game in two windows : `web/test/player/share.suite.mjs` (its header has the run). A whole
+race with the bot as P2, the host on agent browser a, the bot on b :
+`web/test/player/share-bot.suite.mjs`.
