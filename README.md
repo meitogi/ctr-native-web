@@ -3,6 +3,8 @@
 **ctr. in your browser. no cap.** bring your own disc, grab a pad, ruin a few
 friendships. gg.
 
+a [Meitogi](https://github.com/meitogi) thing.
+
 > **[Play at ctr.suuuper.app](https://ctr.suuuper.app/)**
 
 no install. no emulator. no plugin. no sketchy .exe from a forum post in 2009. it's the
@@ -45,7 +47,7 @@ no dates. no versions. trust the process.
 |---|---|---|
 | cooking | **smoother racing** | keeps its pace while you alt-tab to Discord, no more stutter when the first track loads |
 | next | **Share, upgraded** | guests get the full menu (volume, settings, their own controls) ; everyone gets a name — think `Mad Roo` — so the host knows who joined (and who rammed who) ; pick keyboard *or* gamepad so a drifting stick stops speedrunning the menus |
-| in the oven | **LAN / Online** | Mario Kart–style netplay ported from OnlineCTR, right from the game's own multiplayer menus : everyone on their own screen, full screen, with their own disc — same house or across the internet. private room, invite by link. end-to-end encrypted, so nobody sees your skill issue. except the other racers. wifi dies, you come back, the race remembers you |
+| in the oven | **LAN / Online** | netplay like Mario Kart, ported from OnlineCTR, right from the game's own multiplayer menus. everyone on their own screen, full screen, with their own disc — same house or across the internet. private room, invite by link. end-to-end encrypted, so nobody sees your skill issue. except the other racers. wifi dies, you come back, the race remembers you |
 | in the oven | **one game, one link** | one link for everything ; no disc = you land in Share automatically |
 | in the oven | **couch + online** | sofa vs. sofa. 2v2. bring snacks |
 | in the oven | **your screen, your shape** | full window resolution + widescreen. 240p was a vibe in 1999, it's 2026 |
@@ -53,17 +55,25 @@ no dates. no versions. trust the process.
 | in the oven | **disc from your own server** | load it from a box on your home network. drop it once per house, not once per device |
 | trust me bro | **PAL discs** | French version first. 50 Hz and all |
 
-## Under the hood : CTR Native
+## under the hood
 
-This fork is built on [CTR Native](https://github.com/CTR-tools/ctr-native), a native PC
-port of Crash Team Racing (PS1, 1999) based on the
-[CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) decompilation. To build and run the
-native Windows / Linux version, follow
-[its README](https://github.com/CTR-tools/ctr-native#readme).
+this whole thing stands on [CTR Native](https://github.com/CTR-tools/ctr-native), the
+native PC port of Crash Team Racing (PS1, 1999), itself built on the
+[CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) decompilation. want the native
+Windows / Linux build instead ? [their README](https://github.com/CTR-tools/ctr-native#readme)
+has you covered.
 
-## Credits
+## credits (the real MVPs)
 
-- [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) — the decompilation project this is built on
-- [PsyCross](https://github.com/OpenDriver2/PsyCross) — original PS1 compatibility code from which parts of CTR Native's owned platform layer and PsyQ facade headers are derived
-- [SDL3](https://github.com/libsdl-org/SDL) — cross-platform multimedia
-- Crash Team Racing is a trademark of Sony Computer Entertainment / Naughty Dog
+- [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) — decompiled the whole game.
+  absolute legends
+- [CTR Native](https://github.com/CTR-tools/ctr-native) — the native PC port this is a
+  fork of
+- [PsyCross](https://github.com/OpenDriver2/PsyCross) — the original PS1 compatibility
+  code that parts of CTR Native's platform layer and PsyQ facade headers come from
+- [SDL3](https://github.com/libsdl-org/SDL) — audio, input, windows : the boring
+  essentials nobody thanks
+- the browser port — WebAssembly, Share, LAN / Online, the whole web thing :
+  [Meitogi](https://github.com/meitogi)
+- Crash Team Racing is a trademark of Sony Computer Entertainment / Naughty Dog. we're
+  just fans with a compiler.
