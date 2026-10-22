@@ -1,71 +1,58 @@
 # CTR Native Web
 
-**Crash Team Racing, in your browser.** Yes, the real one. Bring your own disc, grab a
-pad, and race — alone, on the sofa, or online against that friend who swears they
-"weren't even trying".
+**ctr. in your browser. no cap.** bring your own disc, grab a pad, ruin a few
+friendships. gg.
 
 > **[Play at ctr.suuuper.app](https://ctr.suuuper.app/)**
 
-No install, no emulator, no plugin, no "download this totally legit .exe" : the
-decompiled PS1 game, rebuilt for the web (WebAssembly, WebGL2, Web Audio). This is a
-fork of [CTR Native](https://github.com/CTR-tools/ctr-native), the native PC port.
+no install. no emulator. no plugin. no sketchy .exe from a forum post in 2009. it's the
+decompiled PS1 game rebuilt for the web (WebAssembly, WebGL2, Web Audio), forked from
+[CTR Native](https://github.com/CTR-tools/ctr-native), the native PC port.
 
-## Bring your own disc
+## bring your own disc
 
-We don't host the game. Not on the site, not in this repo, not in a zip called
-`ctr_full_free_NO_VIRUS.rar`. You need your own **NTSC-U** copy as a raw disc image
-(`ctr-u.bin`, `MODE2/2352` — what a CD ripper gives you ; a cooked 2048-byte `.iso`
-loses the voices and the videos, and Aku Aku deserves better). Loose or inside a
-`.zip`, drop it anywhere on the page **once** : it is copied into your browser's own
-storage and stays there. Nothing is uploaded. Next time, the game is waiting — press
-the button on screen and go.
+we don't host the game. don't ask. you know why (lawyers).
 
-## What's already on the track
+you need your own **NTSC-U** copy as a raw disc image : `ctr-u.bin`, `MODE2/2352`, what a
+CD ripper spits out. a cooked 2048-byte `.iso` won't do — no voices, no videos, sad Aku
+Aku. loose or in a `.zip`, drop it anywhere on the page **once**. it lives in your
+browser now. nothing gets uploaded. next time you just press the button and send it.
 
-- **The whole game, in a tab** — menus, races, the music, the voices, and your saves,
-  kept in the browser (clear your site data and Uka Uka wins).
-- **Your controls, your way** — keyboard or any gamepad, every button remappable in
-  Settings (yes, even Triangle to accelerate, we won't judge — out loud), the right
-  button icons for your pad, and « Skip intro » for the impatient. English or French,
-  following your browser.
-- **Couch party** — 2 to 4 players on one machine in the original split screen, one
-  pad each, or two players on one keyboard (left half : WASD ; right half : the arrows ;
-  elbows : included). Settings › Players shows who is P1–P4 and swaps them. Pads start
-  in analog mode (ANA) ; Select + Start toggles digital (DIG), like the PlayStation's
-  Analog button.
-- **Share** — send a link, and your friends play as P2–P4 **without a disc** : they get
-  your game as live video and sound, you get their pads, peer to peer. Like screen
-  sharing, except they can actually blame you for the Warp Orb.
-- **[Online](https://ctr.suuuper.app/online/)** — Mario Kart–style netplay ported from
-  OnlineCTR : everyone races on their own screen with their own disc, in a private room
-  you share by link. Direct connections first, a relay when there is no other way, and
-  everything end-to-end encrypted — even the relay can't watch you miss every turbo.
-- **Your own relay, if you like** — hosting a Share or Online room goes through a small
-  relay ; the default one needs a key (ask nicely), or run yours in minutes : a Docker
-  image, a one-file setup for a throwaway cloud VM with automatic HTTPS, or a drop-in
-  behind Traefik, HAProxy or Caddy ([relay/README.md](relay/README.md)). Online can
-  also meet through a public MQTT broker, or by copy-pasting a code like it's 2003.
-- **The game on a TV (Mac)** — Safari refuses to AirPlay the game alone (« This engine
-  does not support wireless playback », thanks WebKit). Workaround : Control Center ›
-  Screen Mirroring › your Apple TV › **Use As Separate Display**, move the window there
-  in full screen, and pick the Apple TV as the sound output.
+## what already works (fr)
 
-## Next laps
+- **the whole game, in a tab** — menus, races, music, voices, saves kept in your
+  browser. clear your site data and that's on you.
+- **controls** — keyboard or any gamepad, remap every button in Settings (Triangle to
+  accelerate ? bold. respect.), the right button icons for your pad, « Skip intro »
+  because we've all seen it. English or French, whatever your browser speaks.
+- **couch party** — 2 to 4 players, 1 screen, 0 friendships left. one pad each, or two
+  on one keyboard (left half WASD, right half arrows, elbows included). Settings ›
+  Players shows who's P1–P4 and swaps them. pads start in analog (ANA), Select + Start
+  flips to digital (DIG), just like the PlayStation's Analog button.
+- **Share** — send a link, your friends play as P2–P4 **with no disc**. they get your
+  game as live video + sound, you get their pads, peer to peer. they lose, it's lag.
+  they win, it's skill. classic.
+- **host your own relay** — Share rooms go through a tiny relay. the default one needs
+  a key (slide into the DMs), or spin up yours : Docker image, a one-file setup for a
+  throwaway cloud VM with auto HTTPS, or drop it behind Traefik, HAProxy or Caddy
+  ([relay/README.md](relay/README.md)).
 
-What's coming. Dates ? Ask N. Tropy, he's the one with the time machine.
+## soon™
 
-| | Feature | What you get |
+no dates. no versions. trust the process.
+
+| | what | why you care |
 |---|---|---|
-| In the pit lane | **Smoother racing** | No more freeze-frame at the finish line, and the game keeps its pace while you alt-tab to check Discord |
-| On the starting grid | **Share, upgraded** | Guests get the full menu too (volume, settings, their own controls) ; every player gets a name — something like `Mad Roo` to start with — so the host finally knows who just joined (and who rammed whom) ; pick keyboard *or* gamepad, so a lazy stick stops wandering through the menus on its own |
-| In the garage | **One game, one link** | Online straight from the game's own multiplayer menus, no separate page ; one link whatever the mode, and a friend without a disc lands in Share on their own |
-| In the garage | **Sturdier online** | Your Wi-Fi drops, you come back, the race didn't forget you ; smoother remote karts |
-| In the garage | **Couch + online together** | Sofa vs. sofa : two here against two over there |
-| In the garage | **Your screen, your shape** | The game drawn at your window's own resolution, and widescreen. 240p was fine in 1999 |
-| In the garage | **A proper home page** | Pick Solo, Share or Online from one place |
-| In the garage | **Race the DuckStation crowd** | Join the public OnlineCTR servers and race players on the original game. They've been practising since 1999. Good luck |
-| In the garage | **Your disc from your own server** | Load it from a machine on your home network : drop the disc once per house, not once per device |
-| Pure Wumpa dream | **PAL discs** | The French version first. 50 Hz and all |
+| cooking | **smoother racing** | keeps its pace while you alt-tab to Discord, no more stutter when the first track loads |
+| next | **Share, upgraded** | guests get the full menu (volume, settings, their own controls) ; everyone gets a name — think `Mad Roo` — so the host knows who joined (and who rammed who) ; pick keyboard *or* gamepad so a drifting stick stops speedrunning the menus |
+| in the oven | **Online** | Mario Kart–style netplay ported from OnlineCTR, right from the game's own multiplayer menus : everyone races on their own screen with their own disc, private room, invite by link. end-to-end encrypted, so nobody sees your skill issue. except the other racers. wifi dies, you come back, the race remembers you |
+| in the oven | **one game, one link** | one link for everything ; no disc = you land in Share automatically |
+| in the oven | **couch + online** | sofa vs. sofa. 2v2. bring snacks |
+| in the oven | **your screen, your shape** | full window resolution + widescreen. 240p was a vibe in 1999, it's 2026 |
+| in the oven | **a proper home page** | Solo, Share, Online, one place |
+| in the oven | **race the DuckStation crowd** | public OnlineCTR servers, players on the original game. they've been grinding since 1999. gl hf |
+| in the oven | **disc from your own server** | load it from a box on your home network. drop it once per house, not once per device |
+| trust me bro | **PAL discs** | French version first. 50 Hz and all |
 
 ## Under the hood : CTR Native
 
