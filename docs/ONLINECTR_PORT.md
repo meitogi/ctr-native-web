@@ -874,3 +874,263 @@ the relay (WebSocket). These answer the open risks:
   states ahead of a weapon message. At the game's 30 fps it keeps up. A
   sender that floods a reliable path delays its control messages: unordered
   `game` exists for exactly that.
+
+## Session 14 findings
+
+One build for solo and Online: the map of what `USE_ONLINE` changes at
+compile time today, and of the game's own multiplayer flow, written before
+the design (the decisions are D8–D10 below).
+
+### How the upstream mod enters the online flow
+
+The mod is online-only from boot. Every step is compile-time:
+
+| Step | Where | What it does |
+|---|---|---|
+| Boot init | `game/MAIN/MainMain.c:509` `StateZero` → `octr_entryHook()` (`game/OnlineCTR/hooks.c:33`) | `StatsUpgrade()` overwrites `data.metaPhys[9..12]` for every class, permanently ; drops the cutscene models (`MetaDataModels[0x96..0xa5].LInB = 0`) ; zeroes `octr`, sets `IsBootedPS1` and `ver_psx` |
+| Boot level | `MainMain.c:627` | `gGT->levelID = INTRO_OXIDE` (0x26, the globe) instead of `NAUGHTY_DOG_CRATE` : no intro cutscene |
+| Intro audio | `MainMain.c:661` (`#ifndef`) | `Music_SetIntro`, the SCEA XA and its wait loop are compiled out |
+| Arena | `MainMain.c:519`, `platform/native_memory.c` | 8 MB mempack (RAMEX) |
+| Level init | `game/MAIN/MainInit.c:481` | `OnlineInit_Drivers()` (`hooks.c:84`) instead of `MainInit_Drivers()` : 8 spawn slots, remote drivers born as humans from `octr->nameBuffer`, `CurrState = GAME_WAIT_FOR_RACE` on a race level |
+| Level init, end | `MainInit.c:646` | `octr_initHook()` births the mod thread (`octr_ThreadFunc`, `thread.c:29`) and **returns early** : the cutscene freecam and confetti init below are skipped |
+| Per frame | `thread.c:29` `octr_ThreadFunc` | runs `StatePS1_<CurrState>` (`states.c`) : the server / room / track / laps / character RectMenus on the globe, « waiting for host », « LOADING... », then in-race : ghostify, remote weapon replay, names, end of race. The watchdog resets to the server menu when the bridge stops being called, and on `CurrState < 0` it reloads level 0x26 |
+| Per frame | `game/MAIN/MainFrame.c:357` `NativeOnline_Frame()` (`platform/native_online.c:811`) | the client state machine : `StatePC_Launch_PickServer` connects when `serverLockIn1` is set **and `levelID == 0x26`** (`native_online.c:506`) ; `PickRoom` joins when `serverLockIn2` ; `HostTrackPick` sends `CG_TRACK` when `boolLockedInLap` ; `CharacterPick` sends `data.characterIDs[0]` + `boolLockedInCharacters[DriverID]` ; `SG_STARTLOADING` → `StatePS1_Lobby_StartLoading` requests the level load with `gameMode1 = LOADING | ARCADE_MODE` (`states.c:263`) |
+| Browser | `web/online/library.js` `ctrOnlinePickPrivateRoom`, polled by `page.js` | session 9 : once the page has a room, pokes `serverCountry = 7`, `serverLockIn1 = 1` into octr, so the game goes from boot to the room list |
+
+The lobby → race sequence the mod expects, with who writes each `octr`
+field today (the game's RectMenus) and what the new flow must write instead :
+
+```
+ page room ──► serverCountry=7, serverLockIn1 ──► bridge connects (host: loopback+sv_core ; guest: web link)
+            ──► serverRoom=N, serverLockIn2    ──► CG_JOINROOM ──► SG_NEWCLIENT (DriverID, NumDrivers) ──► LOBBY_ASSIGN_ROLE
+ host : levelID, lapID, boolLockedInLevel+Lap  ──► CG_TRACK   ──► SG_TRACK to all ──► LOBBY_CHARACTER_PICK
+ each : data.characterIDs[0], boolLockedInCharacters[DriverID] ──► CG_CHARACTER ──► SG_CHARACTER to all (characterIDs[slot])
+ server: all locked ──► SG_STARTLOADING ──► StatePS1_Lobby_StartLoading loads octr->levelID ──► OnlineInit_Drivers ──► race
+```
+
+### Every `USE_ONLINE` site, by what it does to single player
+
+95 blocks in 41 files (`grep -rc USE_ONLINE game platform include`).
+**Gate** = changes single-player behaviour when compiled in, so it must
+become a runtime test ; **keep** = harmless with online inactive, stays
+compile-time (sizes, layouts, online-only fields that stay 0).
+
+| File | Blocks | What the online text does | Class |
+|---|---|---|---|
+| `MAIN/MainMain.c` | :509 entry hook · :519 8 MB · :627 boot level · :661 intro | boot into the mod ; no intro | gate :509 (its permanent effects move to activation), :627, :661 ; keep :519 |
+| `MAIN/MainInit.c` | :242, :260, :266 pools · :481 drivers · :646 init hook | 8-driver pools ; online driver birth ; early return skips cutscene / confetti init | gate :481, :646 ; keep pools |
+| `MAIN/MainFrame.c` | :146 + :192 clock loop on `drivers[0]` only · :313 hazard sync · :346 `RunVehicleThread` · :357 bridge call | P1-only clock, checkpoint tracker per driver stage, hazards frozen while `trafficLightsTimer > 3600` | gate all (the bridge call returns at once when inactive) |
+| `MAIN/MainFrame_RenderFrame.c` | :158 split-screen lines · :529 crystal challenge UI · :538 `OnlineEndOfRace` + return · :613 adventure hub UI | no split lines, no adventure HUD, online results screen | gate all |
+| `MAIN/MainGameStart.c` | :34 | `VehBirth_TeleportAll` skipped at race start | gate |
+| `GAMEPAD.c` | :139, :245 one pad · :343, :566, :808 break after P1 | only P1 polled : couch mode dead, pad 2 never plugged | gate all |
+| `LOAD/LOAD_Assets.c` | :67 `LOAD_Robots1P` return · :103 `LOAD_DriverMPK` | no bot characters ; 8 high-LOD models always | gate both |
+| `LOAD/LOAD_TenStages.c` | :329 region 3 for 0x26 · :428, :524 model extras | only on the globe ; extra arrays | keep |
+| `LOAD/LOAD_ModelPtrs.c` | :25 | extra model pointers | keep |
+| `BOTS.c` | :3924 `BOTS_Driver_Convert` return | **no AI driver ever** (1P arcade, demo, end of race) | gate |
+| `PlayLevel.c` | :64, :125, :145, :180, :216, :317, :325, :401, :409, :472 | `farthestHuman = drivers[0]` ; online lap times ; final-lap text and confetti for `driverID == 0` only ; rank holes ; **race ends when `drivers[0]` finishes** | gate all |
+| `Vehicle/VehPhysProc.c` | :251 uncapped reserves · :832, :846 shoot flag · :976 reserves cut · :1079 assume Cross · :1685 audio · :2541 meter grade · :2587 echo · :2935 voice | P1-only sound, reserve rules of online rooms | gate all (:832 / :846 / :251 read `octr` ; gating keeps them off) |
+| `Vehicle/VehStuckProc.c` | :436, :482, :840, :1034, :1114, :1339 | camera / sound for `driverID == 0` only | gate all |
+| `Vehicle/VehFire.c` | :45, :307, :330, :368, :382, :400 | P1-only audio, retro-fueled, `FixReservesIncrement` | gate all |
+| `Vehicle/VehBirth.c` | :67 start-line spawn · :481 camera for P1 only · :609 extra models · :727, :736 engine audio P1 only | adventure key spawn lost ; **2P split screen gets one camera** | gate :67, :481, :727 ; keep :609 |
+| `Vehicle/VehPickupItem.c` | :247, :289, :316 mask sounds · :619 shoot | `driverID == 0` instead of « not a bot » | gate all |
+| `Vehicle/VehPickState.c` :310 · `VehPhysGeneral.c` :1694 | attack pick, item set by room | gate both |
+| `UI/UI_Rank.c` | :137, :164, :198, :216, :252 | online rank column with names and checkpoint times | gate all |
+| `UI/UI_RenderFrame.c` | :133, :471, :555, :772 | HUD for `drivers[0]` only, no position suffix, no ghosts on the map | gate all |
+| `UI/UI_Instance.c` | :62, :230, :399, :410 | one HUD, no BIG1 / CTR letters | gate all |
+| `UI/UI_RaceHud.c` | :105, :115, :209 | head arrows by `octr->NumDrivers` | gate all |
+| `UI/UI_Icon.c` :282, :313 · `UI_Map.c` :275 · `UI_Lerp2D.c` :18 · `UI_DrawSlideMeter.c` :46 · `UI_Clock.c` :224 | 8-icon clip, player test, rank swing, meter grade, clock format | gate all |
+| `HOWL/HOWL_AudioState.c` | :200, :252, :298, :377, :421 | music follows `drivers[0]` | gate all |
+| `HOWL/HOWL_OtherFXRecycle.c` | :5 | **mutes every sound that is not P1's** | gate |
+| `231/RB_Crate.c` | :196, :333, :359, :493 | only `driverID == 0` picks crates : **bots and P2 cannot** | gate all |
+| `231/RB_Player.c` :188 · `RB_Follower.c` :95 · `RB_MaskShieldCloud.c` :432 | P1-only wumpa / follower / voice | gate all |
+| `PROC.c` | :340 | `Online_CollidePointWithBucket` : **no kart collision at all** unless the room has items (`serverRoom` is 0 when inactive) | gate |
+| `CAM.c` | :537 | fly-in for camera 0 only | gate |
+| `DecalFont.c` | :69 | flag mask `0x7ff` (post-retail bug fix) | gate |
+| `zGlobal_DATA.c` | :8166, :8201, :8234 | the online item odds replace the retail tables in `data` (pinned layout, `include/regionsEXE.h:2221`) | gate : the online tables become a second array picked at runtime where `VEH_ITEM_SET_RACE*` is read |
+| `include/namespace_Vehicle.h` :1 · `platform/native_memory.c` :1 · `game/game_unity.h` :2 · `CMakeLists.txt` :2 | struct fields, arena, includes | keep |
+
+So about 75 blocks in 32 files need a runtime test ; the rest (sizes,
+layouts, extra model arrays) stay compile-time. Three
+of the gated ones are not « P1 only » tweaks but outright breakage of the
+OFF behaviour : no AI drivers (`BOTS.c`), no kart collision (`PROC.c`), no
+sound but P1's (`HOWL_OtherFXRecycle.c`).
+
+Inside the mod : `thread.c` reloads level 0x26 on disconnect (`:104`) and
+`states.c` draws the lobby menus and text in every lobby state ;
+`StatePS1_Lobby_StartLoading` is the one lobby state with a side effect the
+new flow still needs (the level load, `states.c:235-274`).
+
+### The game's own multiplayer flow (retail, the lobby to reuse)
+
+- **Main menu is P1 only** : `MM_MenuProc_Main` sets `numPlyrNextGame = 1`
+  (`game/230/MM_MenuFlow.c:84-86`) and `RECTMENU_ProcessInput` reads
+  `buttonTapPerPlayer[0]` unless the menu has `ALL_PLAYERS_USE_MENU`
+  (`game/RECTMENU.c:636-643`, used by the pause menus only).
+- **Player count** : VS → race type → `menuPlayers2P3P4P` ; a row is locked
+  unless pads `0..n-1` are plugged (`MM_ToggleRows_PlayerCount`,
+  `MM_MenuFlow.c:285-317` ; `MainFrame_HaveAllPads`, `MainFrame.c:582-610`).
+  `MM_MenuProc_2p3p4p` sets `numPlyrNextGame = row + 2` and exits the title
+  to the character select (`:362-404`). A remote pad plugged by the page
+  (Share's `slots.read`, `web/share/slots.js:71-84` →
+  `NativeInput_ApplyRemotePads`, `platform/native_input.c:271-317`) opens
+  those rows : that is how session 19's bot plays P2.
+- **Character select** : each player `< numPlyrNextGame` drives its own
+  cursor from `buttonTapPerPlayer[playerIndex]`, locks with Cross (bit
+  `1 << playerIndex` in `sdata->characterSelectFlags`), the screen exits when
+  all have locked and writes `data.characterIDs[0..3]`
+  (`game/230/MM_Characters.c:996-1299`, `:1379-1397`).
+- **Track and laps** : P1 only (`game/230/MM_TrackSelect.c:623`, the lap
+  box through `RECTMENU_ProcessInput`) ; `gGT->currLEV` and `gGT->numLaps`.
+- **The load** : `QueueLoadTrack_MenuProc` (`game/QueueLoadTrack.c:30`) is
+  the single site that turns the menus into a race :
+  `MainRaceTrack_RequestLoad(gGT->currLEV)`. `LOAD_TenStages` copies
+  `numPlyrNextGame` into `numPlyrCurrGame` (`:125-128`), `MainInit_Drivers`
+  births one human per `numPlyrCurrGame` (`MainInit.c:327-330`), pad `i`
+  drives driver `i`, bots only in 1P / 2P Arcade and Adventure (`:333-379`).
+- **End of a VS race** : `PlayLevel.c:467-535` → `MainGameEnd_Initialize` ;
+  the VS menu (RETRY / CHANGE LEVEL / CHANGE CHARACTER / QUIT, `game/225.c:501`)
+  is P1 only ; QUIT and the CHANGE rows set `sdata->mainMenuState` and
+  `MainRaceTrack_RequestLoad(MAIN_MENU_LEVEL)` (`game/UI/UI_RaceFlow.c:324-396`) ;
+  `MAIN_MENU_LEVEL` is 0x27 (`include/namespace_Level.h:45`), the jump
+  into the right menu happens in `LOAD_TenStages.c:380-414`.
+- **Share's host already runs this flow with remote pads** : guests' pads
+  are P2–P4 (`web/share/host.js`, `slots.js`), the host's canvas and audio
+  are streamed over the room link's own WebRTC connection (`media.js`), and
+  the Share bot (`web/share/bot.sh`) browses and locks a character from the
+  host's `charSelect` broadcast (`TAG.kart`, `protocol.js`).
+- **Online's race already runs with the local player as `drivers[0]`** :
+  `OnlineInit_Drivers` maps `octr` slots (`clientID + 1` below `DriverID`,
+  `clientID` above) to drivers 1–7 ; `numPlyrCurrGame` stays 1 (one camera,
+  one HUD).
+
+### The page (facts the share code and the no-disc landing build on)
+
+- A room link is `<base>#room=<11 chars>&key=<43 chars>[&sig=…][&relay=wss://…][&rk=…]`
+  (`web/net/link.js:1-30`) : room id = 8 random bytes base64url, secret = 32
+  random bytes base64url, HKDF-SHA256 keys from (secret, room id)
+  (`web/net/crypto.js:34-42`). The relay URL and its access key travel in the
+  link ; the relay sees the room id and `rk`, never the secret.
+- Online's link is the game page itself (`index.html#room=…`, `page.js:345`),
+  Share's guest link is `share/guest.html#…` (`panel.js:116`). Nothing in a
+  link says which mode it is.
+- A guest opening the Online link without stored game data sees the plain
+  drop zone (`web/ui/src/Boot.svelte`) ; `online/page.js` only runs once the
+  game boots (`library.js:50`), so the room in the hash is invisible until then.
+- There is no short code anywhere.
+- The ON build is served at `/online/` by the published site, the OFF build at
+  `/` (`web/pages/assemble.sh:42-51`) ; `index.html` is the same file in both.
+
+### D8 — One build : the mod is on at runtime
+
+`USE_ONLINE` stays the compile-time flag of the mod's text ; what used to
+be « the ON build is online-only » became two runtime tests, defined in
+`game/OnlineCTR/native_compat.h` and stored in `native_bridge.c` :
+
+- `ONLINE_ROOM` (`octrActive`) — a room is joined. Gates the bridge's state
+  machine (`NativeOnline_Frame` returns at once otherwise), the main menu's
+  ONLINE sub-menu, and the attract demo (a room never starts it).
+- `ONLINE_RACE` (`octrActive && octr->CurrState >= LOBBY_START_LOADING &&
+  !(gameMode1 & MAIN_MENU)`) — this level is, or is being loaded as, the
+  room's race : true from the load's first stage (which clears `MAIN_MENU`),
+  false on the menu level that waits for `SG_STARTLOADING` and keeps
+  rendering under the flag — the lobby's level is never the race. Every in-race and
+  load-time block of the map above tests it : driver birth, pads, HUD,
+  audio, items, crates, collision, bots, lap stats, the end of race. The
+  lobby runs the retail menus with retail pads ; the main menu loaded after a
+  race (`CurrState` back to `LOBBY_ASSIGN_ROLE`) is retail again.
+
+Every edit is marked `// ctr-native: one build, runtime` inside the existing
+`#ifdef USE_ONLINE`, and the retail text keeps its tokens : the OFF build
+preprocesses to the same translation unit as before (`off-identical.sh`).
+The item odds of the online rooms left `struct Data` (pinned layout) for
+`onlineItemSetRace2/3/4[]`, picked at `VehPhysGeneral_SetHeldItem`.
+
+The mod's boot init moved to `OnlineRuntime_Activate()` : `octr` zeroed,
+`IsBootedPS1`, `ver_psx`, the rewards and the save's unlocks opened (saved,
+restored on leave : the retail menus test `GAME_PROGRESS.unlocks`, not the
+hub's `advProgress.rewards`, so the room's players pick any character and
+track in the game's own menus), the
+mod thread born on the current level (it kills itself once the room is left ;
+`octr_initHook` births it on every level of a room). `StatsUpgrade()` is
+applied around the room's race only (`OnlineRuntime_SyncStats`), so solo play
+beside an open room keeps the retail stats ; the cutscene-model drop is not
+done at runtime (the 8 MB arena holds them, a leave must keep the cutscenes).
+`OnlineRuntime_Deactivate()` undoes all of it and, from a race level, loads
+the title.
+
+Natively nothing changes in spirit : `octrBootOnline` (default 1 ; the web
+constructor sets 0) keeps the boot into the globe and the mod's own menus
+(`octr_entryHook` sets `octrActive`). One difference : the globe level now
+gets the retail cutscene init, the early return of `MainInit_FinalizeInit`
+being `ONLINE_RACE`-gated. The i686 build is still compile + ctest only.
+
+The host layer talks to the game through `native_online_game.h` :
+`NativeOnlineGame_Activate / Deactivate / Active / SyncStats / SetMode /
+SetMyCharacter`, stubbed in `tests/online` (always on, as the native flow).
+The bridge polls a control queue once per frame (`NativeOnline_SetControl`,
+`enum NativeOnlineControl` : ENTER, LEAVE, CHARACTER) ; the web transport
+registers `ctr_web_online_control` (D6 kept : JS only queues). ENTER waits
+until the game is on its title between loads, then picks « Private Room »
+(`serverCountry = 7`, `serverLockIn1`) ; the page's
+`ctrOnlinePickPrivateRoom` poke of session 9 is gone.
+
+### D9 — The lobby is the game's own menus, shared
+
+With `octrExternalLobby` (set by the web constructor), the mod's lobby states
+draw nothing : `thread.c` dispatches `LAUNCH_*` / `LOBBY_*` to
+`OnlineExternal_State()` (`native_bridge.c`), which only does what the
+protocol needs — the join of room 5 (the items room ; one room per link ;
+no `ResetPsxGlobals` : the mempack end is the arena's already, `SG_NEWCLIENT`
+clears the locks, and the characters belong to the host's menus), the role
+assignment (and,
+after a race, the reload of the title : the room stays, the room reset sends
+everyone to `LOBBY_ASSIGN_ROLE` on the race level), and the level load of
+`LOBBY_START_LOADING` without its text (the menu's battle limits kept ; the
+active menu closed directly, as upstream's guest state does — a guest has no
+track lock to hide the menu its game sits in, and a menu left active draws
+over the race and takes the pad). The race states are upstream's. `StatePC_Launch_PickServer`'s « level 0x26 »
+test is skipped on the web.
+
+The host plays the lobby in the game : the main menu's new row ONLINE
+(`game/230/MM_MenuFlow.c`, `ONLINE_LNG_ROW` = language slot 0x9a, as the
+mod's menus use 0x9a–0xa1) opens the page's multiplayer panel when no room
+is joined (`NativeWeb_OpenMultiplayer`, CTR_ONLINE web builds only ; a solo
+boot keeps the panel closed, as the OFF build had none — a room link opens
+it), else a
+VS / BATTLE sub-menu whose rows take the retail paths (players, characters,
+track) with `octrOnlineMenuPath` set. The guests' pads are P2–P4 through
+Share's host on the same room (`web/share/panel.js` `startOn`, guests on the
+relay kept with their pad and no picture), so the player-count rows open as
+in couch play. At the track lock, `QueueLoadTrack_MenuProc` calls
+`OnlineLobby_RequestRace()` : in `LOBBY_HOST_TRACK_PICK` it writes
+`octr->levelID`, `lapID`, the locks, the host's own character lock,
+`numPlyrNextGame = 1`, and snapshots the menus' `data.characterIDs[1..3]`
+for the page (`octrLobbyCharacters`, `octrLobbyPhase = STARTING`) ; the
+bridge sends `CG_TRACK`, then `CG_CHARACTER`. The page sends each guest the
+character its pad locked (Share's `LOBBY` message, tag 0x19) ; the guest's
+`OnlineLobby_SetMyCharacter()` writes `data.characterIDs[0]` and its lock,
+its bridge sends `CG_CHARACTER`, and `SG_STARTLOADING` loads every game's
+own race — the existing part. The guest's game, meanwhile, sat on its title
+(or wherever its menus were) with its local input blocked from the join to
+the race load (`ctrUI.lobby`), the host's screen over its
+canvas (`web/online/page.js`, a `<video>` fed by `createShareGuest` on the
+game's own link) and its keys and pad sent as a Share guest's pad.
+
+On the wire the two protocols share the links : every OnlineCTR packet
+travels behind the tag byte 0x20 (`web/online/net.js` `ONLINE_TAG`), Share's
+messages keep their tags (0x01, 0x10–0x19). Session 10's gateway strips the
+tag. A load away from the room's race (the pause menu's quit or retry) leaves
+the room (`MainRaceTrack_RequestLoad` → `OnlineRuntime_LeaveRace`) ; the
+others see the empty `SG_NAME` of a disconnect, as upstream. Four players at
+most : the game's menus stop there (the Share host refuses a fourth guest).
+
+### D10 — One code for any mode (session 14c)
+
+Settled with the user (2026-10-23), built in 14c : the share code is the
+secret — 16 Crockford base32 characters (no I, L, O, U ; case-insensitive) in
+four groups, `K7PX-M2QD-9RTF-H3WB`, 80 random bits ; the room id is derived
+from it (a hash), so the relay still never sees the secret ; the link is
+`<site>/#c=<code>` plus `relay=` / `rk=` when they are not the page's
+defaults. The relay URL and key come from the page's settings (the first link
+received, or the site's defaults). Joining by code : a field on the boot
+screen and in the panel ; a guest without game data lands in Share.
