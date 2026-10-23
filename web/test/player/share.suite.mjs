@@ -11,6 +11,17 @@
 //     toast on join and on leave), the host's name and the list reach the guest.
 //   SHARE-ONE-MACHINE : one controller seen by both windows drives one player once the host is on
 //     « Keyboard » and the guest on « Gamepad » (the user's « ça boucle », 2026-10-22).
+//   SHARE-RELOAD : the guest reloads its page : the slot it gets back (recorded), the stream again,
+//     no slot left behind on the host.
+//   SHARE-FULL : three guests are P2, P3, P4 (the game pulls slots 1–3) ; a fourth is refused `full`
+//     and given no slot.
+//
+// Release builds (as published : no window.__ctr) : the game is waited for on its `vblank=` log
+// lines, the scenarios assert what the Share pages report — the VS. menu walk of SHARE-2TAB and
+// SHARE-ONE-MACHINE (debug log lines) are the debug run's.
+// --set guestOrigin=https://ctr.suuuper.app : the guests open the guest page of that site (the
+// published one), the same link after `#` ; the host stays on this build (the agent browser cannot
+// drop a disc into another origin's storage).
 //
 // RUN
 //   Build : web/build-web.sh debug -DCTR_WEB_PRELOAD_DISC=ON
@@ -18,6 +29,11 @@
 //   Relay : (cd relay && npm ci && RELAY_KEY=<key> PORT=8788 node relay.js)
 //   Play  : bash plans/ctr-native-web/tools/play.sh share <session> 8091 -- \
 //             --set relay=ws://localhost:8788 --set rk=<key> [--set out=<dir for the guest's proofs>]
+//   Release, as published : web/build-web.sh release (OFF, then ON) → web/pages/assemble.sh … site,
+//     python3 web/test/player/serve.py site 8091 (the disc in the agent browser's OPFS for :8091).
+//   Published guests : … --set relay=wss://ctr-relay.suuuper.app --set rk=<key> \
+//     --set guestOrigin=https://ctr.suuuper.app (that origin in AGENT_BROWSER_ORIGINS, the relay and
+//     stun.l.google.com in AGENT_BROWSER_REACH).
 //   Both ports in AGENT_BROWSER_ORIGINS and forwarded ; P2P between two windows of the agent
 //   browser needs AGENT_BROWSER_REACH=*.local (WebRTC's mDNS host candidates), else SHARE-2TAB skips.
 // Not a node --test file : `node --test web/test/*.test.js` never loads it.
@@ -55,6 +71,43 @@ async function waitIn(js, label, expr, timeout = 30_000, every = 250) {
 
 const hostLog = ctx => ctx.js("return document.getElementById('log')?.textContent ?? ''")
 
+/** True once boot() found a release build (no window.__ctr) ; null before. */
+let release = null
+
+/**
+ * Boots the game : a debug build to the main menu (bootToMenu) ; a release build (no window.__ctr :
+ * its ctr_native.js carries no debug bridge) until its game clock runs (`vblank=` lines) — Share
+ * streams whatever is on screen. The build is read from the page's own script, not guessed from
+ * timing : __ctr only appears once the game has its globals, seconds after the clock starts.
+ */
+async function boot(ctx) {
+	release = !(await ctx.js("const r = await fetch('ctr_native.js', { cache: 'no-store' }); return (await r.text()).includes('globalThis.__ctr = ')"))
+	if (!release) return bootToMenu(ctx)
+	const vblank = () => ctx.js("const m = [...(document.getElementById('log')?.textContent ?? '').matchAll(/vblank=(\\d+)/g)].pop(); return m ? Number(m[1]) : 0")
+	// the wasm over the forwarded port sometimes stalls with nothing logged (LOG ## T3) : reload, 3 tries
+	for (let attempt = 1; attempt <= 3; attempt++) {
+		const deadline = Date.now() + 120_000
+		while (Date.now() < deadline) {
+			if (await ctx.js("return !!document.getElementById('press-start')").catch(() => false)) await ctx.press('Enter')
+			else if ((await vblank()) >= 300) return null
+			await sleep(1000)
+		}
+		if (attempt < 3) await ctx.reload()
+	}
+	throw new Error(`no game after 3 × 2 min : ${(await hostLog(ctx)).trim().split('\n').slice(-3).join(' | ')}`)
+}
+
+/** The guest link as the guests open it : on --set guestOrigin's site when given. */
+function guestLink(ctx, link) {
+	const at = ctx.args.guestOrigin
+	if (!at) return link
+	const u = new URL(link)
+	return `${at.replace(/\/$/, '')}/share/guest.html${u.search}${u.hash}`
+}
+
+/** Waits for a guest window's link : connected with both tracks, or refused / closed. */
+const settled = js => waitIn(js, 'the guest connected or refused', "(() => { const s = window.__ctrShareGuest.state(); return s.state === 'refused' || s.state === 'closed' || (s.state === 'connected' && s.tracks.length === 2) ? s : null })()", 40_000)
+
 /** Starts sharing from the panel, as a player would ; returns the guest link. */
 export async function share(ctx) {
 	const { relay, rk = '' } = ctx.args
@@ -73,8 +126,10 @@ export async function share(ctx) {
 }
 
 /** A guest window (a background tab stops painting), with the player harness for its own pad. */
-async function guestWindow(ctx, url) {
-	const origin = new URL(ctx.args.url).origin
+/** `before` : a script run on the guest's origin before the guest page loads (its storage). */
+async function guestWindow(ctx, url, { before } = {}) {
+	url = guestLink(ctx, url)
+	const origin = new URL(url).origin
 	// a small same-origin file first : the agent browser's proxy refuses about:blank
 	const { targetId } = await ctx.conn.send('Target.createTarget', { url: `${origin}/preload-flag.js`, newWindow: true })
 	await sleep(500)
@@ -86,9 +141,68 @@ async function guestWindow(ctx, url) {
 	await ctx.conn.send('Page.addScriptToEvaluateOnNewDocument', { source: "window.__guestErrors = []; addEventListener('error', e => __guestErrors.push(e.message || `load ${e.target?.src || e.target?.href}`), true); addEventListener('unhandledrejection', e => __guestErrors.push(String(e.reason)))" }, sid)
 	const js = expression => ctx.evaluate(ctx.conn, sid, `(async () => { ${expression} })()`)
 	const player = makePlayer({ conn: ctx.conn, sid, js, capture, dir: '', current: () => ({ id: 'guest', proofs: [] }), pressFrames: PLAYER.pressFrames })
+	if (before) await js(before)
 	await ctx.conn.send('Page.navigate', { url }, sid)
 	await waitIn(js, 'the guest page', 'typeof window.__ctrShareGuest === "object"', 20_000)
-	return { targetId, sid, js, player, close: () => ctx.conn.send('Target.closeTarget', { targetId }).catch(() => {}) }
+	return { targetId, sid, js, player, url, close: () => ctx.conn.send('Target.closeTarget', { targetId }).catch(() => {}) }
+}
+
+/**
+ * The host's page as a PNG. The harness's default capture of this WebGL page is flat grey on the
+ * headless agent browser (LOG ## T3, ## 6) ; `fromSurface` reads the compositor's surface.
+ */
+async function hostShot(ctx, file) {
+	const { data } = await ctx.conn.send('Page.captureScreenshot', { format: 'png', fromSurface: true }, ctx.sid)
+	writeFileSync(file, Buffer.from(data, 'base64'))
+}
+
+/**
+ * SHARE-2TAB's end on a release build : no menu walk (no window.__ctr), the guest's keyboard and
+ * virtual pad read by the game as P2's word (readPads, `__ctrShare.state().pads`), the latency pair,
+ * what the guest receives recorded with --set out.
+ */
+async function releaseTwoTab(ctx, g, gs, b, fps) {
+	await g.player.hold('ArrowRight')
+	await waitIn(ctx.js, "P2's Right on the host", `window.__ctrShare.state().pads[1]?.buttons === ${RIGHT}`, 3000, 20)
+	const sent = await g.js('return window.__ctrShareGuest.state().lastChange')
+	const got = (await ctx.js('return window.__ctrShare.state().pads'))[1]
+	await g.player.release('ArrowRight')
+	await waitIn(ctx.js, "P2's Right released", 'window.__ctrShare.state().pads[1]?.buttons === 0xffff', 3000, 50)
+	await g.player.pad(0).connect()
+	await g.player.pad(0).hold('right')
+	await waitIn(ctx.js, "P2's Right from the guest's gamepad", `window.__ctrShare.state().pads[1]?.buttons === ${RIGHT}`, 3000, 20)
+	await g.player.pad(0).release('right')
+	await waitIn(ctx.js, "P2's pad released", 'window.__ctrShare.state().pads[1]?.buttons === 0xffff', 3000, 50)
+	await g.player.pad(0).disconnect()
+	const hs = (await ctx.js('return await window.__ctrShare.stats()'))[0]
+	const lat = { inputMs: Math.round(got.at - sent.at), rttMs: b.rttMs, jitterBufferMs: b.jitterBufferMs && Math.round(b.jitterBufferMs),
+		decodeMs: b.decodeMsPerFrame && Math.round(b.decodeMsPerFrame * 10) / 10, encodeMs: hs?.encodeMsPerFrame && Math.round(hs.encodeMsPerFrame * 10) / 10 }
+	let recorded = null
+	if (ctx.args.out) {
+		const out = join(ctx.args.out, `share-release-${new Date().toISOString().replace(/[:.]/g, '-')}`)
+		mkdirSync(out, { recursive: true })
+		const f = await g.js('return await window.__ctrShareGuest.grab()')
+		if (f) writeFileSync(join(out, 'guest-frame.png'), Buffer.from(f.png, 'base64'))
+		await hostShot(ctx, join(out, 'host.png'))
+		await g.js('window.__ctrShareGuest.recStart(); return true')
+		await sleep(6000)
+		const webm = Buffer.from(await g.js('return await window.__ctrShareGuest.recStop()'), 'base64')
+		writeFileSync(join(out, 'guest-stream.webm'), webm)
+		writeFileSync(join(out, 'latency.json'), `${JSON.stringify({ lat, guest: b, host: hs, guestPage: new URL(g.url).origin }, null, 2)}\n`)
+		recorded = webm.length
+	}
+	return `release host · guest page ${new URL(g.url).origin} · ${gs.path} · P${gs.slot + 1} · video ${b.frameWidth}×${b.frameHeight} ${fps} fps (${hs?.codec} ${hs?.encoder} → ${b.decoder}) · sound energy ${b.audioEnergy.toFixed(3)} · P2's word from the keyboard and the pad read by the game · latency ${JSON.stringify(lat)}${recorded ? ` · guest video ${recorded} B` : ''}`
+}
+
+/**
+ * The click that starts the sound, a real one (a JS click is no user gesture) : on the interface's
+ * overlay, or — the page without its interface (ui/guest.js not loaded yet, or not at all) — on the
+ * page itself, which then listens to any click.
+ */
+async function clickForSound(ctx, g) {
+	const at = await waitIn(g.js, 'somewhere to click for sound', "(() => { const o = document.getElementById('overlay'); const b = (o?.classList.contains('clickable') ? o : document.querySelector('video') ?? document.body).getBoundingClientRect(); return o?.classList.contains('clickable') || window.__ctrShareGuest.state().ui === false ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null })()", 5000).catch(() => null)
+	if (!at) throw new Error(`no « click for sound » on the guest : ${JSON.stringify(await g.js("return { ui: window.__ctrShareGuest.state().ui, overlay: document.getElementById('overlay')?.className ?? null, text: document.getElementById('overlay-text')?.textContent ?? null, errors: window.__guestErrors }"))}`)
+	for (const type of ['mousePressed', 'mouseReleased']) await ctx.conn.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: 1 }, g.sid)
 }
 
 /** Cells of two 32 × 24 grey thumbnails that differ by more than 24 levels. */
@@ -96,7 +210,7 @@ const changed = (a, b) => a.grey.reduce((n, v, i) => n + (Math.abs(v - b.grey[i]
 
 export default async ctx => {
 	await ctx.scenario('SHARE-RELAY-REFUSED', async () => {
-		await bootToMenu(ctx)
+		await boot(ctx)
 		const link = await share(ctx)
 		const g = await guestWindow(ctx, link.replace('guest.html#', 'guest.html?mode=ws#'))
 		try {
@@ -107,7 +221,7 @@ export default async ctx => {
 			if (!h.refusals.some(r => r.code === 'online-mode' && r.path === 'relay')) throw new Error(`host refusals ${JSON.stringify(h.refusals)}`)
 			if (h.guests.length) throw new Error(`host gave a slot : ${JSON.stringify(h.guests)}`)
 			if (/remote pad slot=1 connected/.test(await hostLog(ctx))) throw new Error('P2 got plugged in for a relay guest')
-			return `guest : « ${s.message} » · host refusals ${JSON.stringify(h.refusals)}`
+			return `${release ? 'release' : 'debug'} host · guest page ${new URL(g.url).origin} · guest : « ${s.message} » · host refusals ${JSON.stringify(h.refusals)}`
 		} finally {
 			await g.close()
 		}
@@ -115,8 +229,8 @@ export default async ctx => {
 
 	await ctx.scenario('SHARE-2TAB', async () => {
 		const out = ctx.args.out ? join(ctx.args.out, `share-${new Date().toISOString().replace(/[:.]/g, '-')}`) : null
-		if (out) mkdirSync(out, { recursive: true })
-		await until(ctx, 'the main menu', s => s.menu?.input, { timeout: 10_000 })
+		if (out && !release) mkdirSync(out, { recursive: true }) // a release run files its own (releaseTwoTab)
+		if (!release) await until(ctx, 'the main menu', s => s.menu?.input, { timeout: 10_000 })
 		const link = await share(ctx)
 		const g = await guestWindow(ctx, link)
 		try {
@@ -127,10 +241,11 @@ export default async ctx => {
 			}
 			if (gs.slot !== 1 || !/^direct-/.test(gs.path)) throw new Error(`guest slot ${gs.slot} path ${gs.path}`)
 			await waitIn(ctx.js, 'the stream to the guest', "window.__ctrShare.state().guests[0]?.state === 'streaming'", 15_000)
-			await waitIn(ctx.js, 'P2 plugged in on the pad bus', "/remote pad slot=1 connected/.test(document.getElementById('log').textContent)", 10_000)
+			// the game pulls slot 1 (readPads' mask) ; debug builds also log it on the pad bus
+			await waitIn(ctx.js, 'P2 read by the game', 'window.__ctrShare.state().pads[1] != null', 10_000)
+			if (!release) await waitIn(ctx.js, 'P2 plugged in on the pad bus', "/remote pad slot=1 connected/.test(document.getElementById('log').textContent)", 10_000)
 			// a real click : unmuted playback needs a user gesture
-			const r = await g.js("const b = document.getElementById('overlay').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }")
-			for (const type of ['mousePressed', 'mouseReleased']) await ctx.conn.send('Input.dispatchMouseEvent', { type, x: r.x, y: r.y, button: 'left', clickCount: 1 }, g.sid)
+			await clickForSound(ctx, g)
 			const vis = [await ctx.js('return document.visibilityState'), await g.js('return document.visibilityState')]
 			if (vis.join() !== 'visible,visible') throw new Error(`a window is not painting : ${vis.join(' / ')}`)
 
@@ -148,6 +263,7 @@ export default async ctx => {
 			if (b.frameWidth !== want[0] || b.frameHeight !== want[1]) throw new Error(`guest video ${b.frameWidth} × ${b.frameHeight}, wanted ${want.join(' × ')} (PS1 display ${host.display})`)
 			if (fps < 25) throw new Error(`guest decodes ${fps} fps`)
 			if (!(b.audioEnergy > a.audioEnergy)) throw new Error(`no sound energy on the guest (${a.audioEnergy} → ${b.audioEnergy})`)
+			if (release) return await releaseTwoTab(ctx, g, gs, b, fps)
 
 			// P2's pad : the VS. menu offers 2 players only with pad 2 plugged in
 			const path = await menuTo(ctx, 'VS.', dir => ctx.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
@@ -202,7 +318,7 @@ export default async ctx => {
 			let recorded = null
 			if (out) {
 				for (const [name, f] of [['guest-menu', f0], ['guest-p2-right', f2], ['guest-p2-pad', f3]]) writeFileSync(join(out, `${name}.png`), Buffer.from(f.png, 'base64'))
-				await capture(ctx.conn, ctx.sid, { out: join(out, 'host.png') })
+				await hostShot(ctx, join(out, 'host.png'))
 				// what the guest receives, sound included, while P2 moves left and right
 				await g.js('window.__ctrShareGuest.recStart(); return true')
 				for (let i = 0; i < 4; i++) {
@@ -214,7 +330,6 @@ export default async ctx => {
 				writeFileSync(join(out, 'latency.json'), `${JSON.stringify({ lat, guest: b, host: hs, guestState: gst }, null, 2)}\n`)
 				recorded = webm.length
 			}
-			await ctx.shot('host-character-select')
 			// back to the main menu for the next run
 			await g.player.pad(0).disconnect()
 			return `${gs.path} · P${gs.slot + 1} · video ${b.frameWidth}×${b.frameHeight} ${fps} fps (${hs?.codec} ${hs?.encoder} → ${b.decoder}) · sound energy +${(b.audioEnergy - a.audioEnergy).toFixed(3)} · menu ${path.join(' → ')} → single race → 2 players → ${JSON.stringify(select.menu?.label ?? null)} (${select.screen}, ${select.mode.join('|')}) · P2 Right : ${moved} cells changed (idle ${idle}) · latency ${JSON.stringify(lat)}${recorded ? ` · guest video ${recorded} B` : ''}`
@@ -228,6 +343,7 @@ export default async ctx => {
 		// que ça boucle ») : one physical pad reaches both pages, so it drove P1 on the host and P2
 		// through the guest at once. Each page's « Who plays » (Settings › Players) splits them : the
 		// host on the keyboard, the guest on the gamepad — one press, one player.
+		if (release) ctx.skip('reads the debug pad-bus log (pad0 buttons=…) : the debug run covers it')
 		const link = await share(ctx)
 		const setDevice = mode => `globalThis.ctrUI?.settings?.patch?.({ device: { mode: ${JSON.stringify(mode)}, pad: null } }); return true`
 		await ctx.js(setDevice('keyboard'))
@@ -278,8 +394,7 @@ export default async ctx => {
 			const hud = await g.js("return { sound: !!document.getElementById('ctr-sound'), gear: !!document.getElementById('ctr-gear'), overlay: document.getElementById('overlay-text')?.textContent ?? null, status: document.getElementById('ctr-guest-status')?.textContent ?? null }")
 			if (!hud.sound || !hud.gear) throw new Error(`HUD ${JSON.stringify(hud)}`)
 			// the click that starts the sound, a real one
-			const r = await g.js("const b = document.getElementById('overlay').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }")
-			for (const type of ['mousePressed', 'mouseReleased']) await ctx.conn.send('Input.dispatchMouseEvent', { type, x: r.x, y: r.y, button: 'left', clickCount: 1 }, g.sid)
+			await clickForSound(ctx, g)
 			await waitIn(g.js, 'the video unmuted', "!window.__ctrShareGuest.state().muted", 5000)
 			// the volume of the site's speaker is the video's
 			await g.js('globalThis.ctrUI.settings.patch({ volume: 0.25, muted: false }); return true')
@@ -314,10 +429,9 @@ export default async ctx => {
 	await ctx.scenario('SHARE-NAMES', async () => {
 		const link = await share(ctx)
 		await ctx.js("globalThis.ctrUI.settings.patch({ name: 'Turbo Roo' }); return true")
-		// one origin, one storage : the guest window reads the name written here, not the host's own
-		await ctx.js("localStorage.setItem('ctr-online.name', 'Mad Coco'); return true")
 		const toasts = () => ctx.js("return [...document.querySelectorAll('.toast')].map(t => t.innerText.replace(/\\s+/g, ' ')).join(' | ')")
-		const g = await guestWindow(ctx, link)
+		// the guest's name in its own origin's storage (the host's too when both pages share one origin)
+		const g = await guestWindow(ctx, link, { before: "localStorage.setItem('ctr-online.name', 'Mad Coco'); return true" })
 		try {
 			const gs = await waitIn(g.js, 'the guest connected', "(() => { const s = window.__ctrShareGuest.state(); return s.state !== 'connecting' && s.state !== 'idle' ? s : null })()", 40_000)
 			if (gs.state !== 'connected') {
@@ -339,6 +453,76 @@ export default async ctx => {
 			return `host « Turbo Roo », guest « Mad Coco » → « Sly Tiny » · toasts « ${joined.replace(/\s+/g, ' ')} », « ${left.replace(/\s+/g, ' ')} » · guest list ${JSON.stringify(gl)} · ${await toasts()}`
 		} finally {
 			await g.close()
+		}
+	})
+
+	await ctx.scenario('SHARE-RELOAD', async () => {
+		// A guest reloads its page (a player pressing F5, a phone waking up) : a new link from the same
+		// page. Recorded : the slot it gets back, how long until it streams again, what the host's
+		// slots read in between ; asserted : streaming again, one guest on the host, no slot left over.
+		const link = await share(ctx)
+		const g = await guestWindow(ctx, link)
+		try {
+			const gs = await settled(g.js)
+			if (gs.state !== 'connected') {
+				if (gs.code === 'online-mode') ctx.skip(`no direct WebRTC path between the two windows (${gs.message})`)
+				throw new Error(`guest : ${JSON.stringify(gs)}`)
+			}
+			await waitIn(ctx.js, 'the stream to the guest', "window.__ctrShare.state().guests[0]?.state === 'streaming'", 15_000)
+			const before = gs.slot
+			const t0 = Date.now()
+			await ctx.conn.send('Page.reload', {}, g.sid)
+			// the host's view, every 100 ms, until the reloaded page streams again
+			const seen = []
+			let after = null
+			while (Date.now() - t0 < 30_000) {
+				const h = await ctx.js('const s = window.__ctrShare.state(); return s.guests.map(x => `P${x.slot + 1}:${x.state}`).join(",") || "none"')
+				if (seen[seen.length - 1]?.h !== h) seen.push({ ms: Date.now() - t0, h })
+				after = await g.js("const s = window.__ctrShareGuest?.state(); return s && s.state === 'connected' && s.tracks.length === 2 ? s : null").catch(() => null)
+				if (after && /streaming/.test(h) && !h.includes(',')) break
+				await sleep(100)
+			}
+			if (!after) throw new Error(`the reloaded guest did not connect again in 30 s ; host ${JSON.stringify(seen)}`)
+			const h = await waitIn(ctx.js, 'one guest streaming', "(() => { const s = window.__ctrShare.state(); return s.guests.length === 1 && s.guests[0].state === 'streaming' ? s : null })()", 10_000)
+			const ms = Date.now() - t0
+			const b = await waitIn(g.js, 'frames on the reloaded guest', '(async () => { const s = await window.__ctrShareGuest.stats(); return s?.framesDecoded > 30 ? s : null })()', 15_000)
+			const game = release ? null : await state(ctx)
+			return `P${before + 1} reloaded → back as P${after.slot + 1}${after.slot === before ? ' (its slot)' : ' (ANOTHER slot)'} · streaming again after ${ms} ms, ${b.frameWidth}×${b.frameHeight} · host slots over time ${seen.map(x => `${x.ms}ms ${x.h}`).join(' → ')} · host guests ${h.guests.length}${game ? ` · game ${game.screen}` : ''}`
+		} finally {
+			await g.close()
+		}
+	})
+
+	await ctx.scenario('SHARE-FULL', async () => {
+		// Three guests are P2, P3, P4 in order of arrival — the game pulls slots 1–3, so the multitap
+		// bus is on — and a fourth is refused `full`, with no slot.
+		const link = await share(ctx)
+		const gs = []
+		try {
+			for (let i = 0; i < 3; i++) {
+				const g = await guestWindow(ctx, link)
+				gs.push(g)
+				const s = await settled(g.js)
+				if (s.state !== 'connected') {
+					if (s.code === 'online-mode') ctx.skip(`no direct WebRTC path between the windows (${s.message})`)
+					throw new Error(`guest ${i + 1} : ${JSON.stringify(s)}`)
+				}
+				if (s.slot !== i + 1) throw new Error(`guest ${i + 1} got slot ${s.slot}`)
+			}
+			const h = await waitIn(ctx.js, 'three guests streaming, slots 1–3 read by the game', "(() => { const s = window.__ctrShare.state(); return s.guests.length === 3 && s.guests.every(x => x.state === 'streaming') && s.pads[1] && s.pads[2] && s.pads[3] ? s : null })()", 20_000)
+			const players = await waitIn(gs[2].js, 'PLAYERS 4 on the last guest', '(() => { const s = window.__ctrShareGuest.state(); return s.players === 4 ? s.players : null })()', 5000)
+			const fourth = await guestWindow(ctx, link)
+			gs.push(fourth)
+			const r = await waitIn(fourth.js, 'the fourth guest refused', "(() => { const s = window.__ctrShareGuest.state(); return s.state === 'refused' || s.state === 'closed' || s.state === 'connected' ? s : null })()", 30_000)
+			if (r.state !== 'refused' || r.code !== 'full') throw new Error(`fourth guest : ${JSON.stringify(r)}`)
+			await sleep(1000)
+			const h2 = await ctx.js('return window.__ctrShare.state()')
+			if (h2.guests.length !== 3 || !h2.refusals.some(x => x.code === 'full')) throw new Error(`host after the fourth : ${JSON.stringify({ guests: h2.guests.map(x => x.slot), refusals: h2.refusals })}`)
+			const fps = []
+			for (const g of gs.slice(0, 3)) fps.push(Math.round((await g.js('return await window.__ctrShareGuest.stats()'))?.framesPerSecond ?? 0))
+			return `slots ${h.guests.map(x => `P${x.slot + 1}`).sort().join(' ')} · the game pulls slots 1–3 · players ${players} on the guests · fourth : « ${r.message} » (${r.code}), host refusals ${JSON.stringify(h2.refusals.filter(x => x.code === 'full'))} · guests' fps ${fps.join(' / ')}`
+		} finally {
+			for (const g of gs) await g.close()
 		}
 	})
 }
