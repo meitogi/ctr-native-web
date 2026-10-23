@@ -1,7 +1,7 @@
 name: Pages
 
-# Builds the browser client (Solo + Share at the root, Online under /online/,
-# web/pages/assemble.sh) and publishes it to GitHub Pages — custom domain
+# Builds the browser client (one build : Solo, Share and Online at the root,
+# /online/ a redirect, web/pages/assemble.sh) and publishes it to GitHub Pages — custom domain
 # ctr.suuuper.app, set in Settings > Pages (see TEST-PLAN-13.md, this
 # workflow never writes it). web/pages/guard.sh is the last lock : it fails
 # the deploy if any game data would leave this repo.
@@ -46,22 +46,13 @@ jobs:
 
       # web/build-web.sh sources $EMSDK/emsdk_env.sh itself (emcc, emcmake and
       # emsdk's own node on PATH for the duration of that script only) ; cmake
-      # is already on ubuntu-latest's PATH. The build dir name is the config
-      # name ("release" here, fixed by build-web.sh's own case statement), so
-      # the two builds are kept apart by moving the first out of the way
-      # before building the second — no edit to build-web.sh.
-      - name: Build OFF (Solo + Share)
-        run: |
-          web/build-web.sh release -DCTR_WEB_PRELOAD_DISC=OFF -DCTR_ONLINE=OFF
-          mv build-web-release build-web-release-off
-
-      - name: Build ON (Online)
-        run: |
-          web/build-web.sh release -DCTR_WEB_PRELOAD_DISC=OFF -DCTR_ONLINE=ON
-          mv build-web-release build-web-release-online
+      # is already on ubuntu-latest's PATH. One build since session 14 : the
+      # CTR_ONLINE=ON game plays solo until a room is joined.
+      - name: Build (Solo + Share + Online)
+        run: web/build-web.sh release -DCTR_WEB_PRELOAD_DISC=OFF -DCTR_ONLINE=ON
 
       - name: Assemble the site
-        run: web/pages/assemble.sh build-web-release-off build-web-release-online site
+        run: web/pages/assemble.sh build-web-release site
 
       - name: Guard — no game data, ever
         run: web/pages/guard.sh site
