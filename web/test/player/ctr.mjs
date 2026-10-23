@@ -4,13 +4,14 @@
 // Game state comes from window.__ctr (platform/web_debug_bridge.c, debug web
 // builds only), never from pixels.
 
+import { MAIN_MENU, onMainMenu, menuTo as autoMenuTo } from '../../ui/src/lib/autopilot.js'
+
 // The suites' page options. pressFrames : a press must outlast one game frame
 // (30 fps) on any display — 8 rAF = 67 ms at 120 Hz, 133 ms at 60 Hz.
 export const PLAYER = { gamepad: true, pressFrames: 8 }
 
-// Main menu rows (D230.rowsMainMenuBasic, game/230/D230.c), as the game spells them.
-// ONLINE : the CTR_ONLINE build's row (session 14) ; absent from the OFF build's menu
-export const MAIN_MENU = ['ADVENTURE', 'TIME TRIAL', 'ARCADE', 'VS.', 'BATTLE', 'ONLINE', 'HIGH SCORE', 'SCRAPBOOK']
+// MAIN_MENU (the main menu's rows) and onMainMenu : web/ui/src/lib/autopilot.js's, shared with the page
+export { MAIN_MENU, onMainMenu }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -53,8 +54,6 @@ export function brief(s) {
 	return `screen=${s.screen} level=${s.levelID} mode=${s.mode.join('|')}${menu}${kart} vblank=${s.vblank} fps=${s.fps}`
 }
 
-/** True on the main menu taking input (any row selected). */
-export const onMainMenu = s => s.screen === 'menu' && s.menu != null && s.menu.input && MAIN_MENU.includes(s.menu.label)
 
 /**
  * Boots to the main menu. The intro (copyright, crate, trophy) would play into
@@ -108,21 +107,15 @@ export async function bootToMenu(ctx) {
  * asserting each step lands on the next row. Returns the rows visited.
  */
 export async function menuTo(ctx, label, step) {
-	const visited = []
-	for (let i = 0; i < MAIN_MENU.length; i++) {
-		const s = await state(ctx)
-		visited.push(s.menu.label)
-		if (s.menu.label === label) return visited
-		const target = MAIN_MENU.indexOf(label)
-		const dir = MAIN_MENU.indexOf(s.menu.label) < target ? 'down' : 'up'
-		const row = s.menu.row
-		await step(dir)
-		await until(ctx, `the cursor to leave row ${row}`, n => n.menu != null && n.menu.row !== row, { timeout: 3000 })
-		// The menu acts on a newly pressed button : the next press must come
-		// after the game has sampled this one released (one 30 fps frame or more).
-		await ctx.frames(8)
-	}
-	throw new Error(`never reached ${label} (visited ${visited.join(' → ')})`)
+	// The menu acts on a newly pressed button : the next press must come after the game has
+	// sampled this one released (one 30 fps frame or more) — 8 rAF.
+	return autoMenuTo({
+		read: () => state(ctx),
+		out: { press: key => step(key === 'ArrowDown' ? 'down' : 'up') },
+		label,
+		rows: MAIN_MENU,
+		settle: () => ctx.frames(8),
+	})
 }
 
 /**

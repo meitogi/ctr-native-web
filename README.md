@@ -55,6 +55,40 @@ no dates. no versions. trust the process.
 | in the oven | **disc from your own server** | load it from a box on your home network. drop it once per house, not once per device |
 | trust me bro | **PAL discs** | French version first. 50 Hz and all |
 
+## run it yourself (devs)
+
+one game build, the page on one port. from the repo, with emsdk and cmake around :
+
+```
+web/dev.sh dev
+```
+
+opens the dev page on http://localhost:8090 — the page's sources with hot reload, the debug game
+built the first time. rebuild the game with `web/dev.sh build`, then reload the page.
+`web/dev.sh prod` serves the site exactly as GitHub Pages gets it (`web/dev.sh prod release`
+checks it with the guard too). in the devcontainer : `wtf ctr dev`, `wtf ctr build`, `wtf ctr prod`.
+
+testing alone ? the debug page's home has a **second window** row : Online VS, Online Battle or
+Share. one click, a second window opens beside the first, joins the room by itself and plays as
+Bot ; the first window walks its menus to the race. Settings › Players has the Bot switch, Settings ›
+Dev the log and the game state. none of it ships on the site.
+
+the ports (one list : [web/dev-ports.tsv](web/dev-ports.tsv), checked by `web/dev.sh ports --check`) :
+
+<!-- ports -->
+| Port | Use | Forward in VS Code |
+|---|---|---|
+| 8090 | the dev page : wtf ctr dev (hot reload) or wtf ctr prod (the site as published) | yes |
+| 8091 | player suites' page server (one per parallel session) | yes |
+| 8092 | player suites' page server (one per parallel session) | yes |
+| 8093 | player suites' page server (one per parallel session) | yes |
+| 8787 | local relay, only with wtf ctr dev relay=local (the VPS relay is the default) | yes |
+| 8788 | player suites' relay | yes |
+| 8790 | the web/net and web/share demo pages | yes |
+| 9001 | MQTT stand-in (signaling suite) | yes |
+| 8099 | the LAN disc server (wtf disc), on the LAN host, not in the container | no |
+<!-- /ports -->
+
 ## under the hood
 
 this whole thing stands on [CTR Native](https://github.com/CTR-tools/ctr-native), the

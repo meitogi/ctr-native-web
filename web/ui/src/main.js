@@ -9,6 +9,10 @@
 //   ctrUI.players              couch mode (lib/players.js) : slots as the game reports them, swap(a, b)
 //   ctrUI.lobby(on)            an Online room's guest in the lobby : the game gets no local input
 //   ctrUI.guestInput()         the player's mapping as web/share/protocol.js reads it (guest-input.js)
+// The home (Home.svelte) picks Solo, Share or Online : the press or the drop boots the game, then
+// hosts the room chosen (lib/home.js host). Debug builds (__CTR_DEV__) load src/dev/ : the
+// home's second window, the « Bot » switch, Settings › Dev ; a window opened as the second one
+// (?dev=<mode>) boots by itself.
 // and Module.ctrInput for the game (lib/input-hook.js, pulled by platform/native_input.c).
 import { mount } from 'svelte'
 import App from './App.svelte'
@@ -16,11 +20,12 @@ import './app.css'
 import { findCachedDisc, forgetDisc, probeDisc, storeDiscStream } from '../../disc.js'
 import { resolveDisc } from './lib/discsource.js'
 import { guestInput } from './lib/guest-input.js'
+import { host } from './lib/home.js'
 import { createInputHook } from './lib/input-hook.js'
 import { createPlayers } from './lib/players.js'
 import { LANG, T, errorText } from './lib/strings.js'
 import { ui } from './state.svelte.js'
-import { settings } from './store.js'
+import { role, settings } from './store.js'
 
 const Module = globalThis.Module
 
@@ -39,14 +44,15 @@ document.documentElement.lang = LANG
 // ---- the game's input hook ----
 // The game gets no local input while the player is in the Settings panel (its keyboard focus is
 // there, a key is being bound, or a confirmation is up) ; with the panel open and the focus on the
-// game (a click on it), the game plays — the Online tab stays open beside a race.
+// game (a click on it), the game plays — the Online tab stays open beside a race. With the Bot
+// switch on (debug builds), the panel's focus does not stop the bot's keys.
 const inPanel = () => !!document.activeElement?.closest?.('#ctr-settings')
 // Couch mode : the game reports its four player slots, Settings › Players swaps them.
 const players = createPlayers({
   onChange: (slots) => { ui.players = slots },
   onAnalog: (slot, pad) => toast(pad.analog ? T.analogOn(slot + 1) : T.analogOff(slot + 1), pad.analog ? '' : T.analogOffHelp, pad.family),
 })
-const input = createInputHook(settings, { blocked: () => ui.phase === 'running' && (ui.lobbyGuest || ui.listening !== null || ui.confirm !== null || (ui.settingsOpen && inPanel())) }, { players })
+const input = createInputHook(settings, { blocked: () => ui.phase === 'running' && (ui.lobbyGuest || ui.listening !== null || ui.confirm !== null || (ui.settingsOpen && inPanel() && !ui.bot)) }, { players })
 if (Module) Module.ctrInput = input
 
 // ---- boot ----
@@ -62,6 +68,27 @@ function bootGame(serial) {
   // running once the game presents (the canvas gets its first frame) — or soon anyway
   const done = () => { if (ui.phase === 'starting') ui.phase = 'running' }
   setTimeout(done, 400)
+}
+
+/**
+ * Boots, then hosts the home's choice : the room's link shows in Settings › Multiplayer (`show`).
+ * Resolves with that link (null : solo, or a failure, toasted).
+ */
+async function bootMode(serial, mode = ui.mode, { show = true } = {}) {
+  bootGame(serial)
+  if (mode === 'solo') return null
+  try {
+    const link = await host(mode)
+    if (show) {
+      ui.tab = 'multi'
+      ui.multi = mode
+      ui.settingsOpen = true
+    }
+    return link
+  } catch (e) {
+    toast(String(e?.message ?? e))
+    return null
+  }
 }
 
 async function storeAndBoot(found, { reload }) {
@@ -98,7 +125,7 @@ async function storeAndBoot(found, { reload }) {
   }
   ui.progress = null
   globalThis.__ctrDisc = stored
-  bootGame(probe.serial)
+  bootMode(probe.serial)
 }
 
 /** A file dropped or picked : checked, then stored and booted (or, over a running game, confirmed). */
@@ -129,9 +156,10 @@ export async function handleFile(file) {
   await storeAndBoot(found, { reload: false })
 }
 
-/** The ready screen's press (a key, a pad button, the Play button) : boots the stored disc. */
-export function startGame() {
-  if (ui.phase === 'ready') bootGame(ui.disc.serial)
+/** The ready screen's press (a key, a pad button, a home choice) : boots the stored disc in `mode`. */
+export function startGame(mode = ui.mode, opts) {
+  if (ui.phase !== 'ready') return Promise.resolve(null)
+  return bootMode(ui.disc.serial, mode, opts)
 }
 
 export function forgetStoredDisc() {
@@ -178,6 +206,8 @@ globalThis.__ctrTestHandleFileFromUrl = async (url) => {
   return handleFile(new File([blob], url.split('/').pop()))
 }
 
+if (__CTR_DEV__) import('./dev/index.js').then((dev) => dev.install({ startGame, toast }))
+
 mount(App, { target: document.getElementById('ctr-ui'), props: { input, handleFile, forgetStoredDisc, startGame } })
 
 ;(async () => {
@@ -209,4 +239,6 @@ mount(App, { target: document.getElementById('ctr-ui'), props: { input, handleFi
   globalThis.__ctrDisc = cached
   ui.phase = 'ready'
   ui.status = ''
+  // the home's second window (debug) : in the room already, nobody to press
+  if (__CTR_DEV__ && role.second) startGame('solo')
 })()

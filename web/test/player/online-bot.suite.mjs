@@ -9,12 +9,13 @@
 //
 // RUN : web/online/bot.sh '<room link>' (it brings the agent browser up and calls e2e.mjs).
 //   The page and the relay must be on ports the agent browser's proxy opens
-//   (AGENT_BROWSER_ORIGINS) : web/online/dev.sh debug 8092 8787.
+//   (AGENT_BROWSER_ORIGINS) : web/dev.sh dev relay=local (8090 + 8787).
 //   Start it once your room exists ; it joins, then follows your menus.
 // Not a node --test file.
 
 import { HEARTBEAT_MS, PLAYER, say } from './ctr.mjs'
 import { PHASE, boot, drive, online, until } from './online.suite.mjs'
+import { createPicker } from '../../ui/src/lib/autopilot.js'
 
 export const meta = {
 	url: 'http://localhost:8092/index.html',
@@ -23,9 +24,7 @@ export const meta = {
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
-const CROSS = 'c'
 const RACE_MS = 420_000
-const DIRS = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp']
 
 /** The page in one object : the room, the lobby phase and the bot's view of the host's menus. */
 const look = js => js(`const o = window.__ctrOnline
@@ -66,34 +65,15 @@ export async function bot(ctx) {
 	say(`in ${g.host ?? 'the host'}'s room as ${P} (${g.path}${g.media ? '' : ', no picture'})`)
 
 	const races = []
-	let lastPress = 0
-	let locking = false
-	let tries = 0
-	const browse = async moves => {
-		for (let i = 0; i < moves; i++) {
-			await ctx.press(DIRS[Math.floor(Math.random() * DIRS.length)])
-			await sleep(400)
-		}
-	}
+	const picker = createPicker({ out: { press: ctx.press } })
 	beat = Date.now() + HEARTBEAT_MS
 	for (;;) {
 		g = await look(ctx.js)
 		if (g.state !== 'connected' || g.gone || !g.active) break
 		const s = g.game
 		const slot = g.slot
-		const lockedMine = s?.charSelect && (s.charSelect.locked >> slot) & 1
-		if (g.phase === PHASE.menus && s?.charSelect && !lockedMine) {
-			if (!locking) {
-				say(`character select on the host : ${P} browses the characters`)
-				await sleep(800)
-				await browse(4 + Math.floor(Math.random() * 7))
-				tries = 0
-			} else if (tries >= 3) {
-				await browse(1 + Math.floor(Math.random() * 3))
-				tries = 0
-			}
-			locking = true
-			if (Date.now() - lastPress > 1500) { await ctx.press(CROSS); lastPress = Date.now(); tries++ }
+		if (g.phase === PHASE.menus && s?.charSelect && !((s.charSelect.locked >> slot) & 1)) {
+			if ((await picker.step(s.charSelect, slot)) === 'browse') say(`character select on the host : ${P} browses the characters`)
 		} else if (g.phase === PHASE.race && (await ctx.js('return !!window.__ctr?.track && (window.__ctr.screen === "countdown" || window.__ctr.screen === "race")'))) {
 			say(`racing on my own game (race ${races.length + 1})`)
 			const r = await drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, Date.now() + RACE_MS)
@@ -104,10 +84,7 @@ export async function bot(ctx) {
 			for (const end = Date.now() + 120_000; Date.now() < end && (await look(ctx.js)).phase === PHASE.race; await sleep(500));
 			beat = Date.now() + HEARTBEAT_MS
 			continue
-		} else {
-			if (locking && lockedMine) say(`${P}'s character locked : waiting for the host's track`)
-			locking = false
-		}
+		} else if ((await picker.step(g.phase === PHASE.menus ? s?.charSelect : null, slot)) === 'locked') say(`${P}'s character locked : waiting for the host's track`)
 		if (Date.now() >= beat) {
 			say(`in ${g.host ?? 'the host'}'s room as ${P} : phase ${g.phase}, game state ${g.curr}${s ? `, host on ${s.screen}${s.charSelect ? ' (character select)' : ''}` : ''} — ${races.length} race(s) so far`)
 			beat += HEARTBEAT_MS

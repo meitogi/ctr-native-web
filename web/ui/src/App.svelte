@@ -144,6 +144,9 @@
     return sc >= 0 && claimed(settings.get()).some((m) => START_BUTTONS.some((b) => m[b] === sc))
   }
   function onKeyCapture(e) {
+    // the Bot switch's keys (src/dev/keys.js, debug builds) : for the game and the pad, never for
+    // this page's own shortcuts — only « Skip intro » counts them
+    if (e.ctrBot) { if (e.type === 'keydown') input.onKey(e); return }
     if (ui.phase === 'ready' && e.type === 'keydown' && !e.repeat && !ui.confirm && !onAControl() && !e.metaKey && !e.ctrlKey && !e.altKey && startKey(e)) {
       e.preventDefault()
       startGame()

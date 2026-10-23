@@ -38,4 +38,10 @@ export const ui = $state({
   listening: null,
   notice: '',
   volumeOpen: false,
+  // the home's choice (lib/home.js MODES) : what the press or the drop starts
+  mode: 'solo',
+  // debug builds (src/dev/) : this window's « Bot » switch (lib/autopilot.js drives it), the second
+  // window's progress line ({ mode, text, error })
+  bot: false,
+  second: null,
 })

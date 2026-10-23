@@ -77,8 +77,9 @@ The host sees who joins and leaves (a toast, names in Settings › Multiplayer �
 
 ## By hand
 
-`web/share/dev.sh [debug|release] [page-port] [relay-port]` (or `wtf ctr shared` in the
-workspace) : builds, serves, starts a local relay with a fresh key, prints the host address.
+`web/dev.sh dev relay=local` (or `wtf ctr dev relay=local` in the workspace) : the page on 8090,
+a local relay with a fresh key on 8787, the host address printed ; the home's Share boots and
+shares at once. Alone : the home's « Second window » → Share opens the guest beside it, as Bot.
 
 ## Bot : a second player to test with alone
 
@@ -94,9 +95,9 @@ It steers by its own kart as the host's game sees it : on `BOT`, a **debug** hos
 sends that guest its `karts[slot]` with every present, and the level's racing line once. A release
 host has no `__ctr` and sends nothing : the bot then holds Cross (accelerates, locks its
 character) and does not steer. Host on two ports the agent browser opens
-(`AGENT_BROWSER_ORIGINS`) : `web/share/dev.sh debug 8091 8788`. `BOT_INSTANCE=b` runs it on agent
-browser b. The steering is `drive()` of `web/test/player/online.suite.mjs`, the one Online's bot
-uses, reading `window.__ctrShareGuest.bot()` instead of `window.__ctr`.
+(`AGENT_BROWSER_ORIGINS`) : `web/dev.sh dev relay=local`. `BOT_INSTANCE=b` runs it on agent
+browser b. The steering and the character pick are `web/ui/src/lib/autopilot.js`'s — the ones Online's bot
+and the page's « Bot » switch use —, reading `window.__ctrShareGuest.bot()` instead of `window.__ctr`.
 
 ## Tests and demo
 

@@ -13,6 +13,8 @@
 #   - any *.bin / *.iso / *.cue / *.img file (case-insensitive)
 #   - preload-flag.js saying window.__CTR_WEB_PRELOAD = true
 #   - any .js/.html file literally setting window.__CTR_WEB_PRELOAD = true
+#   - any .js file carrying the debug tools (« ctr-dev-tools », web/ui/src/dev/ : the
+#     second window, the Bot switch — a Debug build's bundle, never published)
 # On success, prints the accepted file list and the site's total size, and
 # exits 0. CTR_WEB_PRELOAD_DISC is never ON in the Pages workflow — this is
 # the second lock, not the only one.
@@ -51,6 +53,9 @@ while IFS= read -r -d '' f; do
     *.js | *.html)
       if grep -q 'window\.__CTR_WEB_PRELOAD *= *true' "$f"; then
         fail "sets window.__CTR_WEB_PRELOAD = true" "$f"
+      fi
+      if grep -q 'ctr-dev-tools' "$f"; then
+        fail "the debug tools (a Debug build's page bundle)" "$f"
       fi
       ;;
   esac

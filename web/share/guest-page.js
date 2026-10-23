@@ -91,7 +91,7 @@ const typing = () => {
 };
 for (const type of ['keydown', 'keyup']) {
   window.addEventListener(type, (e) => {
-    if (type === 'keydown' && typing()) return;
+    if (type === 'keydown' && typing() && !e.ctrBot) return; // ctrBot : the Bot switch's keys (ui/src/dev/keys.js)
     if (type === 'keydown' && e.code === 'KeyF' && !e.repeat) { toggleCrop(); return; }
     const keys = ui?.guestInput().keys;
     const mine = keys ? keys[e.code] : true;

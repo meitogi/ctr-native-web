@@ -181,7 +181,8 @@ function stop() {
   stopOn();
 }
 
-globalThis.ctrShareApi = { slots, startOn, stopOn, host: () => host, guests };
+// start / link : the page's home hosts Share without this panel's button (ui/src/lib/home.js)
+globalThis.ctrShareApi = { slots, startOn, stopOn, host: () => host, guests, start, link: () => linkText };
 
 ui?.settings.subscribe((s) => { if (host && s.name !== host.hostName) host.setHostName(s.name); });
 

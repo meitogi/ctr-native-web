@@ -4,8 +4,10 @@
   // visible invitation. Ids kept from session 3's page (#drop-zone, #pick-disc, #disc-input,
   // #drop-progress, #drop-error, #boot-status) : suites read them.
   // With a stored disc (phase 'ready'), #press-start : the disc, and the real button that starts
-  // the game — the connected pad's Cross in its family's look, the keyboard's Start key.
+  // the game — the connected pad's Cross in its family's look, the keyboard's Start key — in the
+  // home's mode (Home.svelte : Solo, Share, Online), chosen above the drop zone too.
   import Glyph from './Glyph.svelte'
+  import Home from './Home.svelte'
   import Logo from './Logo.svelte'
   import { codeOf } from './lib/keys.js'
   import { BUTTONS } from './lib/mappings.js'
@@ -47,17 +49,19 @@
         </svg>
         <div class="disp big">{T.readyTitle}</div>
         <div class="dim">{T.found(ui.disc?.serial?.replace('_', '-').replace('.', ''))} · {T.readyKept}</div>
+        <Home ready />
         <p class="press" aria-live="polite">
           {T.pressTo}
           {#if ui.pads.length}<Glyph kind="pad" value={padCross} family={ui.pads[0].family} size={34} /> {T.or}{/if}
           <Glyph kind="key" value={startKey} {layout} />
           {T.toPlay}
         </p>
-        <button id="start-game" type="button" class="primary" onclick={startGame}>{T.play}</button>
+        <button id="start-game" type="button" class="primary" onclick={() => startGame()}>{T.home.play[ui.mode]}</button>
       </section>
       <p class="dim small other">{T.otherDisc} <button id="pick-disc" type="button" class="link" onclick={() => input.click()}>{T.chooseFile}</button></p>
       <input id="disc-input" type="file" accept=".bin,.zip,application/zip" hidden bind:this={input} onchange={pick} />
     {:else}
+      <Home />
       <section id="drop-zone" class="card drop" class:busy={ui.phase === 'checking' || ui.phase === 'starting'}>
         <svg class="disc" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
           <circle cx="32" cy="32" r="27" /><circle cx="32" cy="32" r="7" /><path d="M32 13a19 19 0 0 1 19 19" stroke-linecap="round" opacity=".6" />

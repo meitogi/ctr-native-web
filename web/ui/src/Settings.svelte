@@ -5,6 +5,8 @@
   //   Multiplayer  the panels other modules hand over, one segment each (Share : web/share/panel.js,
   //                Online : web/online/page.js) — shown when there is one
   //   System       volume, skip intro, the game data, about
+//   Dev          debug builds only (src/dev/Dev.svelte) : the page log, the game state
+// Debug builds also put the « Bot » switch in Players (src/dev/bot.js).
   // Share's guest page (profile 'guest') : Players (name, who plays, who is in the game), Controls,
   // System (volume, about). The game keeps running beside it, re-centred in what is left ; while it
   // is open the game gets no local input (Module.ctrInput.blocked).
@@ -16,6 +18,13 @@
   import { T } from './lib/strings.js'
   import { ui } from './state.svelte.js'
   import { live, settings } from './store.js'
+  // debug builds only : the Dev tab's component, loaded with the dev tools (__CTR_DEV__ : vite.config.js)
+  let Dev = $state(null)
+  let BotSwitch = $state(null)
+  if (__CTR_DEV__) {
+    import('./dev/Dev.svelte').then((m) => { Dev = m.default })
+    import('./dev/BotSwitch.svelte').then((m) => { BotSwitch = m.default })
+  }
 
   let { forgetStoredDisc = () => {}, layout = null, onclose, profile = 'host' } = $props()
   const guest = $derived(profile === 'guest')
@@ -27,6 +36,7 @@
     multi: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
     system: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
     players: '<circle cx="8.5" cy="8" r="3.2"/><circle cx="16.5" cy="9" r="2.6"/><path d="M2.5 20a6 6 0 0 1 12 0M14 14.6a5 5 0 0 1 7.5 4.4"/>',
+    dev: '<path d="M8 8 4 12l4 4M16 8l4 4-4 4M14 5l-4 14"/>',
     controls: '<path d="M7 6h10c3 0 4.5 2 5 5l.5 4c.3 2.5-2 4-4 2l-2.5-2.5h-8L5.5 17c-2 2-4.3.5-4-2L2 11c.5-3 2-5 5-5z"/>',
   }
   const tabs = $derived([
@@ -34,6 +44,7 @@
     { id: 'controls', title: T.tabs.controls },
     ...(!guest && ui.adopted.length ? [{ id: 'multi', title: T.tabs.multi }] : []),
     { id: 'system', title: T.tabs.system },
+    ...(Dev ? [{ id: 'dev', title: 'Dev' }] : []),
   ])
   const current = $derived(tabs.find((t) => t.id === ui.tab) ?? tabs[0])
   const panels = $derived(ui.adopted.map((a) => ({ id: a.id, title: T.tabs[a.id] ?? a.title, el: a.el })))
@@ -75,6 +86,7 @@
       </label>
       <p class="help">{T.playerNameHelp(NAME_LEN)}</p>
       <WhoPlays />
+      {#if BotSwitch}<BotSwitch />{/if}
       <div class="gap"></div>
       {#if guest}<RoomPlayers />{:else}<Players />{/if}
     {:else if current.id === 'controls'}
@@ -89,6 +101,8 @@
       {/if}
       <!-- keyed : from one panel to another, the old one is parked and the new one moved in -->
       {#key panel.id}<div class="adopted" data-panel={panel.id} use:host={panel.el}></div>{/key}
+    {:else if current.id === 'dev' && Dev}
+      <Dev />
     {:else if current.id === 'system'}
       <div class="label">{T.volume}</div>
       <div class="setrow">

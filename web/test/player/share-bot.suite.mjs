@@ -32,6 +32,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { HEARTBEAT_MS, PLAYER, bootToMenu, menuTo, recordWithSound, say, state, until } from './ctr.mjs'
 import { drive } from './online.suite.mjs'
+import { createPicker } from '../../ui/src/lib/autopilot.js'
 import { share } from './share.suite.mjs'
 
 export const meta = {
@@ -94,37 +95,14 @@ export async function bot(ctx, link) {
 	}
 
 	const races = []
-	let lastPress = 0
-	let locking = false
-	let tries = 0
-	const DIRS = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp']
-	/** A few random moves on the character grid, ~0.4 s apart : the browse, then the pick. */
-	const browse = async (moves) => {
-		for (let i = 0; i < moves; i++) {
-			await ctx.press(DIRS[Math.floor(Math.random() * DIRS.length)])
-			await sleep(400)
-		}
-	}
+	const picker = createPicker({ out: { press: ctx.press } })
 	beat = Date.now() + HEARTBEAT_MS
 	for (;;) {
 		g = await look(ctx.js)
 		if (g.state !== 'connected') break
 		const s = g.game
-		const lockedMine = s?.charSelect && (s.charSelect.locked >> slot) & 1
-		if (s?.charSelect && !lockedMine) {
-			// the character select : browse, then Cross until ours is locked (a press landing as it
-			// opens is lost ; a character the other player holds may refuse it : move on after 3)
-			if (!locking) {
-				say(`character select : ${P} browses the characters`)
-				await sleep(800)
-				await browse(4 + Math.floor(Math.random() * 7))
-				tries = 0
-			} else if (tries >= 3) {
-				await browse(1 + Math.floor(Math.random() * 3))
-				tries = 0
-			}
-			locking = true
-			if (Date.now() - lastPress > 1500) { await ctx.press(CROSS); lastPress = Date.now(); tries++ }
+		if (s?.charSelect && !((s.charSelect.locked >> slot) & 1)) {
+			if ((await picker.step(s.charSelect, slot)) === 'browse') say(`character select : ${P} browses the characters`)
 		} else if (s?.kart && !s.kart.finished && (s.screen === 'countdown' || s.screen === 'race') && s.line?.levelID === s.levelID && s.line.n >= 10) {
 			say(`racing on level ${s.levelID} (${s.line.n} line points)`)
 			const r = await drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, Date.now() + RACE_MS, BOT_STATE)
@@ -132,10 +110,7 @@ export async function bot(ctx, link) {
 			say(`race ${races.length} : ${r.finished ? `finished, rank ${r.rank + 1}` : 'did not finish'}, fired ${r.fired}×`)
 			beat = Date.now() + HEARTBEAT_MS
 			continue
-		} else {
-			if (locking && lockedMine) say(`${P}'s character locked : waiting for the race`)
-			locking = false
-		}
+		} else if ((await picker.step(s?.charSelect, slot)) === 'locked') say(`${P}'s character locked : waiting for the race`)
 		if (Date.now() >= beat) {
 			const where = s ? `${s.screen}${s.charSelect ? ', character select' : ''}` : 'no state'
 			say(`in ${g.host ?? 'the host'}'s game as ${P} : host on ${where} — ${races.length} race(s) so far`)

@@ -39,6 +39,7 @@ import { isIP } from 'node:net'
 import { capture, connect, fetchBrowserWsUrl } from '/opt/devcontainer/base/skills/visual-loop/scripts/cdp.mjs'
 import { makePlayer, pageScript } from '/opt/devcontainer/base/skills/visual-loop/lib/player.mjs'
 import { HEARTBEAT_MS, PLAYER, menuTo, onMainMenu, recordWithSound, say } from './ctr.mjs'
+import * as autopilot from '../../ui/src/lib/autopilot.js'
 
 export const meta = {
 	url: 'http://localhost:8092/index.html',
@@ -55,7 +56,6 @@ export const PHASE = { none: 0, menus: 1, starting: 2, race: 3 }
 const CROSS = 'c' // keyboard C = Cross (platform/native_input.c)
 const BTN_CROSS = 0x10 // Cross in the pad word the bridge writes for a remote driver
 const RACE_MS = 10_000
-const FIRE = 'v' // keyboard V = Circle, use the held item
 const CG_WEAPON = 6 // global.h ClientGiveMessageType
 const SG_WEAPON = 8 // global.h ServerGiveMessageType
 
@@ -434,104 +434,20 @@ function lockBrowser(host, port) {
  * window.__ctr, as time-trial.suite.mjs does), firing whatever item it holds every 1.5 s.
  * `p` : that tab's player (hold / release / press), `js` : its evaluate, `state` : the page
  * expression shaped like window.__ctr ({screen, kart, track}) — Share's bot steers by its guest
- * page's copy of the host's (web/share/guest-page.js `bot()`).
+ * page's copy of the host's (web/share/guest-page.js `bot()`). The driving itself is
+ * web/ui/src/lib/autopilot.js's, shared with the page's « Bot » switch.
  */
 export async function drive(p, js, deadline, state = 'window.__ctr') {
-	const ACCEL = 'c'
-	const REVERSE = 'x'
-	const read = () => js(`const c = ${state}; if (!c) return null; const { track, ...s } = c; return s`)
-	const line = await js(`return (${state})?.track ?? null`)
-	const path = line?.path ?? []
-	const n = path.length
-	if (n < 10) throw new Error(`no racing line in ${state} (debug build ?)`)
-	const seg = path.map((q, i) => Math.hypot(path[(i + 1) % n].x - q.x, path[(i + 1) % n].z - q.z))
-	const spacing = [...seg].sort((a, b) => a - b)[n >> 1]
-	const wrap = a => Math.atan2(Math.sin(a), Math.cos(a))
-	let near = -1
-	const nearest = k => {
-		const span = near < 0 ? n : 40
-		const from = near < 0 ? 0 : near - 10
-		let best = Infinity
-		let at = near
-		for (let j = 0; j < span; j++) {
-			const i = (((from + j) % n) + n) % n
-			const d = (path[i].x - k.pos.x) ** 2 + (path[i].z - k.pos.z) ** 2 + 4 * (path[i].y - k.pos.y) ** 2
-			if (d < best) { best = d; at = i }
-		}
-		near = at
-		return at
-	}
-	let held = null
-	const steer = async want => {
-		if (want === held) return
-		if (held) await p.release(held)
-		if (want) await p.hold(want)
-		held = want
-	}
-	let fired = 0
-	let lastFire = Date.now()
-	let slowSince = 0
-	let maxSpeed = 0
-	let lastPos = null
-	let end = null
-	// Progress along the line : a kart grinding along a wall moves, yet gets nowhere. No new
-	// line point for 4 s is stuck too ; each recovery in a row reverses longer, wheel alternating.
-	let best = { at: -1, since: Date.now() }
-	let recoveries = 0
-	await p.hold(ACCEL)
-	try {
-		while (Date.now() < deadline) {
-			const s = await read()
-			const k = s?.kart
-			if (s?.gone) break // Share's bot : the host left
-			if (!k) { await sleep(100); continue }
-			if (s.screen === 'finished' || k.finished) { end = s; break }
-			maxSpeed = Math.max(maxSpeed, k.speed)
-			let i = nearest(k)
-			for (let d = 0; d < spacing * 2 + Math.max(0, k.speed) / 25; i = (i + 1) % n) d += seg[i]
-			const t = path[i]
-			const err = wrap(Math.atan2(t.x - k.pos.x, t.z - k.pos.z) - (k.angle * 2 * Math.PI) / 4096)
-			const moved = lastPos ? Math.hypot(k.pos.x - lastPos.x, k.pos.z - lastPos.z) : Infinity
-			lastPos = k.pos
-			if ((maxSpeed > 0 && k.speed < maxSpeed / 5) || moved < 5) slowSince ||= Date.now()
-			else slowSince = 0
-			if (near !== best.at && (near - best.at + n) % n < n / 2) {
-				if ((near - best.at + n) % n > 5) recoveries = 0
-				best = { at: near, since: Date.now() }
-			}
-			if ((slowSince && Date.now() - slowSince > 1000) || Date.now() - best.since > 4000) {
-				const away = err > 0 ? 'ArrowRight' : 'ArrowLeft'
-				await p.release(ACCEL)
-				await steer(recoveries % 2 ? (away === 'ArrowRight' ? 'ArrowLeft' : 'ArrowRight') : away)
-				await p.hold(REVERSE)
-				await sleep(Math.min(1100 + 600 * recoveries, 3000))
-				recoveries++
-				best.since = Date.now()
-				await p.release(REVERSE)
-				await steer(null)
-				await p.hold(ACCEL)
-				slowSince = 0
-				near = -1
-				lastPos = null
-				continue
-			}
-			await steer(Math.abs(err) > 0.05 ? (err > 0 ? 'ArrowLeft' : 'ArrowRight') : null)
-			if (Date.now() - lastFire > 1500) {
-				await p.press(FIRE)
-				fired++
-				lastFire = Date.now()
-			}
-			await sleep(30)
-		}
-	} finally {
-		await steer(null)
-		await p.release(ACCEL)
-	}
-	return { finished: !!end, rank: end?.kart?.rank ?? null, fired }
+	return autopilot.drive({
+		out: p,
+		read: () => js(`const c = ${state}; if (!c) return null; const { track, ...s } = c; return s`),
+		track: () => js(`return (${state})?.track ?? null`),
+		deadline,
+	})
 }
 
 /** The run's proof folder : the newest one under --set proofs=<root> holding `file`. */
-function runDirOf(root, file) {
+export function runDirOf(root, file) {
 	if (!root) return null
 	const dirs = readdirSync(root).map(d => join(root, d)).filter(d => existsSync(join(d, file)))
 	return dirs.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] ?? null
@@ -542,7 +458,7 @@ function runDirOf(root, file) {
  * on the headless agent browser (LOG ## T3) : the same file is rewritten from the compositor's
  * surface, which shows the game (ux.suite.mjs, share.suite.mjs do the same).
  */
-async function shot(ctx, label) {
+export async function shot(ctx, label) {
 	const proof = await ctx.shot(label)
 	const dir = proof?.file ? runDirOf(ctx.args.proofs, proof.file) : null
 	const r = await ctx.conn.send('Page.captureScreenshot', { format: 'png', fromSurface: true }, ctx.sid)
