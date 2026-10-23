@@ -97,7 +97,8 @@ test('viewOf : a player\'s own view — 2 players top / bottom, 3–4 quadrants,
 test('HELLO is a control message ; above it nothing is', () => {
   assert.equal(TAG.hello, 0x15);
   assert.deepEqual(decodeControl(encodeControl(TAG.hello, { name: 'Mad Roo' })), { tag: TAG.hello, body: { name: 'Mad Roo' } });
-  assert.equal(decodeControl(encodeControl(TAG.track + 1, {})), null);
+  assert.deepEqual(decodeControl(encodeControl(TAG.lobby, { phase: 2, character: 3 })), { tag: TAG.lobby, body: { phase: 2, character: 3 } });
+  assert.equal(decodeControl(encodeControl(TAG.lobby + 1, {})), null);
 });
 
 test('cleanName is web/ui\'s (the same 9 printable ASCII) ; nameOf falls back to P<n>', async () => {

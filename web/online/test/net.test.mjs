@@ -2,7 +2,7 @@
 //   node --test web/online/test/net.test.mjs
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { EVENT, LOOPBACK_PEER, addressKey, createOnlineNet } from '../net.js';
+import { EVENT, LOOPBACK_PEER, ONLINE_TAG, addressKey, createOnlineNet } from '../net.js';
 import { fakeNetwork } from './fake-room.mjs';
 
 const tick = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,8 +49,27 @@ test('guest : sends carry the reliable flag to the link, payload unchanged', asy
   await tick();
   net.send(-1, bytes(5, 0xaa, 0xbb), 0);
   net.send(-1, bytes(1, 0x41, 0x42), 1);
+  // on the wire every OnlineCTR packet sits behind ONLINE_TAG : the links carry Share's messages too
   assert.deepEqual(fake.sends.map(({ reliable, bytes: b }) => [reliable, [...b]]),
-    [[false, [5, 0xaa, 0xbb]], [true, [1, 0x41, 0x42]]]);
+    [[false, [ONLINE_TAG, 5, 0xaa, 0xbb]], [true, [ONLINE_TAG, 1, 0x41, 0x42]]]);
+});
+
+test('a link\'s messages without the tag (Share : pads, lobby) never reach the game', async () => {
+  const fake = fakeNetwork();
+  const hostNet = createOnlineNet();
+  hostNet.host(fake.hostRoom('A'));
+  const net = createOnlineNet();
+  net.guest(fake.guestRoom('B'));
+  net.connect();
+  await tick();
+  const hostEvent = hostNet.poll();
+  assert.equal(hostEvent.event, EVENT.CONNECTED);
+  const guestLink = hostNet.links[hostEvent.peer];
+  guestLink.send(bytes(1, 0, 0, 0x41, 0xff, 0xff, 0x80, 0x80, 0x80, 0x80)); // a Share PAD
+  guestLink.send(bytes(0x19, 0x7b, 0x7d)); // a Share LOBBY
+  guestLink.send(bytes(ONLINE_TAG, 0x12, 0x34), { reliable: true });
+  await tick();
+  assert.deepEqual(drain(net), [{ peer: -1, event: EVENT.CONNECTED }, { peer: -1, event: EVENT.DATA, bytes: bytes(0x12, 0x34) }]);
 });
 
 test('guest : no host → DISCONNECTED ; no room → connect refused', async () => {

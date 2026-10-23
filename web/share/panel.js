@@ -6,6 +6,11 @@
 // The game calls `Module.ctrShare.present()` after each present and `readPads()` once per input
 // update (platform/native_renderer.c, platform/native_input.c) ; both only touch JS state.
 // window.__ctrShare.state() / .stats() are for the player suites.
+//
+// An Online room (web/online/page.js, session 14) shares its lobby the same way, on its own room :
+// `globalThis.ctrShareApi.startOn(room)` / `stopOn()`. While that room's race runs (the game's
+// lobby phase, Module.ctrOnlineLobby), no frame is captured, the audio track is muted and the
+// guests' pads are not read : the race's pads come from OnlineCTR.
 import { formatRoomLink, newRoom } from '../net/link.js';
 import { openRoom } from '../net/room.js';
 import { createCapture } from './capture.js';
@@ -53,13 +58,27 @@ let error = '';
 // slot → {buttons, at} : when the game first read a new button word (input-latency probe)
 const seen = [null, null, null, null];
 
+let owner = 'share'; // who started the host : 'share' (the panel) or 'online' (the Online room)
+/** An Online room's race runs : the lobby's capture and pads pause (phase 1 = the menus). */
+const racing = () => {
+  const lobby = Module.ctrOnlineLobby?.();
+  return !!lobby?.active && lobby.phase !== 1;
+};
+let audioOn = true;
+
 // The game's two calls. Until « Share », no capture and no guest : both are no-ops.
 Module.ctrShare = {
   present(displayW, displayH, viewportW, viewportH) {
-    capture?.present(displayW, displayH, viewportW, viewportH);
+    const paused = racing();
+    if (!paused) capture?.present(displayW, displayH, viewportW, viewportH);
+    if (capture && audioOn === paused) {
+      audioOn = !paused;
+      for (const t of capture.stream.getAudioTracks()) t.enabled = audioOn;
+    }
     host?.frame(); // a bot guest's own kart (debug builds : window.__ctr)
   },
   readPads(heap, dst) {
+    if (racing()) return 0;
     const mask = slots.read(heap, dst);
     for (let s = 1; s < 4; s++) {
       if (!(mask & (1 << s))) { seen[s] = null; continue; }
@@ -103,6 +122,37 @@ async function tapAudio(ms) {
   return false;
 }
 
+/** Shares this game on `room` (open, role host). `relayGuests` : guests on the relay keep their pad. */
+async function startOn(room, { relayGuests = false, by = 'share' } = {}) {
+  if (host) return host;
+  owner = by;
+  if (!Module.canvas?.captureStream) throw new Error('this browser cannot capture a canvas');
+  capture = createCapture(Module.canvas, Module, { onScale: (scale) => host?.setScale(scale) });
+  audioOn = true;
+  if (!(await tapAudio(3000))) error = 'No game audio yet : guests get video only.';
+  room.on('warning', (w) => { error = `${w.code}: ${w.message}`; render(); });
+  room.on('close', () => { error = 'relay: the relay closed the room'; render(); });
+  host = createShareHost({ room, stream: capture.stream, maxBitrate: Number(bitrate.value), scale: capture.scale, slots, hostName: hostName(),
+    game: () => globalThis.__ctr ?? null, relayGuests });
+  host.on('change', render);
+  // the host is told who comes and goes, Settings open or not
+  host.on('join', (g) => ui?.toast(ui.text.joined(nameOf(g.slot, g.name), g.slot + 1)));
+  host.on('leave', (g) => ui?.toast(ui.text.left(nameOf(g.slot, g.name), g.slot + 1)));
+  render();
+  return host;
+}
+
+/** Stops sharing ; the room stays open when another module owns it. */
+function stopOn({ keepRoom = false } = {}) {
+  host?.close({ keepRoom });
+  capture?.stop();
+  host = null;
+  capture = null;
+  linkText = '';
+  owner = 'share';
+  render();
+}
+
 async function start() {
   if (host) return;
   error = '';
@@ -110,40 +160,28 @@ async function start() {
   save('relay', relay.value.trim());
   save('rk', rk.value.trim());
   try {
-    if (!Module.canvas?.captureStream) throw new Error('this browser cannot capture a canvas');
-    capture = createCapture(Module.canvas, Module, { onScale: (scale) => host?.setScale(scale) });
-    if (!(await tapAudio(3000))) error = 'No game audio yet : guests get video only.';
     const link = newRoom({ relay: relay.value.trim(), rk: rk.value.trim() });
     // the guest page, without this page's query : a relay key there only travels after #
     const base = new URL('share/guest.html', location.href);
     linkText = formatRoomLink(base.href, link);
     // 'host' : the relay's signaling name, in clear — the player's name goes end to end (WELCOME)
     const room = await openRoom({ link, role: 'host', name: 'host' });
-    room.on('warning', (w) => { error = `${w.code}: ${w.message}`; render(); });
-    room.on('close', () => { error = 'relay: the relay closed the room'; render(); });
-    host = createShareHost({ room, stream: capture.stream, maxBitrate: Number(bitrate.value), scale: capture.scale, slots, hostName: hostName(),
-      game: () => globalThis.__ctr ?? null });
-    host.on('change', render);
-    // the host is told who comes and goes, Settings open or not
-    host.on('join', (g) => ui?.toast(ui.text.joined(nameOf(g.slot, g.name), g.slot + 1)));
-    host.on('leave', (g) => ui?.toast(ui.text.left(nameOf(g.slot, g.name), g.slot + 1)));
+    await startOn(room);
   } catch (e) {
     error = `${e.code ? `${e.code}: ` : ''}${e.message ?? e}`;
     capture?.stop();
     capture = null;
     host = null;
+    linkText = '';
   }
   render();
 }
 
 function stop() {
-  host?.close();
-  capture?.stop();
-  host = null;
-  capture = null;
-  linkText = '';
-  render();
+  stopOn();
 }
+
+globalThis.ctrShareApi = { slots, startOn, stopOn, host: () => host, guests };
 
 ui?.settings.subscribe((s) => { if (host && s.name !== host.hostName) host.setHostName(s.name); });
 
@@ -167,12 +205,13 @@ function guests() {
 
 function render() {
   startButton.disabled = !!host;
-  stopButton.disabled = !host;
+  stopButton.disabled = !host || owner !== 'share';
   copyButton.disabled = !linkText;
   bitrateLabel.textContent = `${(Number(bitrate.value) / 1e6).toFixed(2)} Mbit/s per guest`;
   const lines = [];
   if (!host) lines.push('Not sharing.');
   else {
+    if (owner === 'online') lines.push('Sharing the Online room\'s lobby (Settings › Multiplayer › Online).');
     lines.push(`Sharing${capture?.audio ? ' (video + sound)' : ' (video only)'}, ${capture?.frames ?? 0} frames`);
     const list = guests();
     lines.push(list.length ? list.map((g) => `P${g.slot + 1} ${nameOf(g.slot, g.name)} · ${g.path} · ${g.state}`).join('\n') : 'Waiting for guests');

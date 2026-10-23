@@ -73,10 +73,9 @@ const drag = (ctx, type, target = 'body') => ctx.js(`
 
 export default async ctx => {
 	let booted = null
-	// The CTR_ONLINE build ships web/online/ and boots into OnlineCTR's server menu, not the main
-	// menu : there the suite checks the shared name (and the page parts that need no menu).
+	// One build since session 14 : the CTR_ONLINE build boots the normal game too.
+	const needsMainMenu = () => {}
 	const onlineBuild = await ctx.js(`return (await fetch('online/page.js', { method: 'HEAD' })).ok`)
-	const needsMainMenu = () => { if (onlineBuild) ctx.skip('CTR_ONLINE build : it boots into OnlineCTR\'s server menu, not the main menu — run on the single-player build') }
 
 	await ctx.scenario('UX-ZIP-BOOT', async () => {
 		for (let i = 0; i < 60 && !(await page(ctx).catch(() => null))?.ui; i++) await sleep(500) // the page's UI mounted

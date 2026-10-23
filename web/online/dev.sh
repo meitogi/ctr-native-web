@@ -73,11 +73,13 @@ Ready. In VS Code's Ports panel, forward $page and $relayPort (same local number
    Online panel (right) → Create room → Copy link.
 2. Guest — open the copied link in a second window (or on another machine
    that reaches these ports), give it another player name.
-3. In both games (they boot straight into the server menu) : Private Room, then the same room number (the host
-   joins first : it picks the track). Rooms 5-9 have items.
-   Keys : C = Cross (accelerate / OK), V = Circle (fire), X = Square, arrows, Space = Select (leave).
-4. No second player ? A fake guest drives one race against you : once you are in your
-   room (before you confirm the track), in another terminal :
+3. The game boots as usual (one build). Host : main menu → ONLINE → VS or BATTLE → players →
+   characters → track : the guests play P2-P4 on your screen (they see it over their own game),
+   and at the track lock every game loads its own race. Guest : once the link is open, press
+   Cross on the host's screen to join, pick your character with your own keys or pad.
+   Keys : C = Cross (accelerate / OK), V = Circle (fire), X = Square, arrows, Space = Select (leave the race).
+4. No second player ? A fake guest plays against you : once your room exists, in another
+   terminal :
      wtf ctr bot '<the room link>'
    It runs in the agent browser, which only opens ${AGENT_BROWSER_ORIGINS:-its allowed origins} :
    serve on two of those ports (e.g. « debug 8092 8787 »), debug so it follows the racing line.

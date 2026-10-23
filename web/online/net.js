@@ -18,6 +18,20 @@ export const LOOPBACK_PEER = 259;
 /** enum WebOnlineRole (platform/web_online_transport.c) */
 export const ROLE = { none: 0, host: 1, guest: 2 };
 
+/**
+ * The room's links carry Share's messages too (the lobby : the host's screen and the guests'
+ * pads, web/share/protocol.js, tags 0x01 and 0x10–0x19) : every OnlineCTR packet travels behind
+ * this tag byte and anything else on a link is not for the game. Session 10's gateway strips it.
+ */
+export const ONLINE_TAG = 0x20;
+const tagged = (bytes) => {
+  const out = new Uint8Array(bytes.length + 1);
+  out[0] = ONLINE_TAG;
+  out.set(bytes, 1);
+  return out;
+};
+const untagged = (bytes) => (bytes.length && bytes[0] === ONLINE_TAG ? bytes.subarray(1) : null);
+
 /** FNV-1a 64 of a room peer id, as [low, high] unsigned 32-bit halves. */
 export function addressKey(id) {
   let h = 0xcbf29ce484222325n;
@@ -65,7 +79,9 @@ export function createOnlineNet({ name = 'Player' } = {}) {
       net.links[peer] = link;
       link.ctrPeer = peer;
       push({ peer, event: EVENT.CONNECTED, key: addressKey(link.peerId) });
-      link.on('message', (bytes) => {
+      link.on('message', (raw) => {
+        const bytes = untagged(raw);
+        if (!bytes) return;
         count(net.stats.received, bytes);
         push({ peer, event: EVENT.DATA, bytes });
       });
@@ -99,8 +115,10 @@ export function createOnlineNet({ name = 'Player' } = {}) {
       if (net.pending !== pending) return link.close(); // reset meanwhile
       net.pending = null;
       net.hostLink = link;
-      link.on('message', (bytes) => {
+      link.on('message', (raw) => {
         if (net.hostLink !== link) return;
+        const bytes = untagged(raw);
+        if (!bytes) return;
         count(net.stats.received, bytes);
         push({ peer: -1, event: EVENT.DATA, bytes });
       });
@@ -156,7 +174,7 @@ export function createOnlineNet({ name = 'Player' } = {}) {
     const link = peer < 0 ? net.hostLink : net.links[peer];
     if (!link) return;
     count(net.stats.sent, bytes);
-    link.send(bytes, { reliable: !!reliable });
+    link.send(tagged(bytes), { reliable: !!reliable });
   };
 
   /** Host : drop a guest, as enet_peer_disconnect_now (no DISCONNECTED event follows). */

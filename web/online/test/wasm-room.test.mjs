@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { createOnlineNet } from '../net.js';
+import { ONLINE_TAG, createOnlineNet } from '../net.js';
 import { formatRoomLink, newRoom } from '../../net/link.js';
 import { openRoom } from '../../net/room.js';
 import { fakeNetwork } from './fake-room.mjs';
@@ -85,11 +85,17 @@ async function waitFor(what, clients, pred, timeoutMs) {
   }
 }
 
+/** The OnlineCTR message behind the links' tag byte (web/online/net.js) : the links carry the tag, the traces do not. */
+function octrPayload(bytes) {
+  if (bytes[0] !== ONLINE_TAG) throw new Error(`a link carried an untagged message : ${[...bytes.subarray(0, 4)]}`);
+  return bytes.subarray(1);
+}
+
 /** A guest's trace has no channel (the link does not say) : take it from the deliveries, matching bytes. */
 function withChannels(trace, deliveries = []) {
   let d = 0;
   return trace.map((t, k) => {
-    while (d < deliveries.length && !sameBytes(deliveries[d].bytes.subarray(0, 16), t.bytes)) d++;
+    while (d < deliveries.length && !sameBytes(octrPayload(deliveries[d].bytes).subarray(0, 16), t.bytes)) d++;
     assert.ok(d < deliveries.length, `traced message ${k} (type ${t.bytes[0] & 0xf}) was never delivered`);
     return { reliable: deliveries[d++].reliable, bytes: t.bytes };
   });
@@ -212,7 +218,7 @@ async function runScript(t, network, traceOut) {
     await t.test('D7 : CG_RACEDATA / SG_RACEDATA ride `game`, everything else `ctl`', () => {
       assert.ok(network.sends.length > 100);
       for (const s of network.sends) {
-        const type = s.bytes[0] & 0xf;
+        const type = octrPayload(s.bytes)[0] & 0xf;
         const race = s.to === 'A' ? type === CG_RACEDATA : type === SG_RACEDATA;
         assert.equal(s.reliable, !race, `${s.from} → ${s.to} type ${type}`);
       }

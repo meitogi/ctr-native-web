@@ -28,8 +28,14 @@
 //            line, once per level (before the first KART on it).
 //   Debug-only in effect : no ordinary guest sends BOT, so no ordinary guest gets KART / TRACK —
 //   and a guest before session 19 drops them anyway (decodeControl's range).
+//   LOBBY    ctl, host → that guest : {phase, character} — an Online room (session 14) : the
+//            host's game is the lobby ; at its track lock each guest gets the character its pad
+//            locked on the host's screen, which its own game then sends to OnlineCTR's protocol.
+//            `phase` : 1 menus, 2 starting (character set), 3 race.
+//   The OnlineCTR packets of an Online room share these links behind the tag 0x20
+//   (web/online/net.js) : nothing here reads them.
 
-export const TAG = { pad: 1, offer: 0x10, answer: 0x11, welcome: 0x12, refuse: 0x13, players: 0x14, hello: 0x15, bot: 0x16, kart: 0x17, track: 0x18 };
+export const TAG = { pad: 1, offer: 0x10, answer: 0x11, welcome: 0x12, refuse: 0x13, players: 0x14, hello: 0x15, bot: 0x16, kart: 0x17, track: 0x18, lobby: 0x19 };
 export const PAD_BYTES = 10;
 
 /** PSX pad ids : digital pad, analog (DualShock) pad. */
@@ -90,7 +96,7 @@ export function encodeControl(tag, body) {
 /** {tag, body} of a control message, or null when `bytes` is not one. */
 export function decodeControl(bytes) {
   const tag = bytes[0];
-  if (tag < TAG.offer || tag > TAG.track) return null;
+  if (tag < TAG.offer || tag > TAG.lobby) return null;
   try {
     return { tag, body: JSON.parse(fromUtf8.decode(bytes.subarray(1))) };
   } catch {

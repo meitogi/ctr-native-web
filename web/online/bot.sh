@@ -1,14 +1,15 @@
 #!/bin/bash
 # web/online/bot.sh — a fake Online guest, « Bot », so you can test a race alone : the agent
-# browser opens your room link, joins your room, waits for your track and laps, locks a
-# character and drives one race (web/test/player/online-bot.suite.mjs).
+# browser opens your room link, its game joins your room, it plays P2 in your menus (browses
+# and locks a character at each character select) and drives its own game in each race, until
+# you leave (web/test/player/online-bot.suite.mjs).
 #
 #   web/online/bot.sh '<room link>'
 #
 # Serve with web/online/dev.sh debug 8092 8787 : the agent browser's proxy only opens the ports
 # in AGENT_BROWSER_ORIGINS, and only a debug build lets the bot follow the racing line (a
-# release build gets Cross held and items fired). Start it once you are in your room, before
-# you confirm the track. Screenshots and the run's index land in build-bot-proofs/.
+# release build cannot steer). Start it once your room exists. Screenshots and the run's index
+# land in build-bot-proofs/.
 set -euo pipefail
 
 link=${1:-}
@@ -50,6 +51,6 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-echo "bot.sh: Bot is joining — enter your room (it picks the one with a player), then the track and laps"
+echo "bot.sh: Bot is joining your room — in the game : ONLINE → VS or BATTLE, it plays P2 in your menus"
 node "$e2e" --suite "$tree/web/test/player/online-bot.suite.mjs" --url "$origin/index.html" \
   --proofs "$tree/build-bot-proofs" --set "link=$link"

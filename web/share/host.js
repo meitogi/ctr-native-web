@@ -20,13 +20,15 @@ export const BITRATE = { min: 500_000, max: 6_000_000, default: 2_500_000 };
  * @param {string} [o.hostName] - the host's player name (WELCOME, PLAYERS)
  * @param {() => object|null} [o.game] - the game's debug state (window.__ctr, debug builds) : what
  *   a bot guest (BOT) is sent of its own kart ; null = nothing to send (release build)
+ * @param {boolean} [o.relayGuests] - keep a guest whose link is not WebRTC : its pad plays, it
+ *   gets no stream (state 'nomedia') — an Online room's lobby (session 14), never plain Share
  * @returns {Emitter & {slots, guests: object, maxBitrate: number, hostName: string, setBitrate(bps: number): Promise<void>,
  *   setScale(scale: number): Promise<void>, setHostName(name: string): void, players(): {slot, name}[], frame(): void, close(): void}}
  *   `guests` : peerId → {slot, name (null until its HELLO), path, backend, state ('joining' |
  *   'streaming' | 'failed'), error?, senders?, bot?, link} ; `refusals` : the last 8 {peerId, code, path} ;
  *   events 'change', 'join' (guest : streaming), 'leave' (guest).
  */
-export function createShareHost({ room, stream, maxBitrate = BITRATE.default, scale = 1, slots = createSlots(), hostName = '', game = () => null }) {
+export function createShareHost({ room, stream, maxBitrate = BITRATE.default, scale = 1, slots = createSlots(), hostName = '', game = () => null, relayGuests = false }) {
   const host = new Emitter();
   host.slots = slots;
   host.guests = Object.create(null);
@@ -74,7 +76,8 @@ export function createShareHost({ room, stream, maxBitrate = BITRATE.default, sc
 
   const offLink = room.on('link', (link) => {
     // A guest on the relay sees its own backend and stops : this is a courtesy.
-    if (link.backend !== 'webrtc' || !link.pc) return refuse(link, 'online-mode', ONLINE_MODE);
+    const media = link.backend === 'webrtc' && !!link.pc;
+    if (!media && !relayGuests) return refuse(link, 'online-mode', ONLINE_MODE);
     const slot = slots.take(link.peerId);
     if (!slot) return whenListening(link, () => refuse(link, 'full', 'Three guests are already playing : Share drives P2 to P4.'));
     const guest = { slot, name: null, path: link.path, backend: link.backend, state: 'joining', link };
@@ -96,6 +99,12 @@ export function createShareHost({ room, stream, maxBitrate = BITRATE.default, sc
       guest.listening = true;
       link.send(encodeControl(TAG.welcome, { slot, host: nameOf(0, host.hostName) }), { reliable: true });
       link.send(encodeControl(TAG.players, playersBody()), { reliable: true });
+      if (!media) {
+        guest.state = 'nomedia';
+        host.emit('join', guest);
+        change();
+        return;
+      }
       offerMedia(link, stream, { maxBitrate: host.maxBitrate, scale: currentScale }).then((senders) => {
         if (host.guests[link.peerId] !== guest) return;
         guest.senders = senders;
@@ -159,14 +168,16 @@ export function createShareHost({ room, stream, maxBitrate = BITRATE.default, sc
         kart: s.karts?.[g.slot] ?? null }));
     }
   };
-  host.close = () => {
+  /** Stops sharing. `keepRoom` : the room (and its links) stay open — an Online room owns them. */
+  host.close = ({ keepRoom = false } = {}) => {
     offLink();
     offClose();
     for (const id in host.guests) {
       slots.release(id);
-      host.guests[id].link.close();
+      if (!keepRoom) host.guests[id].link.close();
     }
-    room.close();
+    host.guests = Object.create(null);
+    if (!keepRoom) room.close();
   };
   return host;
 }

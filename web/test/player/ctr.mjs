@@ -9,7 +9,8 @@
 export const PLAYER = { gamepad: true, pressFrames: 8 }
 
 // Main menu rows (D230.rowsMainMenuBasic, game/230/D230.c), as the game spells them.
-export const MAIN_MENU = ['ADVENTURE', 'TIME TRIAL', 'ARCADE', 'VS.', 'BATTLE', 'HIGH SCORE', 'SCRAPBOOK']
+// ONLINE : the CTR_ONLINE build's row (session 14) ; absent from the OFF build's menu
+export const MAIN_MENU = ['ADVENTURE', 'TIME TRIAL', 'ARCADE', 'VS.', 'BATTLE', 'ONLINE', 'HIGH SCORE', 'SCRAPBOOK']
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 

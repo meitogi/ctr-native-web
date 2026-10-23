@@ -1,15 +1,17 @@
-// Player suite : Online 2-tab. The suite's tab hosts a room (sv_core runs in its wasm), a
-// second tab opens the room link as the guest ; both play OnlineCTR's own menus with the
-// keyboard (room, track, laps, character ; the page picks « Private Room » itself) into a race, both hold Cross, and
-// each side must see the other's kart move. Once over WebRTC (P2P), once with the guest
-// forced onto the relay's WebSocket path (openRoom mode: ws). Then a whole race in an item
-// room : both karts follow the racing line and fire their items, both screens filmed with
-// their sound and put side by side. The guest runs in a second agent browser when the run
-// has one (instance b, its own Chromium and CDP connection), else in a second tab.
+// Player suite : Online 2-tab. The suite's tab hosts a room (sv_core runs in its wasm, the
+// lobby is its own game's menus, shared to the guest as Share does), a second tab opens the
+// room link as the guest ; the host plays ONLINE → VS → 2 players → characters → track with
+// the keyboard, the guest locks its character with its own keys (they reach the host as P2's
+// pad), each game loads its own race, both hold Cross, and each side must see the other's kart
+// move. Once over WebRTC (P2P), once with the guest forced onto the relay's WebSocket path
+// (openRoom mode: ws ; the guest then plays the lobby without the host's picture). Then a whole
+// race : both karts follow the racing line and fire their items, both screens filmed with their
+// sound and put side by side. The guest runs in a second agent browser when the run has one
+// (instance b, its own Chromium and CDP connection), else in a second tab.
 //
 // RUN
 //   Build : web/build-web.sh debug -DCTR_ONLINE=ON -DCTR_WEB_PRELOAD_DISC=OFF
-//           (the online build boots straight into OnlineCTR ; the disc is stored in OPFS
+//           (one build, session 14 : it boots the normal game ; the disc is stored in OPFS
 //           once per origin by the test hook, then each tab reloads from it)
 //   Serve : ln -sf "$PWD/assets/ctr-u.bin" build-web-debug/ctr-u.bin
 //           python3 web/test/player/serve.py build-web-debug 8092
@@ -36,7 +38,7 @@ import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { capture, connect, fetchBrowserWsUrl } from '/opt/devcontainer/base/skills/visual-loop/scripts/cdp.mjs'
 import { makePlayer, pageScript } from '/opt/devcontainer/base/skills/visual-loop/lib/player.mjs'
-import { HEARTBEAT_MS, PLAYER, recordWithSound, say } from './ctr.mjs'
+import { HEARTBEAT_MS, PLAYER, menuTo, onMainMenu, recordWithSound, say } from './ctr.mjs'
 
 export const meta = {
 	url: 'http://localhost:8092/index.html',
@@ -48,11 +50,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 // game/OnlineCTR/global.h
 export const ST = { PICK_SERVER: 1, PICK_ROOM: 2, HOST_TRACK_PICK: 5, GUEST_TRACK_WAIT: 6, CHARACTER_PICK: 7, START_RACE: 11 }
-const PRIVATE_ROOM = 7
+// game/OnlineCTR/native_compat.h OnlineLobbyPhase (window.__ctrOnline.state().lobby.phase)
+export const PHASE = { none: 0, menus: 1, starting: 2, race: 3 }
 const CROSS = 'c' // keyboard C = Cross (platform/native_input.c)
 const BTN_CROSS = 0x10 // Cross in the pad word the bridge writes for a remote driver
 const RACE_MS = 10_000
-const ITEM_ROOM = 5 // rooms 5-9 have items (game/OnlineCTR/menu.c)
 const FIRE = 'v' // keyboard V = Circle, use the held item
 const CG_WEAPON = 6 // global.h ClientGiveMessageType
 const SG_WEAPON = 8 // global.h ServerGiveMessageType
@@ -82,7 +84,9 @@ export const online = tab => tab.js('return window.__ctrOnline ? window.__ctrOnl
 const pageLog = tab => tab.js(`return [location.href, document.visibilityState, document.getElementById('boot-status')?.textContent,
 	document.getElementById('drop-error')?.textContent, 'game script ' + !!document.querySelector('script[src="ctr_native.js"]'),
 	'focus ' + (document.activeElement?.tagName + '#' + (document.activeElement?.id || '') + (document.activeElement?.closest?.('#ctr-settings') ? ' in settings' : '')) + ', settings ' + (document.getElementById('ctr-settings')?.checkVisibility?.() ? 'open' : 'closed') + ', focused ' + document.hasFocus(),
-	(document.getElementById('log')?.textContent ?? '').trim().split('\\n').slice(-4).join(' | ')].join(' ; ')`).catch(e => e.message)
+	(document.getElementById('log')?.textContent ?? '').trim().split('\\n').slice(-4).join(' | '),
+	'online log ' + (document.getElementById('log')?.textContent ?? '').split('\\n').filter(l => l.includes('[OnlineCTR]')).slice(-8).join(' | '),
+	'last error at ' + (window.__ctrLastError?.at ?? '?') + ' ' + (window.__ctrLastError?.stack ?? 'none').split('\\n').slice(0, 14).join(' < ')].join(' ; ')`).catch(e => e.message)
 
 export async function until(tab, label, pred, timeout = 30_000, every = 250) {
 	const start = Date.now()
@@ -104,7 +108,37 @@ export async function until(tab, label, pred, timeout = 30_000, every = 250) {
 	throw new Error(`${tab.name} : timed out after ${Math.round(timeout / 1000)}s waiting for ${label} (last state ${s?.octr?.CurrState}, ${s?.error || s?.lastError?.message || 'no error'} ; page log : ${await pageLog(tab)})`)
 }
 
-/** Loads `url` in `tab` and boots the game to OnlineCTR's server menu ; stores the disc in OPFS once. */
+/** The game's own state (window.__ctr, debug builds), without the racing line. */
+export const game = tab => tab.js('if (!window.__ctr) return null; const { track, ...s } = window.__ctr; return s')
+
+/**
+ * The game's main menu, with its input on : the intro skipped with Cross while the menu takes
+ * no input yet (ctr.mjs bootToMenu), re-read before every press.
+ */
+export async function toMainMenu(tab) {
+	// the page's log keeps an error's message only : keep the last error's stack for pageLog (debug builds name the wasm frames)
+	await tab.js(`if (!window.__ctrLastError) {
+		window.__ctrLastError = {}
+		const at = () => { try { const c = window.__ctr, o = window.__ctrOnline?.state(); return JSON.stringify({ screen: c?.screen, menu: c?.menu?.label, level: c?.level, octr: o?.octr?.CurrState, lobby: o?.lobby }) } catch (e) { return String(e) } }
+		window.addEventListener('error', e => { window.__ctrLastError.stack = String(e.error?.stack || e.message); window.__ctrLastError.at = at() })
+		window.addEventListener('unhandledrejection', e => { window.__ctrLastError.stack = String(e.reason?.stack || e.reason); window.__ctrLastError.at = at() })
+	} return true`)
+	const deadline = Date.now() + 180_000
+	let beat = Date.now() + HEARTBEAT_MS
+	let s = await game(tab)
+	while (!(s && onMainMenu(s)) && Date.now() < deadline) {
+		if (s?.menu?.input) await tab.press('z') // keyboard Z = Triangle : out of a menu a press opened
+		else await tab.press(CROSS)
+		await sleep(250)
+		s = await game(tab)
+		if (Date.now() >= beat) { say(`${tab.name} : still skipping the intro (${s?.screen ?? 'no __ctr yet'})`); beat += HEARTBEAT_MS }
+	}
+	if (!(s && onMainMenu(s))) throw new Error(`${tab.name} : never reached the main menu (${s?.screen}, ${JSON.stringify(s?.menu)})`)
+	await tab.js("document.getElementById('canvas')?.focus(); return true")
+	return s
+}
+
+/** Loads `url` in `tab` and boots the game to its main menu ; stores the disc in OPFS once. */
 export async function boot(tab, url) {
 	// A load that starts while the previous page of this tab is still pulling the 13 MB debug
 	// wasm through the port forward can stall with no wasm request at all : leave the page
@@ -159,9 +193,24 @@ export async function boot(tab, url) {
 		if (attempt === 3) throw new Error(`${tab.name} : the game never started after ${attempt} loads (${await pageLog(tab)})`)
 		say(`${tab.name} : no game output 60 s after load ${attempt}, reloading (${await pageLog(tab)})`)
 	}
-	// the server menu, or already past it : the page picks Private Room as soon as it has a room
-	await until(tab, 'the server menu', s => s.octr?.CurrState >= ST.PICK_SERVER, 180_000)
+	// one build : the normal game boots ; the room is joined from the title
+	await until(tab, 'the Online panel', s => !!s, 180_000)
+	await toMainMenu(tab)
 	await tab.js(R6_PROBE)
+}
+
+/** As until(), on the game's own state (window.__ctr). */
+async function untilGame(tab, label, pred, timeout = 30_000, every = 250) {
+	const start = Date.now()
+	let beat = start + HEARTBEAT_MS
+	let s = null
+	while (Date.now() - start < timeout) {
+		s = await game(tab).catch(() => null)
+		if (s && pred(s)) return s
+		if (Date.now() >= beat) { say(`${tab.name} : still waiting for ${label} (${Math.round((Date.now() - start) / 1000)} s) : ${s?.screen}, ${s?.menu?.label ?? ''}`); beat += HEARTBEAT_MS }
+		await sleep(every)
+	}
+	throw new Error(`${tab.name} : timed out waiting for ${label} (${s?.screen}, menu ${JSON.stringify(s?.menu)}, charSelect ${JSON.stringify(s?.charSelect)})`)
 }
 
 /** Distance a slot's kart covered over the samples. */
@@ -180,7 +229,7 @@ const rates = r6 => {
  * One 2-tab run. `host` is the suite's own tab (ctx) ; the guest gets a tab of its own,
  * driven with the same player harness.
  */
-async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}) {
+async function twoTabs(ctx, mode, { itemRace = false } = {}) {
 	const relay = ctx.args.relay
 	const rk = ctx.args.rk ?? ''
 	if (!relay) ctx.skip('no relay : --set relay=ws://localhost:8787 --set rk=<key> (a local ctr-relay, see RUN)')
@@ -252,8 +301,10 @@ async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}
 		const vis = [await ctx.js('return document.visibilityState'), await gjs('return document.visibilityState')]
 		if (vis.join() !== 'visible,visible') throw new Error(`a tab is not painting : visibility ${vis.join(' / ')}`)
 
-		// Server menu → room list : the page picks Private Room by itself once it has a room
-		for (const tab of [host, guest]) await until(tab, 'the room list (Private Room picked by the page)', s => s.octr.CurrState === ST.PICK_ROOM && s.octr.numRooms === 16 && s.octr.serverCountry === PRIVATE_ROOM, 30_000)
+		// The host's game joined its own room (the lobby states draw nothing : it stays on its
+		// title) ; the guest's game joined the host's and sits behind the host's picture.
+		await until(host, 'the host in its room', s => s.lobby.active && s.octr.CurrState === ST.HOST_TRACK_PICK, 30_000)
+		await until(guest, 'the guest in the room', s => s.lobby.active && s.octr.CurrState === ST.GUEST_TRACK_WAIT && s.share?.state === 'connected' && s.share.slot === 1, 60_000)
 		const gl = (await online(guest)).links[0]
 		const hl = (await online(host)).links[0]
 		if (mode !== 'ws' && gl?.backend === 'ws') {
@@ -265,40 +316,40 @@ async function twoTabs(ctx, mode, { itemRace = false, itemRoom = itemRace } = {}
 		}
 		if (mode === 'ws' && gl?.backend !== 'ws') throw new Error(`guest path ${gl?.backend}/${gl?.path}, wanted the forced WebSocket path`)
 		if (hl?.peer !== 0) throw new Error(`host : guest peer id ${hl?.peer}`)
-		await ctx.shot(`${mode}-room-list`)
-
-		// Room 0 (no items), or room 5 (the first item room) : the host first (DriverID 0 picks the track)
-		const room = itemRoom ? ITEM_ROOM : 0
-		for (const tab of [host, guest]) for (let i = 0; i < room; i++) {
-			await tab.press('ArrowDown')
-			await tab.frames(8)
-		}
-		// A press landing on a frame the menu does not read is lost : press again, up to 3 times.
-		for (let i = 0; i < 3 && (await online(host)).octr.CurrState === ST.PICK_ROOM; i++) {
-			await host.press(CROSS)
-			await sleep(1500)
-		}
-		await until(host, 'the track pick', s => s.octr.CurrState === ST.HOST_TRACK_PICK, 15_000)
-		if ((await online(host)).octr.serverRoom !== room) throw new Error(`host joined room ${(await online(host)).octr.serverRoom}, not ${room}`)
-		for (let i = 0; i < 3 && (await online(guest)).octr.CurrState === ST.PICK_ROOM; i++) {
-			await guest.press(CROSS)
-			await sleep(1500)
-		}
-		await until(guest, 'the track wait', s => s.octr.CurrState === ST.GUEST_TRACK_WAIT, 15_000)
 		await until(host, 'two drivers', s => s.octr.NumDrivers === 2 && s.octr.names[1] === 'Guest', 15_000)
 		await until(guest, 'two drivers', s => s.octr.NumDrivers === 2 && s.octr.names[1] === 'Host', 15_000)
-		await host.press(CROSS) // track
-		await sleep(600)
-		await host.press(CROSS) // laps
-		for (const tab of [host, guest]) await until(tab, 'the character pick', s => s.octr.CurrState === ST.CHARACTER_PICK, 15_000)
-		// Lock a character : a press landing while the menu opens is lost, press again until locked.
-		for (const tab of [host, guest]) {
-			for (let i = 0; i < 6 && (await online(tab)).octr.CurrState === ST.CHARACTER_PICK; i++) {
-				await tab.press(CROSS)
-				await sleep(1500)
-			}
+		if ((await online(guest)).lobby.phase !== PHASE.menus) throw new Error(`guest : lobby phase ${(await online(guest)).lobby.phase}, wanted the host's menus`)
+		await shot(ctx, `${mode}-room`)
+
+		// The lobby is the host's own menus : ONLINE → VS → 2 players (open : the guest's pad is
+		// plugged as P2 by the Share host) → the character select
+		await menuTo(host, 'ONLINE', dir => host.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
+		for (let i = 0; i < 3; i++) {
+			await host.press(CROSS)
+			await host.frames(15)
 		}
+		await untilGame(host, 'the character select', s => s.charSelect != null, 15_000)
+		await sleep(1000)
+		// the host locks P1 ; the guest's Cross reaches the host as P2's pad (presses landing as the
+		// menu opens are lost : again until locked)
+		for (let i = 0; i < 6 && !((await game(host))?.charSelect?.locked & 1); i++) {
+			await host.press(CROSS)
+			await sleep(800)
+		}
+		for (let i = 0; i < 8 && !((await game(host))?.charSelect?.locked & 2); i++) {
+			await guest.press(CROSS)
+			await sleep(800)
+		}
+		await untilGame(host, 'both characters locked', s => !s.charSelect || (s.charSelect.locked & 3) === 3, 15_000)
+		say('both characters locked : the first track (the lock starts the room\'s race)')
+		for (let i = 0; i < 16 && (await online(host)).octr.CurrState === ST.HOST_TRACK_PICK; i++) {
+			if (!(await game(host))?.charSelect) await host.press(CROSS)
+			await sleep(700)
+		}
+		await until(host, 'the track sent (OnlineCTR character pick)', s => s.octr.CurrState >= ST.CHARACTER_PICK, 15_000)
+		await until(guest, 'the character from the host', s => s.octr.CurrState >= ST.CHARACTER_PICK && s.lobby.phase >= PHASE.starting, 15_000)
 		for (const tab of [host, guest]) await until(tab, 'the race (SG_STARTRACE)', s => s.octr.CurrState === ST.START_RACE, 180_000, 500)
+		for (const tab of [host, guest]) if ((await online(tab)).lobby.phase !== PHASE.race) throw new Error(`${tab.name} : lobby phase ${(await online(tab)).lobby.phase} in the race`)
 
 		// `return await` : a bare `return <promise>` would run the finally below — closing the
 		// guest's tab — as soon as the race starts (« Render process gone », LOG T4).
@@ -487,19 +538,47 @@ function runDirOf(root, file) {
 }
 
 /**
+ * A screenshot of the host's page. ctx.shot's capture (fromSurface: false) comes back flat grey
+ * on the headless agent browser (LOG ## T3) : the same file is rewritten from the compositor's
+ * surface, which shows the game (ux.suite.mjs, share.suite.mjs do the same).
+ */
+async function shot(ctx, label) {
+	const proof = await ctx.shot(label)
+	const dir = proof?.file ? runDirOf(ctx.args.proofs, proof.file) : null
+	const r = await ctx.conn.send('Page.captureScreenshot', { format: 'png', fromSurface: true }, ctx.sid)
+	if (dir && r?.data) writeFileSync(join(dir, proof.file), Buffer.from(r.data, 'base64'))
+	return proof
+}
+
+/**
  * The item race : both drive the whole race and fire, both screens are filmed with their
  * sound, then put side by side in one MP4 (H.264 + MP3, what VS Code's preview plays).
  */
 async function itemRaceOn(ctx, { host, guest, gp, gjs }) {
-	const shot = await ctx.shot('item-race-start')
-	const dir = runDirOf(ctx.args.proofs, shot.file)
+	const start = await shot(ctx, 'item-race-start')
+	const dir = runDirOf(ctx.args.proofs, start.file)
 	const guestCur = { id: 'ONLINE-ITEM-RACE', proofs: [] }
 	const gRec = dir ? makePlayer({ conn: guest.gconn, sid: null, js: gjs, capture, dir, current: () => guestCur, pressFrames: PLAYER.pressFrames }) : null
 	const deadline = Date.now() + 240_000
+	// The item path on both games every 2 s (debug bridge : crates hit, wumpa, item held, free
+	// pool entries) : the proof that crates break and items are picked, not just that fire was pressed.
+	const items = { host: [], guest: [] }
+	const ITEM_PROBE = 'const c = window.__ctr; return c?.kart ? { crates: c.kart.crates, wumpa: c.kart.wumpa, item: c.kart.item, roll: c.kart.roll, pools: c.pools, lights: c.lights, t: Date.now() } : null'
+	let sampling = true
+	const sample = async () => {
+		while (sampling) {
+			for (const [who, tab] of [['host', host], ['guest', guest]]) {
+				const v = await tab.js(ITEM_PROBE).catch(() => null)
+				if (v) items[who].push(v)
+			}
+			await sleep(2000)
+		}
+	}
 	const race = () => Promise.all([
 		drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, deadline),
 		drive(gp, gjs, deadline),
-	])
+		sample(),
+	].map((p, i) => i === 2 ? p : p.finally(() => { sampling = false })))
 	let results
 	// Which session went away, if one does : a detach or a renderer crash, host or guest.
 	const gone = []
@@ -539,6 +618,13 @@ async function itemRaceOn(ctx, { host, guest, gp, gjs }) {
 	const [h, g] = results
 	const hs = await online(host)
 	const gs = await online(guest)
+	const itemsOf = who => {
+		const xs = items[who]
+		const last = xs.at(-1)
+		return { crates: last?.crates ?? null, wumpaMax: Math.max(-1, ...xs.map(x => x.wumpa)), items: [...new Set(xs.filter(x => x.item !== 0xf).map(x => x.item))], poolsMin: xs.length ? { thread: Math.min(...xs.map(x => x.pools?.thread ?? 1e9)), small: Math.min(...xs.map(x => x.pools?.small ?? 1e9)) } : null, samples: xs.length }
+	}
+	const picked = { host: itemsOf('host'), guest: itemsOf('guest') }
+	say(`item path : ${JSON.stringify(picked)}`)
 	const fired = { hostSent: hs.stats.received[CG_WEAPON] ?? 0, toGuest: hs.stats.sent[SG_WEAPON] ?? 0, guestGot: gs.stats.received[SG_WEAPON] ?? 0, guestSent: gs.stats.sent[CG_WEAPON] ?? 0 }
 	let both = 'no proofs root (--set proofs=<root>) : guest screen not filmed'
 	if (dir && guestCur.video) {
@@ -550,18 +636,18 @@ async function itemRaceOn(ctx, { host, guest, gp, gjs }) {
 		both = r.status === 0 ? `both screens : ${out} (host ${hostVideo.file}, guest ${guestCur.video.file}, guest cut by ${lag} s)` : `side-by-side failed : ${r.stderr}`
 	}
 	if (!(h.fired > 0 && g.fired > 0)) throw new Error('nobody pressed fire')
+	if (!(picked.host.crates > 0 && picked.guest.crates > 0)) throw new Error(`a kart broke no crate : ${JSON.stringify(picked)}`)
 	// Each side's items reached the other : the host's server got the guest's, the guest got the host's.
 	if (!(fired.hostSent > 0 && fired.guestGot > 0)) throw new Error(`no weapon crossed between the players : ${JSON.stringify(fired)}`)
 	if (!(h.finished && g.finished)) throw new Error(`the race did not end for both : host ${JSON.stringify(h)}, guest ${JSON.stringify(g)}`)
 	if (dir && !/^both screens/.test(both)) throw new Error(both)
-	return `${guest.own ? 'two browsers' : 'two tabs'} · guest session re-attached ${guest.gs.reattached}× · host ${h.finished ? `finished, rank ${h.rank}` : 'did not finish'} · guest ${g.finished ? `finished, rank ${g.rank}` : 'did not finish'} · weapon messages ${JSON.stringify(fired)} · ${both}`
+	return `${guest.own ? 'two browsers' : 'two tabs'} · guest session re-attached ${guest.gs.reattached}× · host ${h.finished ? `finished, rank ${h.rank}` : 'did not finish'} · guest ${g.finished ? `finished, rank ${g.rank}` : 'did not finish'} · weapon messages ${JSON.stringify(fired)} · items ${JSON.stringify(picked)} · ${both}`
 }
 
 export default async ctx => {
 	await ctx.scenario('ONLINE-2TAB-P2P', () => twoTabs(ctx, 'auto'))
+	// the guest on the relay plays the lobby blind (its pad, no picture) and races as the others
 	await ctx.scenario('ONLINE-2TAB-WS', () => twoTabs(ctx, 'ws'))
-	// the hold race of ONLINE-2TAB-WS in an item room : runs on a release build too (no __ctr)
-	await ctx.scenario('ONLINE-ITEM-ROOM', () => twoTabs(ctx, 'ws', { itemRoom: true }))
 	// A whole race, both driving and firing, both screens filmed ; over WebRTC when it pairs.
 	await ctx.scenario('ONLINE-ITEM-RACE', () => twoTabs(ctx, 'auto', { itemRace: true }))
 }

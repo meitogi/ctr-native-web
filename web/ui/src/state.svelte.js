@@ -19,6 +19,9 @@ export const ui = $state({
   multi: null,
   // Share's guest page : { slot, host, list: [{ slot, name }] } from the host's messages
   room: null,
+  // an Online room's guest in the lobby (web/online/page.js) : the local keys and pads go to the
+  // host, not to this game
+  lobbyGuest: false,
   // Share's guest page : the connection as web/share/guest-page.js reports it (guest.js)
   guest: null,
   // panels other modules hand over (web/online/page.js, web/share/panel.js) : { id, title, el }

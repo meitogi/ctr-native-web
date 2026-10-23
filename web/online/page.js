@@ -10,15 +10,30 @@
 // players find each other : our relay, public MQTT brokers, a copy-paste code), in order.
 // Guest : the room link in the page's URL (`#room=…`, web/net/link.js) and the connection
 // (automatic : direct, else via the relay ; or always via the relay). The guest starts its link
-// as soon as the room opens ; the game's « Private Room » entry then uses it. The player name is
-// read when the game connects. Strings follow the browser's language (French or English).
+// as soon as the room opens. The player name is read when the game connects. Strings follow the
+// browser's language (French or English).
+//
+// One build (session 14) : the game plays solo until a room is here. Hosting a room shares this
+// game's screen and takes the guests' pads as P2–P4 (web/share, on the same room : the lobby is
+// the game's own ONLINE → VS / BATTLE menus), and asks the game to join (Module.ctrOnlineControl).
+// A guest's game joins the same way ; while the host is in its menus the guest sees the host's
+// screen over its own game and its keys and pad go to the host. At the host's track lock each
+// guest gets the character it locked there (Share's LOBBY message) and every game loads its own
+// race through OnlineCTR's protocol. Module.ctrOnlineLobby() is the game's side of it.
 //
 // Debug getter : `window.__ctrOnline.state()` — octr as the bridge sees it, the room, its links,
 // per-slot kart samples, message counts ; tests read it instead of pixels (never `window.__ctr`,
 // which is T3's).
 import { formatRoomLink, newRoom, parseRoomLink } from '../net/link.js';
 import { openRoom } from '../net/room.js';
+import { createShareGuest } from '../share/guest.js';
+import { TAG, encodeControl, nameOf, pickPad } from '../share/protocol.js';
 import { createOnlineNet } from './net.js';
+
+/** enum OnlineLobbyPhase (game/OnlineCTR/native_compat.h) */
+export const PHASE = { none: 0, menus: 1, starting: 2, race: 3 };
+/** enum NativeOnlineControl (platform/native_online.h) */
+export const CTL = { enter: 1, leave: 2, character: 3 };
 
 const DEFAULT_RELAY = 'wss://ctr-relay.suuuper.app';
 const NAME_LEN = 9; // game/OnlineCTR/global.h
@@ -74,7 +89,12 @@ const STRINGS = {
       '  Enter = Start (pause)            Space = Select (leave the online room)',
       '  A gamepad works as is (standard mapping). F4 moves the keyboard to the next player.',
     ],
-    hint: 'Once there is a room, the game skips its server menu and lists the rooms : pick the same room number as the host (C = Cross).',
+    leave: 'Leave the room',
+    hostHint: 'Create the room and send the link. Then, in the game : ONLINE → VS or BATTLE. The others play P2–P4 on your screen ; at the track lock everyone races on their own screen.',
+    guestHint: 'Once in the room, the host\'s screen shows here while it picks : press Cross to join, pick your character with your own keys or pad. The race then runs on your own screen.',
+    lobby: ['', 'In the host\'s menus', 'Starting the race', 'Racing'],
+    inRoom: (list) => `In the room : ${list}`,
+    noPicture: 'No direct path to the host : your pad plays, the host\'s screen is not shown.',
     paths: { 'direct-ipv6': 'direct (IPv6)', 'direct-lan': 'direct (local network)', 'direct-nat': 'direct (through NAT)', relay: 'via the relay' },
     meets: { relay: 'our relay', mqtt: 'public brokers', paste: 'copy-paste' },
     states: ['starting', 'server menu', 'room list', 'version error', 'joining', 'track choice', 'waiting for the track', 'character choice', 'waiting for the others', 'loading', 'start line', 'racing', 'results'],
@@ -139,7 +159,12 @@ const STRINGS = {
       '  Entrée = Start (pause)            Espace = Select (quitter la salle en ligne)',
       '  Une manette marche telle quelle (mapping standard). F4 passe le clavier au joueur suivant.',
     ],
-    hint: 'Dès qu\'il y a une partie, le jeu saute son menu de serveurs et liste les salles : prends le même numéro de salle que l\'hôte (C = Croix).',
+    leave: 'Quitter la partie',
+    hostHint: 'Crée la partie et envoie le lien. Puis, dans le jeu : ONLINE → VS ou BATTLE. Les autres jouent P2–P4 sur ton écran ; au choix du circuit, chacun court sur son propre écran.',
+    guestHint: 'Une fois dans la partie, l\'écran de l\'hôte s\'affiche ici pendant qu\'il choisit : appuie sur Croix pour entrer, choisis ton perso avec tes touches ou ta manette. La course tourne ensuite sur ton écran.',
+    lobby: ['', 'Dans les menus de l\'hôte', 'Lancement de la course', 'Course'],
+    inRoom: (list) => `Dans la partie : ${list}`,
+    noPicture: 'Pas de chemin direct vers l\'hôte : ta manette joue, l\'écran de l\'hôte n\'est pas affiché.',
     paths: { 'direct-ipv6': 'en direct (IPv6)', 'direct-lan': 'en direct (réseau local)', 'direct-nat': 'en direct (à travers le NAT)', relay: 'via le relais' },
     meets: { relay: 'notre relais', mqtt: 'les serveurs publics', paste: 'copier-coller' },
     states: ['démarrage', 'menu des serveurs', 'liste des salles', 'erreur de version', 'arrivée', 'choix du circuit', 'attente du circuit', 'choix du perso', 'attente des autres', 'chargement', 'ligne de départ', 'course', 'résultats'],
@@ -183,6 +208,8 @@ const CSS = `
   border: 1px solid #555; background: #111; color: #ddd; cursor: pointer; padding: 0; opacity: 0;
   transition: opacity 150ms linear; display: flex; align-items: center; justify-content: center; }
 #online-toggle.hidden { display: none; }
+#online-lobby { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; background: #000; z-index: 5; pointer-events: none; }
+#online-lobby.hidden { display: none; }
 `;
 
 // A monochrome « network » glyph : three linked nodes.
@@ -215,8 +242,16 @@ export function attach(Module) {
   let linkText = '';
   let error = '';
   let codeOut = null; // { to, blob } : the copy-paste code to send
+  let shareGuest = null; // guest : the host's screen and our pad (web/share/guest.js)
+  let shareHost = null; // host : the lobby shared (web/share/panel.js's host)
+  let startSent = false; // host : the characters of this race start went out
+  const held = Object.create(null); // guest : the keys down, for the pad sent to the host
+  const lobbyVideo = el('video', { id: 'online-lobby', className: 'hidden', autoplay: true, playsInline: true });
+  const lobbyStream = new MediaStream();
+  const lobby = () => Module.ctrOnlineLobby?.() ?? { active: false, phase: PHASE.none, characters: [] };
 
   document.head.append(el('style', { textContent: CSS }));
+  document.body.append(lobbyVideo);
   const panel = el('aside', { id: 'online' });
   const toggle = el('button', { id: 'online-toggle', type: 'button', title: T.open, innerHTML: ICON });
   // The page's Settings (web/ui, session 12) when it is there : this panel becomes its « Online »
@@ -224,13 +259,14 @@ export function attach(Module) {
   const ui = globalThis.ctrUI;
   const tab = ui ? ui.adopt('online', T.title, panel) : null;
   if (!tab) document.body.append(panel, toggle);
+  // the main menu's ONLINE row, picked with no room (game/230/MM_MenuFlow.c)
+  if (Module.ctrInput) Module.ctrInput.openMultiplayer = () => setOpen(true);
   // keys typed in the panel are not the game's
   panel.addEventListener('keydown', (e) => e.stopPropagation());
   panel.addEventListener('keyup', (e) => e.stopPropagation());
 
   // ---- open / closed ----
   const setOpen = (open) => {
-    save('panel', open ? 'open' : 'closed');
     if (tab) return open ? tab.open() : tab.close();
     panel.classList.toggle('closed', !open);
     toggle.classList.toggle('hidden', open);
@@ -320,14 +356,17 @@ export function attach(Module) {
   const status = el('div', { className: 'status', id: 'online-status' });
   const errorLine = el('div', { className: 'error', id: 'online-error' });
   const hideButton = el('button', { type: 'button', id: 'online-hide', textContent: T.hide });
+  const leaveButton = el('button', { type: 'button', id: 'online-leave', textContent: T.leave });
+  const hint = el('div', { className: 'hint' });
 
   panel.append(
     el('header', {}, el('h2', {}, T.title), hideButton),
     el('label', { hidden: !!ui }, T.name, name),
     hostBox, joinBox, codeBox,
-    roomLine, status, errorLine,
-    el('div', { className: 'hint' }, T.hint));
+    roomLine, status, errorLine, leaveButton,
+    hint);
   hideButton.addEventListener('click', () => setOpen(false));
+  leaveButton.addEventListener('click', () => leave());
 
   const explain = (e) => T.errors[e?.code] ?? `${e?.code ? `${e.code} : ` : ''}${e?.message ?? e}`;
   const fail = (e) => { error = explain(e); render(); };
@@ -355,10 +394,32 @@ export function attach(Module) {
       room.on('blob', (b) => { codeOut = b; render(); });
       room.on('close', () => fail({ code: 'relay' }));
       net.host(room);
+      // the lobby : this game's screen to the guests, their pads as P2–P4, on the same room
+      const share = globalThis.ctrShareApi;
+      if (share) shareHost = await share.startOn(room, { relayGuests: true, by: 'online' });
+      Module.ctrOnlineControl?.(CTL.enter);
     } catch (e) {
       link = null;
       fail(e);
     }
+    render();
+  }
+
+  /** Leaves the room : the game drops the mod, the lobby share stops, the room closes. */
+  function leave() {
+    Module.ctrOnlineControl?.(CTL.leave);
+    globalThis.ctrShareApi?.stopOn({ keepRoom: true });
+    shareHost = null;
+    shareGuest?.close();
+    shareGuest = null;
+    net.disconnect?.();
+    net.room?.close();
+    net.room = null;
+    net.role = 'none';
+    link = null;
+    linkText = '';
+    codeOut = null;
+    setLobbyGuest(false);
     render();
   }
 
@@ -379,11 +440,84 @@ export function attach(Module) {
       room.on('blob', (b) => { codeOut = b; render(); });
       net.guest(room);
       net.preconnect();
+      setLobbyGuest(true); // before the game's ENTER is processed, the keys are the host's
+      Module.ctrOnlineControl?.(CTL.enter);
+      await lobbyGuestOn(room);
     } catch (e) {
       fail(e);
     }
     render();
   }
+
+  // The host's screen and our pad ride the game's own link to the host (web/share/guest.js) ;
+  // ?bot : a scripted guest (web/online/bot.sh) asks a debug host for its kart as Share's bot does.
+  async function lobbyGuestOn(room) {
+    for (let i = 0; i < 600 && !net.hostLink && net.room === room; i++) await new Promise((r) => setTimeout(r, 100));
+    if (net.room !== room || !net.hostLink) return;
+    shareGuest?.close();
+    const g = createShareGuest(room, {
+      link: net.hostLink, name: net.name, bot: query.has('bot'), relay: true,
+      onTrack(e) {
+        lobbyStream.addTrack(e.track);
+        if (lobbyVideo.srcObject !== lobbyStream) lobbyVideo.srcObject = lobbyStream;
+      },
+    });
+    shareGuest = g;
+    g.on('change', () => {
+      const body = g.lobby;
+      if (body && body.phase === PHASE.starting && Number.isInteger(body.character)) Module.ctrOnlineControl?.(CTL.character, body.character);
+      render();
+    });
+    await g.connect();
+  }
+
+  // ---- the lobby, every 100 ms : what the game's phase asks of the page ----
+  const setLobbyGuest = (on) => {
+    ui?.lobby?.(on);
+    lobbyVideo.classList.toggle('hidden', !(on && shareGuest?.media && lobbyStream.getTracks().length));
+  };
+  function lobbyTick() {
+    const l = lobby();
+    if (net.role === 'host' && shareHost) {
+      // the track lock : each guest gets the character its pad locked on this screen
+      if (l.active && l.phase === PHASE.starting && !startSent) {
+        startSent = true;
+        for (const id in shareHost.guests) {
+          const g = shareHost.guests[id];
+          const character = l.characters[g.slot];
+          if (g.listening && character >= 0) g.link.send(encodeControl(TAG.lobby, { phase: PHASE.starting, character }), { reliable: true });
+        }
+      }
+      if (l.phase !== PHASE.starting) startSent = false;
+    }
+    if (net.role === 'guest') {
+      // our game ignores the local devices from the room's join to its race load (and again on
+      // the title reloaded after a race) ; the pad goes to the host only while its menus run
+      setLobbyGuest(l.active && l.phase !== PHASE.race);
+      if (l.active && l.phase === PHASE.menus && shareGuest?.state === 'connected') sendPad();
+    }
+  }
+  setInterval(lobbyTick, 100);
+  // our keys and pad to the host while in its lobby (~60 a second, latest wins there)
+  function sendPad() {
+    if (!ui || shareGuest?.state !== 'connected') return;
+    const s = ui.settings.get();
+    const pad = query.has('bot') ? pickPad({ mode: 'keyboard' }, held, []) : pickPad(s.device, held, navigator.getGamepads?.() ?? [], ui.guestInput?.());
+    shareGuest.sendPad(pad);
+  }
+  for (const type of ['keydown', 'keyup']) {
+    window.addEventListener(type, (e) => {
+      held[e.code] = type === 'keydown';
+      if (shareGuest?.state === 'connected' && lobby().phase === PHASE.menus) sendPad();
+    });
+  }
+  window.addEventListener('blur', () => { for (const k in held) held[k] = false; });
+  (function padLoop() {
+    if (shareGuest?.state === 'connected' && lobby().phase === PHASE.menus) sendPad();
+    requestAnimationFrame(padLoop);
+  })();
+  // the lobby's sound follows the page's volume
+  ui?.settings.subscribe((s) => { lobbyVideo.muted = !!s.muted; lobbyVideo.volume = Math.min(1, Math.max(0, s.volume ?? 1)); });
 
   createButton.addEventListener('click', host);
   copyButton.addEventListener('click', () => navigator.clipboard?.writeText(linkText));
@@ -439,23 +573,21 @@ export function attach(Module) {
     roomLine.textContent = room ? (net.role === 'host' ? T.hosting(link?.room ?? '') : T.guestOf(link?.room ?? '')) : '';
     const list = links();
     const octr = Module.ctrOnlineOctr?.();
+    const l = lobby();
     const lines = [];
     if (net.role === 'host') lines.push(list.length ? list.map((l) => T.player(l.peer + 1, ...say(l))).join('\n') : T.waiting);
     if (net.role === 'guest') lines.push(net.hostLink ? T.toHost(...say(list[0])) : net.pending ? T.connecting : T.notConnected);
+    const players = net.role === 'host' ? shareHost?.players() : shareGuest?.list;
+    if (players?.length) lines.push(T.inRoom(players.map((p) => `P${p.slot + 1} ${nameOf(p.slot, p.name)}`).join(' · ')));
+    if (l.active && T.lobby[l.phase]) lines.push(T.lobby[l.phase]);
+    if (net.role === 'guest' && shareGuest?.state === 'connected' && !shareGuest.media) lines.push(T.noPicture);
     if (octr && octr.CurrState >= 0) lines.push(T.game(T.states[octr.CurrState] ?? octr.CurrState));
     status.textContent = lines.join('\n');
     errorLine.textContent = error || (net.lastError ? explain(net.lastError) : '');
+    leaveButton.style.display = room ? '' : 'none';
+    hint.textContent = net.role === 'guest' || asGuest ? T.guestHint : T.hostHint;
   }
   setInterval(render, 500);
-
-  // The server menu (Europe, USA… Private Room) asks a question the page already answered :
-  // once there is a room, Private Room is picked for the player, every 3 s at most (a guest
-  // whose host is not there yet goes back to that menu after the bridge's attempts).
-  let lastPick = 0;
-  setInterval(() => {
-    if (!net.room || Date.now() - lastPick < 3000) return;
-    if (Module.ctrOnlinePickPrivateRoom?.()) lastPick = Date.now();
-  }, 250);
 
   window.__ctrOnline = {
     state() {
@@ -472,15 +604,28 @@ export function attach(Module) {
         error,
         octr: Module.ctrOnlineOctr?.() ?? null,
         karts: Module.ctrOnlineKarts?.() ?? null,
+        lobby: lobby(),
+        share: net.role === 'host'
+          ? { guests: shareHost ? Object.values(shareHost.guests).map((g) => ({ slot: g.slot, name: g.name, state: g.state, path: g.path, bot: !!g.bot })) : [] }
+          : shareGuest ? { state: shareGuest.state, media: shareGuest.media, slot: shareGuest.slot, list: shareGuest.list, lobby: shareGuest.lobby, video: [lobbyVideo.videoWidth, lobbyVideo.videoHeight] } : null,
       };
     },
+    /** ?bot : our kart as the host's game sees it, shaped like window.__ctr (web/share/guest-page.js bot()). */
+    bot() {
+      if (!shareGuest || shareGuest.state === 'closed' || shareGuest.state === 'refused') return { gone: true, screen: shareGuest?.state ?? 'idle', kart: null };
+      const s = shareGuest.game;
+      return s ? { ...s, track: shareGuest.track } : null;
+    },
     host,
+    leave,
   };
 
   // The controls, once, in the page's log under the canvas and in the browser's console.
   for (const line of T.controls) Module.print?.(line);
 
-  setOpen(load('panel', 'open') !== 'closed');
+  // One build : a solo boot keeps the panel closed, as the OFF build had none (nothing stored :
+  // session 9's remembered state kept it open at every boot) ; a room link opens it.
+  setOpen(asGuest);
   if (asGuest) guest();
   render();
 }
