@@ -1,0 +1,15 @@
+# The dev and test ports — the one list. Read by web/dev.sh ports (README table, the agent
+# browser's AGENT_BROWSER_ORIGINS in .devcontainer/.env) and plans' tools/ports.sh (the servers
+# it may list and stop). Columns, tab-separated : port · use · forwarded in VS Code (yes : a
+# server in the container ; no : it runs elsewhere) · the agent browser's origin for it (- : none).
+# The published site is an origin too (last row, no port).
+8090	the dev page : wtf ctr dev (hot reload) or wtf ctr prod (the site as published)	yes	http://localhost:8090
+8091	player suites' page server (one per parallel session)	yes	http://localhost:8091
+8092	player suites' page server (one per parallel session)	yes	http://localhost:8092
+8093	player suites' page server (one per parallel session)	yes	http://localhost:8093
+8787	local relay, only with wtf ctr dev relay=local (the VPS relay is the default)	yes	http://localhost:8787
+8788	player suites' relay	yes	http://localhost:8788
+8790	the web/net and web/share demo pages	yes	http://localhost:8790
+9001	MQTT stand-in (signaling suite)	yes	http://localhost:9001
+8099	the LAN disc server (wtf disc), on the LAN host, not in the container	no	-
+-	the published site	no	https://ctr.suuuper.app

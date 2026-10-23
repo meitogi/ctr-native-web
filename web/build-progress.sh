@@ -1,4 +1,4 @@
-# web/build-progress.sh — sourced by the dev scripts (solo-dev.sh, share/dev.sh, online/dev.sh) :
+# web/build-progress.sh — sourced by the dev entry point (web/dev.sh) :
 #
 #   build_with_progress <log> <command> [args…]
 #

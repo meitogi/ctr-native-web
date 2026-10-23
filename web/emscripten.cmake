@@ -77,6 +77,12 @@ add_custom_command(
 find_program(CTR_WEB_NODE node REQUIRED)
 find_program(CTR_WEB_NPM npm REQUIRED)
 set(CTR_WEB_UI_DIR "${CMAKE_SOURCE_DIR}/web/ui")
+# __CTR_DEV__ in the bundle (vite.config.js) : the debug-only pieces in a Debug build only
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(CTR_WEB_UI_DEV 1)
+else()
+    set(CTR_WEB_UI_DEV 0)
+endif()
 file(GLOB_RECURSE CTR_WEB_UI_SOURCES CONFIGURE_DEPENDS "${CTR_WEB_UI_DIR}/src/*")
 add_custom_command(
     OUTPUT "${CTR_WEB_UI_DIR}/node_modules/.package-lock.json"
@@ -87,7 +93,7 @@ add_custom_command(
 )
 add_custom_command(
     OUTPUT "${CMAKE_BINARY_DIR}/ui/ui.js" "${CMAKE_BINARY_DIR}/ui/ui.css"
-    COMMAND ${CMAKE_COMMAND} -E env "CTR_UI_OUT=${CMAKE_BINARY_DIR}/ui"
+    COMMAND ${CMAKE_COMMAND} -E env "CTR_UI_OUT=${CMAKE_BINARY_DIR}/ui" "CTR_DEV=${CTR_WEB_UI_DEV}"
             "${CTR_WEB_NODE}" node_modules/vite/bin/vite.js build --logLevel warn
     WORKING_DIRECTORY "${CTR_WEB_UI_DIR}"
     DEPENDS ${CTR_WEB_UI_SOURCES} "${CTR_WEB_UI_DIR}/vite.config.js" "${CMAKE_SOURCE_DIR}/web/disc.js"
