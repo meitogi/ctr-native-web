@@ -194,11 +194,11 @@ int RB_CrateWeapon_ThCollide(struct Thread *crateThread, struct Thread *collidin
 			if (driver->clockReceive == 0)
 			{
 #ifdef USE_ONLINE
-				if (driver->driverID != 0)
+				if (ONLINE_RACE && driver->driverID != 0) // ctr-native: one build, runtime
 					return 0; // guessing return 0 means """cancel"""
 
 				// do nothing at end of race
-				if ((driver->actionsFlagSet & ACTION_RACE_FINISHED) != 0)
+				if (ONLINE_RACE && (driver->actionsFlagSet & ACTION_RACE_FINISHED) != 0)
 					return 0;
 #endif
 
@@ -331,7 +331,7 @@ int RB_CrateFruit_ThCollide(struct Thread *crateThread, struct Thread *colliding
 				driver = collidingTh->object;
 
 #ifdef USE_ONLINE
-				if (driver->driverID != 0)
+				if (ONLINE_RACE && driver->driverID != 0) // ctr-native: one build, runtime
 				{
 					RB_Player_ModifyWumpa(driver, newWumpa);
 					return 0; // thread not born????
@@ -357,7 +357,7 @@ int RB_CrateFruit_ThCollide(struct Thread *crateThread, struct Thread *colliding
 				driver = ((struct TrackerWeapon *)collidingTh->object)->driverParent;
 
 #ifdef USE_ONLINE
-				if (driver->driverID != 0)
+				if (ONLINE_RACE && driver->driverID != 0) // ctr-native: one build, runtime
 				{
 					RB_Player_ModifyWumpa(driver, newWumpa);
 					return 0; // thread not born????
@@ -491,7 +491,7 @@ int RB_CrateTime_ThCollide(struct Thread *crateThread, struct Thread *driverTh, 
 			}
 
 #ifdef USE_ONLINE
-			if (driver->driverID != 0)
+			if (ONLINE_RACE && driver->driverID != 0) // ctr-native: one build, runtime
 				return 0;
 #endif
 

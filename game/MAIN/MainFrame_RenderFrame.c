@@ -155,14 +155,15 @@ void MainFrame_RenderFrame(struct GameTracker *gGT, struct GamepadSystem *gGamep
 			DotLights_AudioAndVideo(gGT);
 		}
 
-#ifndef USE_ONLINE
+#ifdef USE_ONLINE
+		if (!ONLINE_RACE) // ctr-native: one build, runtime
+#endif
 		if ((gGT->renderFlags & RENDER_FLAG_SPLIT_SCREEN_LINES) != 0)
 		{
 			WindowBoxLines(gGT);
 
 			WindowDivsionLines(gGT);
 		}
-#endif
 
 		// if game is not loading
 		if (sdata->Loading.stage == LOAD_IDLE)
@@ -526,9 +527,10 @@ void RenderAllHUD(struct GameTracker *gGT)
 					// if crystal challenge
 					else
 					{
-#ifndef USE_ONLINE
-						UI_RenderFrame_CrystChall();
+#ifdef USE_ONLINE
+						if (!ONLINE_RACE) // ctr-native: one build, runtime
 #endif
+						UI_RenderFrame_CrystChall();
 					}
 				}
 
@@ -537,9 +539,12 @@ void RenderAllHUD(struct GameTracker *gGT)
 				{
 #ifdef USE_ONLINE
 					// online rooms are never a cup: upstream's VS-cup check comes first
-					void OnlineEndOfRace();
-					OnlineEndOfRace();
-					return;
+					if (ONLINE_RACE) // ctr-native: one build, runtime
+					{
+						void OnlineEndOfRace();
+						OnlineEndOfRace();
+						return;
+					}
 #endif
 					if ((u32)(sdata->Loading.stage + 5) > 1)
 					{
@@ -610,9 +615,10 @@ void RenderAllHUD(struct GameTracker *gGT)
 					// if any transition is over
 					if (gGT->pushBuffer_UI.fadeFromBlack_currentValue > 0xfff)
 					{
-#ifndef USE_ONLINE
-						UI_RenderFrame_AdvHub();
+#ifdef USE_ONLINE
+						if (!ONLINE_RACE) // ctr-native: one build, runtime
 #endif
+						UI_RenderFrame_AdvHub();
 					}
 				}
 

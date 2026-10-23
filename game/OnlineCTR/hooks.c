@@ -60,6 +60,7 @@ void octr_entryHook()
 	memset(octr, 0, sizeof(struct OnlineCTR));
 	octr->IsBootedPS1 = 1;
 	octr->ver_psx = VERSION;
+	octrActive = 1; // ctr-native: one build — the native boot is the mod's own flow
 }
 
 // this runs after the end of MainInit_FinalizeInit,
@@ -70,6 +71,7 @@ void octr_initHook()
 
 	// small stack pool, pause thread (those threads can't pause)
 	PROC_BirthWithObject(0x30f, octr_ThreadFunc, 0, 0);
+	octrThreadAlive = 1; // ctr-native: one build (native_bridge.c)
 
 	struct GameTracker* gGT = sdata->gGT;
 	if(gGT->levelID <= TURBO_TRACK)

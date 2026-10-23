@@ -434,7 +434,7 @@ void VehStuckProc_MaskGrab_Update(struct Thread *t, struct Driver *d)
 
 	// CameraDC flag
 #ifdef USE_ONLINE
-	if (d->driverID == 0)
+	if (!ONLINE_RACE || d->driverID == 0) // ctr-native: one build, runtime
 #endif
 	GAME_TRACKER->cameraDC[d->driverID].flags |= CAMERA_FLAG_DIRECTION_CHANGED;
 
@@ -480,7 +480,7 @@ void VehStuckProc_MaskGrab_Animate(struct Thread *t, struct Driver *d)
 		if ((d->KartStates.MaskGrab.boolWhistle == false) && (d->NoInputTimer < VEH_STUCK_MASK_GRAB_WHISTLE_TIME))
 		{
 #ifdef USE_ONLINE
-			if (d->driverID == 0)
+			if (!ONLINE_RACE || d->driverID == 0) // ctr-native: one build, runtime
 #endif
 			OtherFX_Play(VEH_STUCK_MASK_GRAB_WHISTLE_FX, 1);
 			d->KartStates.MaskGrab.boolWhistle = true;
@@ -838,7 +838,7 @@ void VehStuckProc_PlantEaten_Animate(struct Thread *t, struct Driver *d)
 		RotTrans(&plantVector, &camVec, gteFlags);
 
 #ifdef USE_ONLINE
-		if (driver->driverID != 0)
+		if (ONLINE_RACE && driver->driverID != 0) // ctr-native: one build, runtime
 			return;
 #endif
 
@@ -1032,7 +1032,7 @@ void VehStuckProc_RevEngine_PhysLinear(struct Thread *t, struct Driver *d)
 	}
 
 #ifdef USE_ONLINE
-	if (d->driverID != 0)
+	if (ONLINE_RACE && d->driverID != 0) // ctr-native: one build, runtime
 		return;
 #endif
 
@@ -1112,7 +1112,7 @@ void VehStuckProc_RevEngine_Animate(struct Thread *t, struct Driver *d)
 					d->KartStates.RevEngine.lockoutFlags |= REV_ENGINE_LOCKOUT_ALL;
 
 #ifdef USE_ONLINE
-					if (d->driverID == 0)
+					if (!ONLINE_RACE || d->driverID == 0) // ctr-native: one build, runtime
 #endif
 					OtherFX_Play_Echo(VEH_STUCK_REV_OVERREV_FX, 1, ((u32)d->actionsFlagSet >> 16) & 1);
 				}
@@ -1337,7 +1337,7 @@ void VehStuckProc_RevEngine_Init(struct Thread *t, struct Driver *d)
 
 		// CameraDC flag
 #ifdef USE_ONLINE
-		if (d->driverID == 0)
+		if (!ONLINE_RACE || d->driverID == 0) // ctr-native: one build, runtime
 #endif
 		GAME_TRACKER->cameraDC[d->driverID].flags |= CAMERA_FLAG_DIRECTION_CHANGED;
 	}

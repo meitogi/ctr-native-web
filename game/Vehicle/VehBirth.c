@@ -67,7 +67,8 @@ void VehBirth_TeleportSelf(struct Driver *d, u32 spawnFlag, int spawnPosY)
 #ifdef USE_ONLINE
 		// always spawn using the
 		// 8-place starting line
-		goto VehBirth_StartlinePosition;
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+			goto VehBirth_StartlinePosition;
 #endif
 		if ((GAME_TRACKER->podiumRewardID == STATIC_KEY) && (GAME_TRACKER->currAdvProfile.numKeys == 1))
 		{
@@ -479,7 +480,7 @@ VehBirth_RotationReady:
 		} while (funcIndex >= 0);
 
 #ifdef USE_ONLINE
-		if (driver->driverID == 0)
+		if (!ONLINE_RACE || driver->driverID == 0) // ctr-native: one build, runtime
 #endif
 		CAM_StartOfRace(&GAME_TRACKER->cameraDC[driver->driverID]);
 
@@ -725,7 +726,8 @@ void VehBirth_EngineAudio_AllPlayers(void)
 	{
 		d = th->object;
 #ifdef USE_ONLINE
-		d = gGT->drivers[0];
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+			d = gGT->drivers[0];
 #endif
 		driverID = d->driverID;
 		engine = GAME_CHARACTER_METADATA[GAME_CHARACTER_IDS[driverID]].engineID;
@@ -734,7 +736,8 @@ void VehBirth_EngineAudio_AllPlayers(void)
 
 		EngineAudio_InitOnce((u16)engine, HOWL_SFX_CENTER_NO_DISTORTION);
 #ifdef USE_ONLINE
-		return;
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+			return;
 #endif
 	}
 }
@@ -888,6 +891,13 @@ struct Driver *VehBirth_Player(int index)
 	t = PROC_BirthWithObject(VEH_BIRTH_PLAYER_THREAD_FLAGS, 0, VEH_PLAYER_THREAD_NAME, 0);
 	d = t->object;
 	memset(d, 0, DRIVER_NTSC_RETAIL_SIZE);
+#ifdef USE_ONLINE
+	// ctr-native: one build — the mod's fields live in the pool object's unused
+	// tail (0x638..), past the retail memset : zero them, or a driver born on a
+	// reused arena carries a stale meterGradeTimer and its unterminated grade
+	// (DecalFont read past the arena on the first race after the menus)
+	memset(&d->uncappedReserves, 0, sizeof(struct Driver) - offsetof(struct Driver, uncappedReserves));
+#endif
 
 	VehBirth_NonGhost(t, index);
 

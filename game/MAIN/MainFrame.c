@@ -144,7 +144,8 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 			psVar9 = (struct Driver *)psVar12->object;
 
 #ifdef USE_ONLINE
-			psVar9 = gGT->drivers[0];
+			if (ONLINE_RACE) // ctr-native: one build, runtime
+				psVar9 = gGT->drivers[0];
 #endif
 
 			if (psVar9->clockSend)
@@ -190,7 +191,8 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 			pushBuffer = pushBuffer + 1;
 
 #ifdef USE_ONLINE
-			break;
+			if (ONLINE_RACE) // ctr-native: one build, runtime
+				break;
 #endif
 		}
 		gGT->timer = gGT->timer + 1;
@@ -312,7 +314,7 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 			{
 #ifdef USE_ONLINE
 				// synchronize track hazards
-				if ((iVar4 == STATIC) || (iVar4 == SPIDER))
+				if (ONLINE_RACE && ((iVar4 == STATIC) || (iVar4 == SPIDER))) // ctr-native: one build, runtime
 				{
 					if (gGT->trafficLightsTimer > 3600)
 						continue;
@@ -344,13 +346,14 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 							pcVar5 = psVar9->funcPtrs[iVar11];
 
 #ifdef USE_ONLINE
-							RunVehicleThread(pcVar5, psVar12, psVar9);
-#else
+							if (ONLINE_RACE) // ctr-native: one build, runtime
+								RunVehicleThread(pcVar5, psVar12, psVar9);
+							else
+#endif
 							if (pcVar5 != 0)
 							{
 								pcVar5(psVar12, psVar9);
 							}
-#endif
 						}
 					}
 

@@ -31,6 +31,15 @@ void octr_ThreadFunc(struct Thread* t) // ctr-native: ThreadFunc is a typedef
 {
 	int isIdle = 0;
 
+	// ctr-native: one build — the thread dies with the room
+	if (!octrActive)
+	{
+		octrThreadAlive = 0;
+		t->flags |= 0x800;
+		return;
+	}
+	octrThreadAlive = 1;
+
 	struct GameTracker* gGT = sdata->gGT;
 	octr->boolPlanetLEV = gGT->levelID == 0x26; //was 0x26 (globe level)
 
@@ -92,6 +101,16 @@ void octr_ThreadFunc(struct Thread* t) // ctr-native: ThreadFunc is a typedef
 	// if client closed, or server disconnected
 	if(boolCloseClient || (octr->CurrState < 0))
 	{
+		// ctr-native: one build — leaving the room turns the mod off and
+		// returns to the title ; the mod's own flow (native) reloads the globe
+		if (octrExternalLobby)
+		{
+			OnlineRuntime_Deactivate();
+			octrThreadAlive = 0;
+			t->flags |= 0x800;
+			return;
+		}
+
 		sdata->ptrActiveMenu = 0;
 
 		if(octr->boolPlanetLEV)
@@ -139,11 +158,16 @@ void octr_ThreadFunc(struct Thread* t) // ctr-native: ThreadFunc is a typedef
 		DrawOverheadNames();
 	}
 
+	// ctr-native: one build — the web's lobby is the game's own menus and the
+	// page : the lobby states draw nothing (native_bridge.c)
+	if (octrExternalLobby && octr->CurrState >= 0 && octr->CurrState < GAME_WAIT_FOR_RACE)
+		OnlineExternal_State();
+	else
 	if (octr->CurrState >= 0)
 		funcs[octr->CurrState]();
 
 	// if connecting, or entering IP
-	if (octr->boolClientBusy)
+	if (octr->boolClientBusy && !octrExternalLobby) // ctr-native: the page shows the status
 	{
 		DecalFont_DrawLine(
 			"SEE CLIENT WINDOW",
@@ -151,7 +175,7 @@ void octr_ThreadFunc(struct Thread* t) // ctr-native: ThreadFunc is a typedef
 	}
 
 	// not gameplay, must draw LAST
-	if (octr->CurrState <= LOBBY_WAIT_FOR_LOADING)
+	if (octr->CurrState <= LOBBY_WAIT_FOR_LOADING && !octrExternalLobby) // ctr-native: no lobby drawn on the web
 	{
 		void PrintTimeStamp();
 		PrintTimeStamp();

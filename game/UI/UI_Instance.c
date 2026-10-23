@@ -60,7 +60,8 @@ struct Instance *UI_INSTANCE_BirthWithThread(int modelID, int tickFunc, int hudS
 	{
 		struct Driver *driver = driverThread->object;
 #ifdef USE_ONLINE
-		driver = gGT->drivers[0];
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+			driver = gGT->drivers[0];
 #endif
 		struct UiElement3D *ui3D;
 		struct Thread *hudThread;
@@ -228,7 +229,8 @@ struct Instance *UI_INSTANCE_BirthWithThread(int modelID, int tickFunc, int hudS
 		hudStruct += UI_HUD_SLOT_COUNT;
 
 #ifdef USE_ONLINE
-		break;
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+			break;
 #endif
 	}
 
@@ -396,9 +398,10 @@ void UI_INSTANCE_InitAll(void)
 	    // If you're not in Battle Mode
 	    ((gameMode1 & BATTLE_MODE) == 0))
 	{
-#ifndef USE_ONLINE
-		UI_INSTANCE_BirthWithThread(STATIC_BIG1, (int)UI_ThTick_big1, UI_HUD_SLOT_BIG1, 0, 0, (int)sdata->s_big1);
+#ifdef USE_ONLINE
+		if (!ONLINE_RACE) // ctr-native: one build, runtime
 #endif
+		UI_INSTANCE_BirthWithThread(STATIC_BIG1, (int)UI_ThTick_big1, UI_HUD_SLOT_BIG1, 0, 0, (int)sdata->s_big1);
 	}
 
 	// If you're not in Adventure Mode
@@ -407,10 +410,15 @@ void UI_INSTANCE_InitAll(void)
 		return;
 	}
 
-#ifndef USE_ONLINE
+#ifdef USE_ONLINE
+	if (!ONLINE_RACE) // ctr-native: one build, runtime
+	{
+#endif
 	sdata->ptrHudC = UI_INSTANCE_BirthWithThread(STATIC_C, (int)UI_ThTick_CtrLetters, UI_HUD_SLOT_TOKEN_OR_CTR, 0, 0, (int)sdata->s_hudc);
 	sdata->ptrHudT = UI_INSTANCE_BirthWithThread(STATIC_T, (int)UI_ThTick_CtrLetters, UI_HUD_SLOT_TOKEN_OR_CTR, 0, 0, (int)sdata->s_hudt);
 	sdata->ptrHudR = UI_INSTANCE_BirthWithThread(STATIC_R, (int)UI_ThTick_CtrLetters, UI_HUD_SLOT_TOKEN_OR_CTR, 0, 0, (int)sdata->s_hudr);
+#ifdef USE_ONLINE
+	}
 #endif
 
 	// Make a token

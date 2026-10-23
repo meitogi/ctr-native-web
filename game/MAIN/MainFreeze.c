@@ -1546,6 +1546,17 @@ void MainFreeze_MenuPtrDefault(struct RectMenu *menu)
 	// stringID 4: "RETRY"
 	case 3:
 	{
+#ifdef USE_ONLINE
+		// ctr-native: one build — a restart cannot be shared with the room : it
+		// leaves the race for the title (MainRaceTrack_RequestLoad leaves the room)
+		if (ONLINE_RACE)
+		{
+			GAME_MAIN_MENU_STATE = MAIN_MENU_TITLE;
+			GAME_TRACKER->gameMode1 &= ~PAUSE_1;
+			MainRaceTrack_RequestLoad(MAIN_MENU_LEVEL);
+			return;
+		}
+#endif
 		// get rid of pause flag
 		GAME_TRACKER->gameMode1 &= ~PAUSE_1;
 

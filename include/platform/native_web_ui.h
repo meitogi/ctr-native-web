@@ -8,12 +8,18 @@
 // (game/233/CS_Thread.c), the title / trophy animation (game/230/MM_Title.c). The disc loads
 // between them are not shortened. Defined in platform/native_input.c ; the page is pulled, it
 // never calls in (ASYNCIFY). Native builds : always 0, the original intro.
+// NativeWeb_OpenMultiplayer() opens the page's multiplayer panel (Settings › Multijoueur) : the
+// main menu's ONLINE row, picked with no room joined (game/230/MM_MenuFlow.c, CTR_ONLINE builds).
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/em_macros.h>
 // declared as the EM_JS import it is : the game's files see this before the EM_JS (unity build)
 int NativeWeb_IntroSkip(void) EM_IMPORT(NativeWeb_IntroSkip);
+#ifdef USE_ONLINE
+void NativeWeb_OpenMultiplayer(void) EM_IMPORT(NativeWeb_OpenMultiplayer);
+#endif
 #else
 #define NativeWeb_IntroSkip() 0
+#define NativeWeb_OpenMultiplayer() ((void)0)
 #endif
 
 #endif

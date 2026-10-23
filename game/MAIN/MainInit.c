@@ -478,13 +478,16 @@ void MainInit_FinalizeInit(struct GameTracker *gGT)
 		gGT->trackLength_x_numLaps_x_8 = lev1->ptr_restart_points[0].distToFinish * gGT->numLaps * 8;
 	}
 
-#ifndef USE_ONLINE
+#ifdef USE_ONLINE
+	if (ONLINE_RACE) // ctr-native: one build, runtime
+	{
+		void OnlineInit_Drivers(struct GameTracker * gGT);
+		OnlineInit_Drivers(gGT);
+	}
+	else
+#endif
 	// OG code
 	MainInit_Drivers(gGT);
-#else
-	void OnlineInit_Drivers(struct GameTracker * gGT);
-	OnlineInit_Drivers(gGT);
-#endif
 
 	// assume 1P fov
 	numPlyr = 1;
@@ -644,12 +647,18 @@ void MainInit_FinalizeInit(struct GameTracker *gGT)
 #endif
 
 #ifdef USE_ONLINE
-	void octr_initHook();
-	octr_initHook();
+	// ctr-native: one build — the mod thread on every level of a room, the
+	// early return for the room's race only
+	if (ONLINE_ROOM)
+	{
+		void octr_initHook();
+		octr_initHook();
+	}
 
 	// quit, so confetti doesn't initialize
 	// when loading into Polar Credits LEV
-	return;
+	if (ONLINE_RACE)
+		return;
 #endif
 
 	if ((gGT->gameMode1 & GAME_CUTSCENE) != 0)

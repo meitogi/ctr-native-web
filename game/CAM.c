@@ -535,7 +535,7 @@ void CAM_StartOfRace(struct CameraDC *cDC)
 	struct Level *level1 = gGT->level1;
 
 #ifdef USE_ONLINE
-	if (cDC != &gGT->cameraDC[0])
+	if (ONLINE_RACE && cDC != &gGT->cameraDC[0]) // ctr-native: one build, runtime
 		return;
 #endif
 

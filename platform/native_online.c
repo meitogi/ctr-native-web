@@ -41,6 +41,9 @@ static char connectAddress[64];
 static unsigned int frameCount;
 static int lastLoggedState = -100;
 
+static int (*controlPoll)(int *arg);
+static int pendingEnter;
+
 static void sendToHostUnreliable(const void *data, int size)
 {
 	if (boolConnected)
@@ -504,7 +507,8 @@ void StatePC_Launch_PickServer()
 	}
 
 	// must be in cutscene level to see country selector
-	if (NativeOnlineGame_LevelID() != 0x26)
+	// (the web's lobby is the game's own menus, on any level)
+	if (!NativeOnlineGame_ExternalLobby() && NativeOnlineGame_LevelID() != 0x26)
 		return;
 
 	// quit if in loading screen (force-reconnect)
@@ -814,6 +818,58 @@ void NativeOnline_Configure(const OnlineTransport *t, const char *playerName, co
 		snprintf(privateServer, sizeof(privateServer), "%s", serverAddress);
 }
 
+void NativeOnline_SetControl(int (*poll)(int *arg))
+{
+	controlPoll = poll;
+}
+
+// The host layer's commands (web) ; ENTER waits until the game can join.
+static void ProcessControl(void)
+{
+	int cmd, arg = 0;
+
+	if (!controlPoll)
+		return;
+
+	while ((cmd = controlPoll(&arg)) != NATIVE_ONLINE_CTL_NONE)
+	{
+		switch (cmd)
+		{
+			case NATIVE_ONLINE_CTL_ENTER:
+				pendingEnter = 1;
+				break;
+
+			case NATIVE_ONLINE_CTL_LEAVE:
+				pendingEnter = 0;
+				if (NativeOnlineGame_Active())
+				{
+					NativeOnlineGame_Log("[OnlineCTR] Left the room\n");
+					Disconnect();
+					NativeOnlineGame_Deactivate();
+				}
+				break;
+
+			case NATIVE_ONLINE_CTL_CHARACTER:
+				NativeOnlineGame_SetMyCharacter(arg);
+				break;
+
+			default:
+				break;
+		}
+	}
+
+	if (pendingEnter && !NativeOnlineGame_Active() && NativeOnlineGame_Activate())
+	{
+		pendingEnter = 0;
+		connectRetry = 0;
+		lastLoggedState = -100;
+		// « Private Room », as the server menu's Cross would
+		octr->serverCountry = 7;
+		octr->serverLockIn1 = 1;
+		NativeOnlineGame_Log("[OnlineCTR] Joined the page's room\n");
+	}
+}
+
 void NativeOnline_Frame(void)
 {
 	if (!octr)
@@ -830,6 +886,16 @@ void NativeOnline_Frame(void)
 		return;
 #endif
 	}
+
+	// one build : nothing runs until a room is joined
+	ProcessControl();
+	NativeOnlineGame_SyncStats();
+	if (!NativeOnlineGame_Active())
+		return;
+
+	// the game dropped the connection (thread.c, a race left) : close the transport
+	if (octr->CurrState < 0 && (boolConnected || boolConnecting))
+		Disconnect();
 
 	frameCount++;
 

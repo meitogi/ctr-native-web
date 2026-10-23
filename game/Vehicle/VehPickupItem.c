@@ -245,7 +245,7 @@ struct MaskHeadWeapon *VehPickupItem_MaskUseWeapon(struct Driver *driver, b32 bo
 
 		if (
 #ifdef USE_ONLINE
-		    (driver->driverID == 0) &&
+		    (ONLINE_RACE ? (driver->driverID == 0) : ((actionsFlagSet & ACTION_BOT) == 0)) && // ctr-native: one build, runtime
 #else
 		    // If this is human and not AI
 		    ((actionsFlagSet & ACTION_BOT) == 0) &&
@@ -287,7 +287,7 @@ struct MaskHeadWeapon *VehPickupItem_MaskUseWeapon(struct Driver *driver, b32 bo
 		actionsFlagSet = driver->actionsFlagSet;
 		if (
 #ifdef USE_ONLINE
-		    (driver->driverID == 0) &&
+		    (ONLINE_RACE ? (driver->driverID == 0) : ((actionsFlagSet & ACTION_BOT) == 0)) && // ctr-native: one build, runtime
 #else
 		    ((actionsFlagSet & ACTION_BOT) == 0) &&
 #endif
@@ -314,7 +314,7 @@ struct MaskHeadWeapon *VehPickupItem_MaskUseWeapon(struct Driver *driver, b32 bo
 		actionsFlagSet = driver->actionsFlagSet;
 		if (
 #ifdef USE_ONLINE
-		    (driver->driverID == 0) &&
+		    (ONLINE_RACE ? (driver->driverID == 0) : ((actionsFlagSet & ACTION_BOT) == 0)) && // ctr-native: one build, runtime
 #else
 		    ((actionsFlagSet & ACTION_BOT) == 0) &&
 #endif
@@ -618,7 +618,7 @@ void VehPickupItem_ShootNow(struct Driver *d, s32 weaponID, s32 flags)
 #endif
 #if defined(USE_ONLINE)
 	int rn = octr->serverRoom;
-	if (ROOM_IS_ITEMS(rn) && d->driverID == 0) // if in item lobby and is ourself
+	if (ONLINE_RACE && ROOM_IS_ITEMS(rn) && d->driverID == 0) // if in item lobby and is ourself // ctr-native: one build, runtime
 	{
 		octr->Shoot[0].boolJuiced = 0;
 		if (d->numWumpas >= 10)

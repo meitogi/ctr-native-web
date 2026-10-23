@@ -308,7 +308,7 @@ DamageApplied:
 	if ((attackDriver != NULL) && ((GAME_TRACKER->gameMode1 & END_OF_RACE) == 0))
 	{
 #ifdef USE_ONLINE
-		if (attackDriver->driverID != 0)
+		if (ONLINE_RACE && attackDriver->driverID != 0) // ctr-native: one build, runtime
 			return 0; // 0 = "quit"?
 #endif
 

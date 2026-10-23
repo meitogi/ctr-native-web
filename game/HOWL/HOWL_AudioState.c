@@ -197,11 +197,6 @@ void Audio_Update1(void)
 #if defined(CTR_NATIVE)
 	struct GameTracker *entryGT = GAME_TRACKER;
 #endif
-#ifdef USE_ONLINE
-	// the lead-driver searches are replaced by drivers[0]
-	(void)i;
-	(void)candidate;
-#endif
 
 	switch ((s16)((u16)GAME_AUDIO_STATE - 1))
 	{
@@ -250,9 +245,14 @@ void Audio_Update1(void)
 
 		// human driver in the lead
 #ifdef USE_ONLINE
-		gGT = GAME_TRACKER;
-		d = gGT->drivers[0];
-#else
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+		{
+			gGT = GAME_TRACKER;
+			d = gGT->drivers[0];
+		}
+		else
+		{
+#endif
 		gGT = GAME_TRACKER;
 		for (i = 0; i < 8; i++)
 		{
@@ -263,6 +263,8 @@ void Audio_Update1(void)
 				d = candidate;
 				break;
 			}
+		}
+#ifdef USE_ONLINE
 		}
 #endif
 
@@ -296,9 +298,14 @@ void Audio_Update1(void)
 
 		// human driver in the lead
 #ifdef USE_ONLINE
-		gGT = GAME_TRACKER;
-		d = gGT->drivers[0];
-#else
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+		{
+			gGT = GAME_TRACKER;
+			d = gGT->drivers[0];
+		}
+		else
+		{
+#endif
 		gGT = GAME_TRACKER;
 		for (i = 0; i < 8; i++)
 		{
@@ -309,6 +316,8 @@ void Audio_Update1(void)
 				d = candidate;
 				break;
 			}
+		}
+#ifdef USE_ONLINE
 		}
 #endif
 
@@ -375,9 +384,14 @@ void Audio_Update1(void)
 
 		// human driver in the lead
 #ifdef USE_ONLINE
-		gGT = GAME_TRACKER;
-		d = gGT->drivers[0];
-#else
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+		{
+			gGT = GAME_TRACKER;
+			d = gGT->drivers[0];
+		}
+		else
+		{
+#endif
 		gGT = GAME_TRACKER;
 		for (i = 0; i < 8; i++)
 		{
@@ -388,6 +402,8 @@ void Audio_Update1(void)
 				d = candidate;
 				break;
 			}
+		}
+#ifdef USE_ONLINE
 		}
 #endif
 
@@ -419,14 +435,19 @@ void Audio_Update1(void)
 
 		// human driver in the lead
 #ifdef USE_ONLINE
-		gGT = GAME_TRACKER;
-		d = gGT->drivers[0];
-		// upstream tests d->driverRank == 0 for the victory fanfare
-		if (d != NULL)
+		if (ONLINE_RACE) // ctr-native: one build, runtime
 		{
-			raceOrderIndex = d->driverRank;
+			gGT = GAME_TRACKER;
+			d = gGT->drivers[0];
+			// upstream tests d->driverRank == 0 for the victory fanfare
+			if (d != NULL)
+			{
+				raceOrderIndex = d->driverRank;
+			}
 		}
-#else
+		else
+		{
+#endif
 		gGT = GAME_TRACKER;
 		for (i = 0; i < 8; i++)
 		{
@@ -438,6 +459,8 @@ void Audio_Update1(void)
 				d = candidate;
 				break;
 			}
+		}
+#ifdef USE_ONLINE
 		}
 #endif
 

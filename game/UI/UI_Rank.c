@@ -134,7 +134,9 @@ void UI_DrawRankedDrivers(void)
 		// height to draw rank (this bitshifts later)
 		int rankTextY = UI_RANK_TEXT_START_Y << 16;
 
-#ifndef USE_ONLINE
+#ifdef USE_ONLINE
+		if (!ONLINE_RACE) // ctr-native: one build, runtime
+#endif
 		for (int rankLineIndex = 0; rankLineIndex < visibleRankCount; rankLineIndex++)
 		{
 			// make the text white by default
@@ -154,15 +156,11 @@ void UI_DrawRankedDrivers(void)
 			// add to Y, which mekes it lower on screen
 			rankTextY = rankTextY + (UI_RANK_TEXT_SLOT_HEIGHT << 16);
 		}
-#else
-		(void)visibleRankCount;
-		(void)rankTextY;
-#endif
 
 		for (driverIndex = 0; driverIndex < UI_RANK_DRIVER_COUNT; driverIndex++)
 		{
 #ifdef USE_ONLINE
-			if (!octr->nameBuffer[driverIndex][0])
+			if (ONLINE_RACE && !octr->nameBuffer[driverIndex][0]) // ctr-native: one build, runtime
 			{
 				continue;
 			}
@@ -196,9 +194,13 @@ void UI_DrawRankedDrivers(void)
 						// if top positions
 
 #ifdef USE_ONLINE
-						pos.x = 10;
-						pos.y = 53 + desiredRank * 20;
-#else
+						if (ONLINE_RACE) // ctr-native: one build, runtime
+						{
+							pos.x = 10;
+							pos.y = 53 + desiredRank * 20;
+						}
+						else
+#endif
 						if (desiredRank < UI_RANK_VISIBLE_ARCADE_COUNT)
 						{
 							pos.x = UI_RANK_ICON_X;
@@ -208,13 +210,13 @@ void UI_DrawRankedDrivers(void)
 						{
 							continue;
 						}
-#endif
 					}
 				}
 
 				SVec2 iconPos = {.x = pos.x, .y = pos.y};
 #ifdef USE_ONLINE
-				s16 iconScale = FP(0.75);
+				s16 iconScale = ONLINE_RACE ? FP(0.75) : UI_RANK_ICON_SCALE; // ctr-native: one build, runtime
+				if (ONLINE_RACE)
 				{
 					s16 txtColor = WHITE;
 					// upstream reads checkpointTracker[] with a counter that is 0 here
@@ -250,7 +252,10 @@ void UI_DrawRankedDrivers(void)
 				    1, iconScale, damageColor);
 
 #ifdef USE_ONLINE
-				if (checkpointTracker[driverIndex].timer > 0)
+				if (!ONLINE_RACE) // ctr-native: one build, runtime
+				{
+				}
+				else if (checkpointTracker[driverIndex].timer > 0)
 				{
 					DecalFont_DrawLineStrlen(checkpointTracker[driverIndex].displayTime, 10, pos.x + 30, pos.y + 9, FONT_SMALL,
 					                         checkpointTracker[driverIndex].drawFlags);

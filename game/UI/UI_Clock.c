@@ -222,6 +222,7 @@ void UI_DrawRaceClock(s16 labelPosX, s16 labelPosY, u32 flags, struct Driver *dr
 
 	// Draw String
 #ifdef USE_ONLINE
+	if (ONLINE_RACE) // ctr-native: one build, runtime
 	{
 		TotalTime tt;
 		char displayTime[32]; // 99:59:59.999 or BEST: 9:59.999 (upstream: 15, too small for any int)
@@ -244,8 +245,8 @@ void UI_DrawRaceClock(s16 labelPosX, s16 labelPosY, u32 flags, struct Driver *dr
 			DecalFont_DrawLine("LAST: ", posX, textPosY + 0x18 + 8, FONT_SMALL, RED);
 			DecalFont_DrawLine(displayTime, posX + data.font_charPixWidth[FONT_SMALL] * 5, textPosY + 0x18 + 8, FONT_SMALL, PERIWINKLE);
 		}
+		return;
 	}
-	return;
 #endif
 	DecalFont_DrawLine(totalTimeString, posX, numParamY >> 0x10, FONT_BIG, (int)timeColor);
 

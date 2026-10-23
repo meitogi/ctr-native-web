@@ -250,12 +250,12 @@ void VehPhysProc_Driving_PhysLinear(struct Thread *thread, struct Driver *driver
 
 #ifdef USE_ONLINE
 	// reserves past the s16 cap drain from uncappedReserves first
-	if (driver->reserves == 0)
+	if (ONLINE_RACE && driver->reserves == 0) // ctr-native: one build, runtime
 	{
 		driver->uncappedReserves = 0;
 	}
 
-	if (driver->uncappedReserves > 0)
+	if (ONLINE_RACE && driver->uncappedReserves > 0)
 	{
 		driver->uncappedReserves = (driver->uncappedReserves > msPerFrame) ? (driver->uncappedReserves - msPerFrame) : 0;
 		driver->timeSpentUsingReserves = CTR_MipsSubLo(driver->timeSpentUsingReserves, msPerFrameNeg);
@@ -830,7 +830,7 @@ itemRollDone:
 			bomb->flags |= 2;
 			driver->instBombThrow = NULL;
 #if defined(USE_ONLINE)
-			if (ROOM_IS_ITEMS(octr->serverRoom) && driver->driverID == 0)
+			if (ONLINE_RACE && ROOM_IS_ITEMS(octr->serverRoom) && driver->driverID == 0) // ctr-native: one build, runtime
 				octr->Shoot[0].boolNow = 1;
 #endif
 			goto CheckJumpButtons;
@@ -844,7 +844,7 @@ itemRollDone:
 			shield->flags |= SHIELD_FLAG_SHOOT;
 			driver->instBubbleHold = NULL;
 #if defined(USE_ONLINE)
-			if (ROOM_IS_ITEMS(octr->serverRoom) && driver->driverID == 0)
+			if (ONLINE_RACE && ROOM_IS_ITEMS(octr->serverRoom) && driver->driverID == 0) // ctr-native: one build, runtime
 				octr->Shoot[0].boolNow = 1;
 #endif
 			goto CheckJumpButtons;
@@ -973,7 +973,13 @@ ClearJumpButtonHeld:
 CheckJumpDone:
 	CTR_PSX_OBSERVE_VALUE(buttonsHeld);
 	CTR_PSX_LOAD_WORD(approximateSpeedRaw, square);
-#ifndef USE_ONLINE
+#ifdef USE_ONLINE
+	// upstream online builds define USE_RETROFUELED, enabled in retro rooms only
+	// Assume you're holding cross (X)
+	u32 assumeCross = VEH_PHYS_PROC_ASSUMED_CROSS_BUTTON;
+	if (!ONLINE_RACE) // ctr-native: one build, runtime
+	{
+#endif
 	if (
 	    // If you are holding Square
 	    (approximateSpeedRaw != 0) &&
@@ -984,12 +990,10 @@ CheckJumpDone:
 		// Set Reserves to zero
 		driver->reserves = 0;
 	}
-#else
-	// upstream online builds define USE_RETROFUELED, enabled in retro rooms only
-	// Assume you're holding cross (X)
-	u32 assumeCross = VEH_PHYS_PROC_ASSUMED_CROSS_BUTTON;
+#ifdef USE_ONLINE
+	}
 	// if you are holding square
-	if (approximateSpeedRaw != 0)
+	else if (approximateSpeedRaw != 0)
 	{
 		// held DOWN or have landing boost, in a retro room
 		if (ROOM_IS_RETRO(octr->serverRoom) &&
@@ -1077,7 +1081,8 @@ CheckJumpDone:
 		// you have Reserves and you aren't slowing down
 		cross = (u32)approximateSpeedRaw;
 #ifdef USE_ONLINE
-		cross = assumeCross;
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+			cross = assumeCross;
 #endif
 	}
 
@@ -1683,7 +1688,7 @@ void VehPhysProc_Driving_Audio(struct Thread *t, struct Driver *d)
 {
 	(void)t;
 #ifdef USE_ONLINE
-	if (d->driverID != 0)
+	if (ONLINE_RACE && d->driverID != 0) // ctr-native: one build, runtime
 		return;
 #endif
 	EngineSound_Player(d);
@@ -2539,8 +2544,11 @@ void VehPhysProc_PowerSlide_Update(struct Thread *t, struct Driver *d)
 			int highMeter = CTR_MipsSll((u8)d->const_turboLowRoomWarning, VEH_PHYS_PROC_FRAME_TIME_SHIFT);
 
 #ifdef USE_ONLINE
-			void AssignMeterGrade(struct Driver * driver, int meterLeft);
-			AssignMeterGrade(d, meterLeft);
+			if (ONLINE_RACE) // ctr-native: one build, runtime
+			{
+				void AssignMeterGrade(struct Driver * driver, int meterLeft);
+				AssignMeterGrade(d, meterLeft);
+			}
 #endif
 			if (meterLeft < highMeter)
 			{
@@ -2585,7 +2593,7 @@ void VehPhysProc_PowerSlide_Update(struct Thread *t, struct Driver *d)
 			if (d->turbo_MeterRoomLeft == 0)
 			{
 #ifdef USE_ONLINE
-				if (d->driverID == 0)
+				if (!ONLINE_RACE || d->driverID == 0) // ctr-native: one build, runtime
 #endif
 				OtherFX_Play_Echo(VEH_PHYS_PROC_DRIFT_METER_FULL_FX, 1, (u16)(d->actionsFlagSet >> 16) & 1);
 
@@ -2933,7 +2941,7 @@ void VehPhysProc_SpinFirst_Init(struct Thread *t, struct Driver *d)
 	}
 
 #ifdef USE_ONLINE
-	if (d->driverID == 0)
+	if (!ONLINE_RACE || d->driverID == 0) // ctr-native: one build, runtime
 #endif
 	Voiceline_RequestPlay(VEH_PHYS_PROC_SPIN_VOICELINE_ID, GAME_CHARACTER_IDS[d->driverID], VEH_PHYS_PROC_SPIN_VOICELINE_PRIORITY);
 

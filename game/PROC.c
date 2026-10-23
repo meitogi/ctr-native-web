@@ -338,9 +338,12 @@ void PROC_CollidePointWithBucket(struct Thread *th, struct BucketSearchParams *b
 	// only used with drivers colliding
 	// with other drivers, disabled online
 #if defined(USE_ONLINE)
-	void Online_CollidePointWithBucket(struct Thread * th, short *vec3_pos);
-	Online_CollidePointWithBucket(th, (short *)buf);
-	return;
+	if (ONLINE_RACE) // ctr-native: one build, runtime
+	{
+		void Online_CollidePointWithBucket(struct Thread * th, short *vec3_pos);
+		Online_CollidePointWithBucket(th, (short *)buf);
+		return;
+	}
 #endif
 	while (th != 0)
 	{

@@ -62,7 +62,8 @@ void PlayLevel_UpdateLapStats(void)
 	}
 
 #ifdef USE_ONLINE
-	farthestHuman = gGT->drivers[0];
+	if (ONLINE_RACE) // ctr-native: one build, runtime
+		farthestHuman = gGT->drivers[0];
 #endif
 
 	for (driverIndex = 0; driverIndex < PLAYLEVEL_DRIVER_COUNT; driverIndex++)
@@ -123,7 +124,7 @@ void PlayLevel_UpdateLapStats(void)
 			currDriver->distanceToFinish_checkpoint = distToFinish_curr;
 
 #ifdef USE_ONLINE
-			if (driverIndex == 0)
+			if (ONLINE_RACE && driverIndex == 0) // ctr-native: one build, runtime
 			{
 				currDriver->currLapTime = gGT->elapsedEventTime - currDriver->lapTime;
 				if (currDriver->currLapTime < currDriver->bestLapTime)
@@ -142,7 +143,9 @@ void PlayLevel_UpdateLapStats(void)
 			// if this is not final lap
 			else
 			{
-#ifndef USE_ONLINE
+#ifdef USE_ONLINE
+				if (!ONLINE_RACE) // ctr-native: one build, runtime
+#endif
 				if (
 				    // If you're in Arcade, or
 				    // If you're in Adventure, or
@@ -156,7 +159,6 @@ void PlayLevel_UpdateLapStats(void)
 
 					gGT->lapTime[currDriver->lapIndex] = gGT->elapsedEventTime - currDriver->lapTime;
 				}
-#endif
 
 				// time on the clock
 				currDriver->lapTime = gGT->elapsedEventTime;
@@ -178,7 +180,7 @@ void PlayLevel_UpdateLapStats(void)
 				{
 					if ((currDriver->actionsFlagSet & ACTION_BOT) == 0)
 #ifdef USE_ONLINE
-						if (currDriver->driverID == 0)
+						if (!ONLINE_RACE || currDriver->driverID == 0) // ctr-native: one build, runtime
 #endif
 					{
 						// frames, so the animation lasts 3 seconds
@@ -214,7 +216,7 @@ void PlayLevel_UpdateLapStats(void)
 				currDriver->heldItemID = HELD_ITEM_NONE;
 
 #ifdef USE_ONLINE
-				if (currDriver->driverID == 0)
+				if (!ONLINE_RACE || currDriver->driverID == 0) // ctr-native: one build, runtime
 #endif
 				if ((currDriver->actionsFlagSet & ACTION_BOT) == 0)
 				{
@@ -324,10 +326,10 @@ void PlayLevel_UpdateLapStats(void)
 	{
 #ifdef USE_ONLINE
 		// online can be fragmented
-		if (gGT->drivers[currRank] == 0)
+		if (ONLINE_RACE && gGT->drivers[currRank] == 0) // ctr-native: one build, runtime
 			numDead1++;
 
-		if (gGT->drivers[currRank] == 0)
+		if (ONLINE_RACE && gGT->drivers[currRank] == 0)
 			continue;
 #endif
 
@@ -399,7 +401,8 @@ void PlayLevel_UpdateLapStats(void)
 				gGT->drivers[bestDriverIndex]->driverRank = currRank;
 
 #ifdef USE_ONLINE
-				gGT->drivers[bestDriverIndex]->driverRank -= numDead1;
+				if (ONLINE_RACE) // ctr-native: one build, runtime
+					gGT->drivers[bestDriverIndex]->driverRank -= numDead1;
 #endif
 			}
 
@@ -410,14 +413,21 @@ void PlayLevel_UpdateLapStats(void)
 				// This is broken, sometimes a hole will appear between
 				// the icons at the startline, if someone disconnects,
 				// nobody knows why, but screw it
-				gGT->drivers[bestDriverIndex]->driverRank = numSpawn;
-				gGT->humanPlayerPositions[bestDriverIndex - numDead1] = numSpawn;
-				numSpawn++;
-#else
+				if (ONLINE_RACE) // ctr-native: one build, runtime
+				{
+					gGT->drivers[bestDriverIndex]->driverRank = numSpawn;
+					gGT->humanPlayerPositions[bestDriverIndex - numDead1] = numSpawn;
+					numSpawn++;
+				}
+				else
+				{
+#endif
 				// set every driver position rank,
 				// to the order that they spawn on the starting line
 				gGT->drivers[bestDriverIndex]->driverRank = sdata->kartSpawnOrderArray[bestDriverIndex];
 				gGT->humanPlayerPositions[bestDriverIndex] = sdata->kartSpawnOrderArray[bestDriverIndex];
+#ifdef USE_ONLINE
+				}
 #endif
 			}
 		}
@@ -470,11 +480,14 @@ void PlayLevel_UpdateLapStats(void)
 	}
 
 #ifdef USE_ONLINE
-	if ((gGT->drivers[0]->actionsFlagSet & ACTION_RACE_FINISHED) != 0)
+	if (ONLINE_RACE) // ctr-native: one build, runtime
 	{
-		MainGameEnd_Initialize();
+		if ((gGT->drivers[0]->actionsFlagSet & ACTION_RACE_FINISHED) != 0)
+		{
+			MainGameEnd_Initialize();
+		}
+		return;
 	}
-	return;
 #endif
 
 	int humanPlayerCount = gGT->numPlyrCurrGame;

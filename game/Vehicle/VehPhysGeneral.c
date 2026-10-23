@@ -1693,7 +1693,7 @@ void VehPhysGeneral_SetHeldItem(struct Driver *driver)
 
 #if defined(USE_ONLINE)
 	int rn = octr->serverRoom;
-	if (ROOM_IS_ITEMS(rn)) // if in item lobby.
+	if (ONLINE_RACE && ROOM_IS_ITEMS(rn)) // if in item lobby. // ctr-native: one build, runtime
 	{
 		mode = octr->NumDrivers;
 		if (octr->NumDrivers == 1)
@@ -1826,17 +1826,32 @@ void VehPhysGeneral_SetHeldItem(struct Driver *driver)
 		driver->heldItemID = (u8)selectedItem;
 		break;
 	case ITEMSET_Race2:
+#ifdef USE_ONLINE
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+			selectedItem = onlineItemSetRace2[(rng * ITEMSET_WEAPON_COUNT_RACE2) / ITEMSET_RNG_BUCKET_COUNT];
+		else
+#endif
 		selectedItem = VEH_ITEM_SET_RACE2[(rng * ITEMSET_WEAPON_COUNT_RACE2) / ITEMSET_RNG_BUCKET_COUNT];
 		CTR_PSX_OBSERVE_VALUE(selectedItem);
 		driver->heldItemID = (u8)selectedItem;
 		break;
 	case ITEMSET_Race3:
+#ifdef USE_ONLINE
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+			selectedItem = onlineItemSetRace3[(rng * ITEMSET_WEAPON_COUNT_RACE3) / ITEMSET_RNG_BUCKET_COUNT];
+		else
+#endif
 		selectedItem = VEH_ITEM_SET_RACE3[(rng * ITEMSET_WEAPON_COUNT_RACE3) / ITEMSET_RNG_BUCKET_COUNT];
 		CTR_PSX_OBSERVE_VALUE(selectedItem);
 		driver->heldItemID = (u8)selectedItem;
 		break;
 	case ITEMSET_Race4:
 		// NOTE(aalhendi): Race4 storage is 0x14 bytes, but retail samples 0x13 entries.
+#ifdef USE_ONLINE
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+			selectedItem = onlineItemSetRace4[(rng * ITEMSET_WEAPON_COUNT_RACE4) / ITEMSET_RNG_BUCKET_COUNT];
+		else
+#endif
 		selectedItem = VEH_ITEM_SET_RACE4[(rng * ITEMSET_WEAPON_COUNT_RACE4) / ITEMSET_RNG_BUCKET_COUNT];
 		CTR_PSX_OBSERVE_VALUE(selectedItem);
 		driver->heldItemID = (u8)selectedItem;

@@ -23,6 +23,13 @@ void MainRaceTrack_RequestLoad(s16 levelID)
 {
 	struct GameTracker *gt = GAME_TRACKER;
 
+#ifdef USE_ONLINE
+	// ctr-native: one build — a load away from the room's race (pause menu)
+	// leaves the room ; the room's own loads keep its state
+	if (ONLINE_RACE && octr->CurrState >= GAME_WAIT_FOR_RACE && levelID != octr->levelID)
+		OnlineRuntime_LeaveRace();
+#endif
+
 	// Turn off HUD
 	gt->hudFlags &= HUD_FLAG_CLEAR_RACE_HUD_MASK;
 

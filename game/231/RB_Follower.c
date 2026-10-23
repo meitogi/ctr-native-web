@@ -93,7 +93,7 @@ void RB_Follower_Init(struct Driver *d, struct Thread *mineTh)
 	}
 
 #ifdef USE_ONLINE
-	if (d->driverID != 0)
+	if (ONLINE_RACE && d->driverID != 0) // ctr-native: one build, runtime
 		return;
 #endif
 

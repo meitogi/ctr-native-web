@@ -274,7 +274,7 @@ void UI_Map_DrawDrivers(struct UIMap *map, struct Thread *bucket, s16 *driverIco
 		// calls hoist the scale into an extra saved register with GCC 2.8.1.
 #ifdef USE_ONLINE
 		// only driver[0] is the player, remote humans draw as others
-		if (d->driverID != 0)
+		if (ONLINE_RACE ? (d->driverID != 0) : (d->actionsFlagSet & ACTION_BOT)) // ctr-native: one build, runtime
 #else
 		if (d->actionsFlagSet & ACTION_BOT)
 #endif

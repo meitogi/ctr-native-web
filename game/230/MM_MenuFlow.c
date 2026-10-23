@@ -49,6 +49,87 @@ s32 MM_TransitionInOut(struct TransitionMeta *meta, s32 framesPassed, s32 numFra
 	return allTransitionsDone ? 1 : (negativeTransitionState ? -1 : 0);
 }
 
+#ifdef USE_ONLINE
+#include <platform/native_web_ui.h>
+// ctr-native: one build — the main menu's ONLINE row and its VS / BATTLE
+// sub-menu. Without a room the row opens the page's multiplayer panel ; with
+// one, VS and BATTLE take the retail paths (players, characters, track) with
+// the room's players as P2-P4, and the track lock starts the room's race
+// (QueueLoadTrack.c). The native build boots into the mod's own menus and
+// never shows this row.
+static struct MenuRow onlineRowsMainBasic[8] =
+{
+	{0x4C, 0, 1, 0, 0},
+	{0x4D, 0, 2, 1, 1},
+	{0x4E, 1, 3, 2, 2},
+	{0x4F, 2, 4, 3, 3},
+	{0x50, 3, 5, 4, 4},
+	{ONLINE_LNG_ROW, 4, 6, 5, 5},
+	{0x51, 5, 6, 6, 6},
+	{RECTMENU_STRING_NONE},
+};
+static struct MenuRow onlineRowsMainWithScrapbook[9] =
+{
+	{0x4C, 0, 1, 0, 0},
+	{0x4D, 0, 2, 1, 1},
+	{0x4E, 1, 3, 2, 2},
+	{0x4F, 2, 4, 3, 3},
+	{0x50, 3, 5, 4, 4},
+	{ONLINE_LNG_ROW, 4, 6, 5, 5},
+	{0x51, 5, 7, 6, 6},
+	{0x234, 6, 7, 7, 7},
+	{RECTMENU_STRING_NONE},
+};
+static struct MenuRow onlineRowsModes[3] =
+{
+	{0x4F, 0, 1, 0, 0},
+	{0x50, 0, 1, 1, 1},
+	{RECTMENU_STRING_NONE},
+};
+static void OnlineMenu_Proc(struct RectMenu *menu);
+static struct RectMenu onlineMenu =
+{
+	.stringIndexTitle = ONLINE_LNG_ROW,
+	.state = CENTER_ON_X,
+	.rows = &onlineRowsModes[0],
+	.funcPtr = OnlineMenu_Proc,
+};
+
+static void OnlineMenu_Proc(struct RectMenu *menu)
+{
+	s16 row = menu->rowSelected;
+
+	if (row == -1)
+	{
+		menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+		return;
+	}
+	if (row < -1 || row > 1 || !ONLINE_ROOM)
+	{
+		return;
+	}
+
+	// as the main menu's VS / BATTLE rows, single race only
+	GAME_TRACKER->gameMode2 &= ~(CUP_ANY_KIND);
+	if (row == 0)
+	{
+		if ((GAME_TRACKER->gameMode2 & CHEAT_ONELAP) != 0)
+		{
+			GAME_TRACKER->numLaps = MM_ONE_LAP_CHEAT_COUNT;
+		}
+	}
+	else
+	{
+		GAME_TRACKER->gameMode1 |= BATTLE_MODE;
+	}
+
+	octrOnlineMenuPath = 1;
+	MM_CHARACTER_SELECT_TRANSITION_STATE = EXITING_MENU;
+	menu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
+	menu->ptrNextBox_InHierarchy = &MM_MENU_PLAYERS_2P3P4P;
+}
+#endif
+
 void MM_MenuProc_Main(struct RectMenu *menu)
 {
 	register u32 timeTrialSetupTracker CTR_PSX_REGISTER("$3");
@@ -63,6 +144,15 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 	{
 		MM_MENU_MAIN.rows = MM_ROWS_MAIN_WITH_SCRAPBOOK;
 	}
+#ifdef USE_ONLINE
+	if (!octrBootOnline) // ctr-native: one build, runtime
+	{
+		GAME_LANGUAGE_STRINGS[ONLINE_LNG_ROW] = "ONLINE";
+		MM_MENU_MAIN.rows = (MM_MENU_MAIN.rows == MM_ROWS_MAIN_WITH_SCRAPBOOK) ? onlineRowsMainWithScrapbook : onlineRowsMainBasic;
+		onlineMenu.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
+		onlineMenu.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
+	}
+#endif
 
 	MM_ParseCheatCodes();
 	MM_ToggleRows_Difficulty();
@@ -85,6 +175,12 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		{
 			GAME_TRACKER->numPlyrNextGame = 1;
 
+#ifdef USE_ONLINE
+			// ctr-native: one build — a room never starts the attract demo
+			octrOnlineMenuPath = 0;
+			if (ONLINE_ROOM)
+				GAME_TRACKER->demoCountdownTimer = TITLE_DEMO_IDLE_FRAMES;
+#endif
 			// if button pressed, reset timer
 			if (GAMEPADS->anyoneHeldCurr != 0)
 			{
@@ -243,6 +339,22 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		mainMenu->state |= DRAW_NEXT_MENU_IN_HIERARCHY;
 		return;
 	}
+
+#ifdef USE_ONLINE
+	// ctr-native: one build — Online
+	case ONLINE_LNG_ROW:
+	{
+		if (!ONLINE_ROOM)
+		{
+			// no room yet : the page's multiplayer panel hosts or joins one
+			NativeWeb_OpenMultiplayer();
+			return;
+		}
+		mainMenu->ptrNextBox_InHierarchy = &onlineMenu;
+		mainMenu->state |= DRAW_NEXT_MENU_IN_HIERARCHY;
+		return;
+	}
+#endif
 
 	// Battle
 	case LNG_BATTLE:

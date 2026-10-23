@@ -131,7 +131,8 @@ void UI_RenderFrame_Racing()
 			playerStruct = (struct Driver *)playerThread->object;
 
 #ifdef USE_ONLINE
-			playerStruct = gGT->drivers[0];
+			if (ONLINE_RACE) // ctr-native: one build, runtime
+				playerStruct = gGT->drivers[0];
 #endif
 			// if player has not driven backwards very far,
 			if ((playerStruct->distanceDrivenBackwards < 0x1f5)
@@ -468,12 +469,10 @@ void UI_RenderFrame_Racing()
 
 				sVar1 = hudStructPtr[UI_HUD_SLOT_RANK].x;
 				sVar2 = hudStructPtr[UI_HUD_SLOT_RANK].y;
-#ifndef USE_ONLINE
-				UI_DrawPosSuffix(sVar1, sVar2, playerStruct, (s16)partTimeVariable5);
-#else
-				(void)sVar1;
-				(void)sVar2;
+#ifdef USE_ONLINE
+				if (!ONLINE_RACE) // ctr-native: one build, runtime
 #endif
+				UI_DrawPosSuffix(sVar1, sVar2, playerStruct, (s16)partTimeVariable5);
 
 				if (numPlyr > 2)
 				{
@@ -553,7 +552,8 @@ void UI_RenderFrame_Racing()
 			hudStructPtr += UI_HUD_SLOT_COUNT;
 
 #ifdef USE_ONLINE
-			break;
+			if (ONLINE_RACE) // ctr-native: one build, runtime
+				break;
 #endif
 
 		} while (playerThread != 0);
@@ -769,9 +769,10 @@ void UI_RenderFrame_Racing()
 			UI_Map_DrawDrivers(levPtrMap, gGT->threadBuckets[PLAYER].thread, local_30);
 			UI_Map_DrawDrivers(levPtrMap, gGT->threadBuckets[ROBOT].thread, local_30);
 
-#ifndef USE_ONLINE
-			UI_Map_DrawGhosts(levPtrMap, gGT->threadBuckets[GHOST].thread);
+#ifdef USE_ONLINE
+			if (!ONLINE_RACE) // ctr-native: one build, runtime
 #endif
+			UI_Map_DrawGhosts(levPtrMap, gGT->threadBuckets[GHOST].thread);
 
 			UI_Map_DrawTracking(levPtrMap, gGT->threadBuckets[TRACKING].thread);
 

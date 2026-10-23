@@ -175,3 +175,19 @@ void StubGame_Frame(void)
 			break;
 	}
 }
+
+// one build : the stub is the native flow, on from the start
+int NativeOnlineGame_Active(void) { return 1; }
+int NativeOnlineGame_Activate(void) { return 1; }
+void NativeOnlineGame_Deactivate(void) {}
+void NativeOnlineGame_SyncStats(void) {}
+int NativeOnlineGame_ExternalLobby(void) { return 0; }
+void NativeOnlineGame_SetMode(int bootOnline, int externalLobby) { (void)bootOnline; (void)externalLobby; }
+void NativeOnlineGame_SetMyCharacter(int characterID) { (void)characterID; }
+void NativeOnlineGame_LobbyPointers(int **active, int **phase, int **characters)
+{
+	static int active_ = 1, phase_, characters_[8];
+	*active = &active_;
+	*phase = &phase_;
+	*characters = characters_;
+}

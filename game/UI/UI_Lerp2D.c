@@ -18,6 +18,7 @@ void UI_Lerp2D_Angular(SVec2 *pos, s16 drawnPosition, s16 absolutePosition, s16 
 #ifdef USE_ONLINE
 	// online rank column (UI_DrawRankedDrivers): 8 icons, 20 px apart from
 	// y = 53, swinging around x = 10
+	if (ONLINE_RACE) // ctr-native: one build, runtime
 	{
 		s32 swing = MATH_Sin((frameCounter * (1 << UI_LERP2D_ANGULAR_FRAME_SHIFT)) / UI_LERP2D_TRANSITION_FRAMES) * UI_LERP2D_RANK_ICON_RADIUS >>
 		            UI_LERP2D_FIXED_SHIFT;

@@ -31,7 +31,7 @@ enum WebOnlineRole
 };
 
 // web/online/library.js
-extern void ctr_web_online_init(void *octrStorage, const int *layout, int layoutLen, const int *karts);
+extern void ctr_web_online_init(void *octrStorage, const int *layout, int layoutLen, const int *karts, int *const *lobby);
 extern int ctr_web_online_role(char *name, int cap);
 extern int ctr_web_online_connect(void);
 extern void ctr_web_online_disconnect(void);
@@ -39,6 +39,8 @@ extern void ctr_web_online_send(int peer, const void *buf, int len, int reliable
 extern void ctr_web_online_kick(int peer);
 // info: peer, event, reliable, address key low, address key high
 extern int ctr_web_online_poll(void *buf, int cap, int *info);
+// the page's command queue (native_online.h NativeOnlineControl), arg out
+extern int ctr_web_online_control(int *arg);
 
 static const OnlineTransport *active;
 static const OnlineTransport *bridgeTransport = &WebOnline_Transport;
@@ -269,6 +271,13 @@ __attribute__((constructor)) static void WebOnline_Install(void)
 		offsetof(struct OnlineCTR, serverLockIn1),
 	};
 
+	// one build : the page reads these next to octr (active, lobby phase, the
+	// menus' characters per slot at the track lock)
+	int *lobby[3];
+	NativeOnlineGame_LobbyPointers(&lobby[0], &lobby[1], &lobby[2]);
+
+	NativeOnlineGame_SetMode(0, 1);
+	NativeOnline_SetControl(ctr_web_online_control);
 	NativeOnline_Configure(&WebOnline_Transport, NULL, WEB_ONLINE_ROOM_ADDRESS);
-	ctr_web_online_init(o, layout, (int)(sizeof(layout) / sizeof(layout[0])), karts);
+	ctr_web_online_init(o, layout, (int)(sizeof(layout) / sizeof(layout[0])), karts, lobby);
 }

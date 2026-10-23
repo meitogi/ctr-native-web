@@ -335,6 +335,13 @@ EM_JS(void, NativeInput_WebPullMappings, (s32 *keyboard, s32 *keyboard2, s32 *ga
 });
 
 // include/platform/native_web_ui.h : 1 when the page saw a press for « Skip intro » (consumed).
+#ifdef USE_ONLINE
+EM_JS(void, NativeWeb_OpenMultiplayer, (void), {
+	const input = Module.ctrInput;
+	if (input && input.openMultiplayer) input.openMultiplayer();
+});
+#endif
+
 EM_JS(int, NativeWeb_IntroSkip, (void), {
 	const input = Module['ctrInput'];
 	return input && input.introSkip() ? 1 : 0;

@@ -27,6 +27,15 @@ void QueueLoadTrack_MenuProc(struct RectMenu *menu)
 		GAME_TRACKER->gameMode1 &= ~(POINT_LIMIT | LIFE_LIMIT | TIME_LIMIT);
 	}
 
+#ifdef USE_ONLINE
+	// ctr-native: one build — from the main menu's ONLINE row the track lock
+	// starts the room's race through OnlineCTR (the load comes with SG_STARTLOADING)
+	if (OnlineLobby_RequestRace())
+	{
+		RECTMENU_Hide(menu);
+		return;
+	}
+#endif
 	MainRaceTrack_RequestLoad(GAME_TRACKER->currLEV);
 
 	RECTMENU_Hide(menu);

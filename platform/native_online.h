@@ -16,4 +16,15 @@ void NativeOnline_Frame(void);
 
 unsigned int NativeOnline_FrameCount(void);
 
+// One build (docs/ONLINECTR_PORT.md, D8) : the host layer's commands, polled
+// once per frame. poll() returns the next command (0 = none) and its argument.
+enum NativeOnlineControl
+{
+	NATIVE_ONLINE_CTL_NONE,
+	NATIVE_ONLINE_CTL_ENTER,     // join the page's room (waits for the title)
+	NATIVE_ONLINE_CTL_LEAVE,     // leave the room
+	NATIVE_ONLINE_CTL_CHARACTER, // arg = this guest's character, picked on the host
+};
+void NativeOnline_SetControl(int (*poll)(int *arg));
+
 #endif

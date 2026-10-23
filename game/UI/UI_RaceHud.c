@@ -104,7 +104,8 @@ void UI_BattleDrawHeadArrows(struct Driver *player)
 
 #ifdef USE_ONLINE
 	int OnlineGetNumDrivers();
-	numPlyr = OnlineGetNumDrivers();
+	if (ONLINE_RACE) // ctr-native: one build, runtime
+		numPlyr = OnlineGetNumDrivers();
 #endif
 
 	for (u8 i = 0; i < numPlyr; i++)
@@ -207,7 +208,8 @@ void UI_BattleDrawHeadArrows(struct Driver *player)
 
 		gradient = data.ptrColor[PLAYER_BLUE + currTeam];
 #ifdef USE_ONLINE
-		gradient = data.ptrColor[CRASH_BLUE + data.characterIDs[i]];
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+			gradient = data.ptrColor[CRASH_BLUE + data.characterIDs[i]];
 #endif
 		CtrGpu_WriteColorCode(&arrow->g3.r0, (gradient[0] & UI_BATTLE_HEAD_ARROW_COLOR_MASK) | UI_BATTLE_HEAD_ARROW_SEMITRANS_MASK);
 		CtrGpu_WriteColorCode(&arrow->g3.r1, gradient[1] | UI_BATTLE_HEAD_ARROW_SEMITRANS_MASK);

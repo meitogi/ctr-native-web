@@ -31,7 +31,8 @@ void MainGameStart_Initialize(struct GameTracker *gGT, b32 boolStopAudio)
 		howl_StopAudio(0, 0, 1);
 	}
 
-#ifndef USE_ONLINE
-	VehBirth_TeleportAll(gGT, VEH_BIRTH_SPAWN_INIT_RACE_STATE);
+#ifdef USE_ONLINE
+	if (!ONLINE_RACE) // ctr-native: one build, runtime
 #endif
+	VehBirth_TeleportAll(gGT, VEH_BIRTH_SPAWN_INIT_RACE_STATE);
 }

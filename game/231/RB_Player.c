@@ -186,7 +186,7 @@ void RB_Player_ModifyWumpa(struct Driver *driver, int wumpaDelta)
 	}
 
 #ifdef USE_ONLINE
-	if (driver->driverID != 0)
+	if (ONLINE_RACE && driver->driverID != 0) // ctr-native: one build, runtime
 		return;
 #endif
 

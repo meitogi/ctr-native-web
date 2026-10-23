@@ -43,4 +43,18 @@ int NativeOnlineGame_SetKartWumpa(int slot, int numWumpas);
 unsigned int NativeOnlineGame_NowMs(void);
 void NativeOnlineGame_Log(const char *fmt, ...);
 
+// One build (docs/ONLINECTR_PORT.md, D8) : the mod is on while a room is
+// joined. Natively it is on from boot ; the web joins and leaves at runtime.
+int NativeOnlineGame_Active(void);
+int NativeOnlineGame_Activate(void);          // 1 when joined (from the title, between loads)
+void NativeOnlineGame_Deactivate(void);
+void NativeOnlineGame_SyncStats(void);        // StatsUpgrade around the room's race
+int NativeOnlineGame_ExternalLobby(void);     // the lobby is outside the mod (web)
+void NativeOnlineGame_SetMode(int bootOnline, int externalLobby);
+void NativeOnlineGame_SetMyCharacter(int characterID); // a guest's pick, from the page
+// The lobby state the page reads next to octr (web/online/library.js) : the
+// room flag, the lobby phase (enum OnlineLobbyPhase) and the menus' character
+// per slot at the track lock, int[8].
+void NativeOnlineGame_LobbyPointers(int **active, int **phase, int **characters);
+
 #endif

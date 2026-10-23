@@ -137,8 +137,11 @@ void GAMEPAD_PollVsync(struct GamepadSystem *gGamepads)
 	}
 
 #ifdef USE_ONLINE
-	numPorts = 1;
-	maxPadsPerPort = 1;
+	if (ONLINE_RACE) // ctr-native: one build, runtime
+	{
+		numPorts = 1;
+		maxPadsPerPort = 1;
+	}
 #endif
 
 	// loop through all gamepad ports
@@ -243,8 +246,11 @@ s32 GAMEPAD_GetNumConnected(struct GamepadSystem *gGamepads)
 	}
 
 #ifdef USE_ONLINE
-	numPorts = 1;
-	maxPadsPerPort = 1;
+	if (ONLINE_RACE) // ctr-native: one build, runtime
+	{
+		numPorts = 1;
+		maxPadsPerPort = 1;
+	}
 #endif
 
 	port = 0;
@@ -342,7 +348,7 @@ s32 GAMEPAD_ProcessHold(struct GamepadSystem *gGamepads)
 	{
 #ifdef USE_ONLINE
 		// only P1 is polled: slots 1-7 hold the remote drivers' pads
-		if (i != 0)
+		if (ONLINE_RACE && i != 0) // ctr-native: one build, runtime
 			break;
 #endif
 		pad = &gGamepads->gamepad[i];
@@ -565,7 +571,7 @@ void GAMEPAD_ProcessSticks(struct GamepadSystem *gGamepads)
 	{
 #ifdef USE_ONLINE
 		// only P1 is polled: slots 1-7 hold the remote drivers' pads
-		if (i != 0)
+		if (ONLINE_RACE && i != 0) // ctr-native: one build, runtime
 			break;
 #endif
 		pad = &gGamepads->gamepad[i];
@@ -806,7 +812,8 @@ s32 GAMEPAD_ProcessTapRelease(struct GamepadSystem *gGamepads)
 				pad->buttonsReleased = 0;
 			}
 #ifdef USE_ONLINE
-			break;
+			if (ONLINE_RACE) // ctr-native: one build, runtime
+				break;
 #endif
 			++i;
 		} while (i < gGamepads->numGamepadsConnected);

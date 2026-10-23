@@ -43,7 +43,7 @@ void VehFire_Audio(struct Driver *driver, int speed_cap)
 	register u32 audioFlags CTR_PSX_REGISTER("$6");
 
 #ifdef USE_ONLINE
-	if (audioDriver->driverID != 0)
+	if (ONLINE_RACE && audioDriver->driverID != 0) // ctr-native: one build, runtime
 		return;
 #endif
 
@@ -307,7 +307,7 @@ void VehFire_Increment(struct Driver *driverArg, int reservesArg, u32 typeArg, i
 #if defined(USE_ONLINE)
 	// upstream online builds define USE_RETROFUELED, enabled in retro rooms only
 	int rn = octr->serverRoom;
-	int doRetroFueled = ROOM_IS_RETRO(rn);
+	int doRetroFueled = ONLINE_RACE && ROOM_IS_RETRO(rn); // ctr-native: one build, runtime
 #endif
 	if (
 	    // any gain in boost,
@@ -366,11 +366,14 @@ void VehFire_Increment(struct Driver *driverArg, int reservesArg, u32 typeArg, i
 		if (oldOTT < reserves)
 		{
 #ifdef USE_ONLINE
-			void FixReservesIncrement(struct Driver * driver, int reserves);
-			FixReservesIncrement(driver, reserveDelta);
-#else
-			driver->reserves = (s16)CTR_MipsAddLo((u16)driver->reserves, reserveDelta);
+			if (ONLINE_RACE) // ctr-native: one build, runtime
+			{
+				void FixReservesIncrement(struct Driver * driver, int reserves);
+				FixReservesIncrement(driver, reserveDelta);
+			}
+			else
 #endif
+			driver->reserves = (s16)CTR_MipsAddLo((u16)driver->reserves, reserveDelta);
 			driver->turbo_outsideTimer = (s16)reserves;
 		}
 	}
@@ -380,11 +383,14 @@ void VehFire_Increment(struct Driver *driverArg, int reservesArg, u32 typeArg, i
 	{
 		// increase reserves BY param2
 #ifdef USE_ONLINE
-		void FixReservesIncrement(struct Driver * driver, int reserves);
-		FixReservesIncrement(driver, reserves);
-#else
-		driver->reserves = (s16)CTR_MipsAddLo((u16)driver->reserves, reserves);
+		if (ONLINE_RACE) // ctr-native: one build, runtime
+		{
+			void FixReservesIncrement(struct Driver * driver, int reserves);
+			FixReservesIncrement(driver, reserves);
+		}
+		else
 #endif
+		driver->reserves = (s16)CTR_MipsAddLo((u16)driver->reserves, reserves);
 	}
 
 	// super engine
@@ -398,7 +404,7 @@ void VehFire_Increment(struct Driver *driverArg, int reservesArg, u32 typeArg, i
 	}
 
 #if defined(USE_ONLINE)
-	if (driver->driverID != 0) // if not ourself
+	if (ONLINE_RACE && driver->driverID != 0) // if not ourself // ctr-native: one build, runtime
 		return;
 #endif
 

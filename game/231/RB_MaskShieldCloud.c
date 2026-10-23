@@ -430,7 +430,7 @@ void RB_ShieldDark_ThTick_Grow(struct Thread *th)
 		                                    player->instSelf->thread);
 	}
 #ifdef USE_ONLINE
-	if (player->driverID == 0)
+	if (ONLINE_RACE ? (player->driverID == 0) : !(player->actionsFlagSet & ACTION_BOT)) // ctr-native: one build, runtime
 #else
 	if (!(player->actionsFlagSet & ACTION_BOT))
 #endif

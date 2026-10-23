@@ -65,7 +65,8 @@ void LOAD_Robots2P(struct BigHeader *bigfile, int p1, int p2, void (*callback)(s
 void LOAD_Robots1P(int characterID)
 {
 #ifdef USE_ONLINE
-	return;
+	if (ONLINE_RACE) // ctr-native: one build, runtime
+		return;
 #endif
 
 	int slotIndex = 1;
@@ -104,6 +105,7 @@ int LOAD_DriverMPK(struct BigHeader *bigfile, int levelLOD, void (*callback)(str
 	// upstream: goto ForceOnlineLoad8, LOAD_Robots1P (returns early online),
 	// then USE_DRIVERLOD's highLOD_DriverMPK(8): high-LOD models of
 	// drivers 0-6 and the Time Trial MPK of driver 7
+	if (ONLINE_RACE) // ctr-native: one build, runtime
 	{
 		int i;
 		for (i = 0; i < ONLINE_DRIVER_MODEL_COUNT - 1; i++)

@@ -508,8 +508,12 @@ void StateZero()
 
 #ifdef USE_ONLINE
 	// upstream: ModsMain()
-	void octr_entryHook();
-	octr_entryHook();
+	// ctr-native: one build — only the native boot enters the mod's own flow
+	if (octrBootOnline)
+	{
+		void octr_entryHook();
+		octr_entryHook();
+	}
 #endif
 
 	// Set Video Mode to NTSC
@@ -625,7 +629,8 @@ void StateZero()
 	// gGT->levelID = OXIDE_TRUE_ENDING;
 
 #ifdef USE_ONLINE
-	gGT->levelID = INTRO_OXIDE;
+	if (octrBootOnline) // ctr-native: one build, runtime
+		gGT->levelID = INTRO_OXIDE;
 #endif
 
 	InitGeom();
@@ -658,7 +663,10 @@ void StateZero()
 
 	VSyncCallback(MainDrawCb_Vsync);
 
-#ifndef USE_ONLINE
+#ifdef USE_ONLINE
+	if (!octrBootOnline) // ctr-native: one build, runtime
+	{
+#endif
 	Music_SetIntro();
 	CseqMusic_StopAll();
 	CseqMusic_Start(CSEQ_SONG_LEVEL, 0, NULL, 0, 0);
@@ -683,6 +691,8 @@ void StateZero()
 		}
 #endif
 		CDSYS_XAPauseAtEnd();
+	}
+#ifdef USE_ONLINE
 	}
 #endif
 

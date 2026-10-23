@@ -50,6 +50,12 @@
 //   karts        gGT->drivers[0 .. players-1], each with the same fields as `kart`
 //                (karts[1] = P2 : Share's bot steers it), null entries for missing
 //                drivers
+//                wumpa numWumpas · item heldItemID (DriverHeldItem, 0xf none) · roll itemRollTimer
+//                (> 0 while the ? roulette runs) · crates numTimesHitWeaponBox — the item
+//                path, for the online tests (RB_Crate.c, VehPickupItem.c)
+//   pools        { thread, small } : free entries of gGT->JitPools.thread / .smallStack, -1 while a level loads (a
+//                crate's thread is born on first contact, RB_CrateAny_LInC_Birth ; an empty
+//                pool leaves it intact)
 //   charSelect   while the character select is the active menu (D230.menuCharacterSelect) :
 //                { locked } = sdata->characterSelectFlags, bit n set once player n
 //                locked a character (MM_Characters.c) ; null otherwise
@@ -130,23 +136,27 @@ EM_JS(void, WebDebugBridge_PushPathJS, (int levelID, const s16 *frames, int coun
 
 // Runs right after WebDebugBridge_PushJS, on the object it just wrote.
 EM_JS(void, WebDebugBridge_PushMoreJS,
-      (int hasSub, const char *subTitle, int subRow, const char *subLabel, int subState, int players, const s32 *karts, int charSelect),
+      (int hasSub, const char *subTitle, int subRow, const char *subLabel, int subState, int players, const s32 *karts, int charSelect,
+       int poolThread, int poolSmall),
 {
 	const c = globalThis.__ctr;
 	if (!c) return;
+	c.pools = { thread: poolThread, small: poolSmall };
 	const str = p => (p ? UTF8ToString(p) : null);
 	c.sub = hasSub ? { title: str(subTitle), row: subRow, label: str(subLabel), state: subState >>> 0, input: !(subState & 0x20) } : null;
 	c.players = players;
 	c.charSelect = charSelect < 0 ? null : { locked: charSelect };
 	c.karts = [];
 	for (let i = 0; i < players; i++) {
-		const k = HEAP32.subarray((karts >> 2) + i * 13, (karts >> 2) + (i + 1) * 13);
+		const k = HEAP32.subarray((karts >> 2) + i * 17, (karts >> 2) + (i + 1) * 17);
 		c.karts.push(k[0] ? {
 			lap: k[1], speed: k[2], rank: k[3], finished: !!k[4],
 			pos: { x: k[5], y: k[6], z: k[7] }, angle: k[8],
 			checkpoint: k[9], target: k[9] < 0 ? null : { x: k[10], z: k[11] }, toFinish: k[12] >>> 0,
+			wumpa: k[13], item: k[14], roll: k[15], crates: k[16],
 		} : null);
 	}
+	if (c.kart && c.karts[0]) Object.assign(c.kart, { wumpa: c.karts[0].wumpa, item: c.karts[0].item, roll: c.karts[0].roll, crates: c.karts[0].crates });
 });
 
 internal const char *WebDebugBridge_String(s16 stringIndex)
@@ -157,6 +167,23 @@ internal const char *WebDebugBridge_String(s16 stringIndex)
 	}
 
 	return sdata->lngStrings[(u16)stringIndex & ~MENU_ROW_LOCKED];
+}
+
+// Entries of a pool's free list, -1 while a level loads (the lists point into memory the
+// load pops and reuses until JitPool_Init). Bounded by the pool's size.
+internal int WebDebugBridge_PoolFree(const struct JitPool *pool)
+{
+	int n = 0;
+
+	if (sdata->Loading.stage != LOAD_IDLE)
+	{
+		return -1;
+	}
+	for (const struct Item *it = pool->free.first; (it != NULL) && (n <= pool->maxItems); it = it->next)
+	{
+		n++;
+	}
+	return n;
 }
 
 // A point on the track ahead of driver `d` : the restart point two nodes past its checkpoint.
@@ -251,7 +278,7 @@ internal void WebDebugBridge_Publish(void)
 		struct RectMenu *sub = NULL;
 		const char *subTitle = NULL;
 		const char *subLabel = NULL;
-		s32 karts[4 * 13];
+		s32 karts[4 * 17];
 		int players = gGT->numPlyrCurrGame;
 
 		for (struct RectMenu *m = menu; (m != NULL) && (m->state & DRAW_NEXT_MENU_IN_HIERARCHY) && (m->ptrNextBox_InHierarchy != NULL);
@@ -274,7 +301,7 @@ internal void WebDebugBridge_Publish(void)
 		for (int i = 0; i < players; i++)
 		{
 			struct Driver *k = gGT->drivers[i];
-			s32 *o = &karts[i * 13];
+			s32 *o = &karts[i * 17];
 			int tx = 0;
 			int tz = 0;
 
@@ -295,8 +322,13 @@ internal void WebDebugBridge_Publish(void)
 			o[10] = tx;
 			o[11] = tz;
 			o[12] = (s32)k->distanceToFinish_curr;
+			o[13] = k->numWumpas;
+			o[14] = (s32)k->heldItemID;
+			o[15] = k->itemRollTimer;
+			o[16] = k->numTimesHitWeaponBox;
 		}
 		WebDebugBridge_PushMoreJS(sub != NULL, subTitle, sub ? sub->rowSelected : -1, subLabel, sub ? (int)sub->state : 0, players, karts,
-		                          menu == &D230.menuCharacterSelect ? (int)(sdata->characterSelectFlags & 0xf) : -1);
+		                          menu == &D230.menuCharacterSelect ? (int)(sdata->characterSelectFlags & 0xf) : -1,
+		                          WebDebugBridge_PoolFree(&gGT->JitPools.thread), WebDebugBridge_PoolFree(&gGT->JitPools.smallStack));
 	}
 }
