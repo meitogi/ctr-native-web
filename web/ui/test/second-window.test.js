@@ -1,7 +1,7 @@
-// The home's logic (src/lib/home.js) : the second window's address, place and settings, hosting.
+// Settings › Dev's second window (src/lib/second-window.js) : its address, place and settings, hosting.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { BOT_SEED, SECOND, host, memoryStorage, pageRole, secondWindowUrl, windowFeatures } from '../src/lib/home.js'
+import { BOT_SEED, SECOND, host, memoryStorage, pageRole, secondWindowUrl, windowFeatures } from '../src/lib/second-window.js'
 import { KEYS, createSettings } from '../src/lib/settings.js'
 
 test('second window url : the room link kept whole, ?bot ?mute ?dev added', () => {
@@ -42,13 +42,13 @@ test("the bot's settings stay in memory : « Bot », the keyboard, nothing writt
   assert.equal(createSettings(player).get().device.mode, 'gamepad')
 })
 
-test('host : Share through the panel, Online through its page, solo hosts nothing', async () => {
+test('host : Share through the panel, Online through its page', async () => {
   const calls = []
   const g = {
     ctrShareApi: { start: async () => { calls.push('share') }, link: () => 'http://h/share/guest.html#room=1' },
     __ctrOnline: { host: async () => { calls.push('online') }, state: () => ({ link: 'http://h/index.html#room=2' }) },
   }
-  assert.equal(await host('solo', g), null)
+  await assert.rejects(host('solo', g), /no room/)
   assert.equal(await host('share', g), 'http://h/share/guest.html#room=1')
   assert.equal(await host('online', g), 'http://h/index.html#room=2')
   assert.deepEqual(calls, ['share', 'online'])

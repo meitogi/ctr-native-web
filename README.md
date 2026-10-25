@@ -68,10 +68,10 @@ built the first time. rebuild the game with `web/dev.sh build`, then reload the 
 `web/dev.sh prod` serves the site exactly as GitHub Pages gets it (`web/dev.sh prod release`
 checks it with the guard too). in the devcontainer : `wtf ctr dev`, `wtf ctr build`, `wtf ctr prod`.
 
-testing alone ? the debug page's home has a **second window** row : Online VS, Online Battle or
-Share. one click, a second window opens beside the first, joins the room by itself and plays as
-Bot ; the first window walks its menus to the race. Settings › Players has the Bot switch, Settings ›
-Dev the log and the game state. none of it ships on the site.
+testing alone ? on the debug page, from the main menu, Settings › Dev has a **second window** :
+Online VS, Online Battle or Share. one click, a window opens beside the first, joins the room by
+itself and plays as Bot ; the first window walks its menus to the race. Settings › Players has the
+Bot switch, Settings › Dev the log and the game state too. none of it ships on the site.
 
 the ports (one list : [web/dev-ports.tsv](web/dev-ports.tsv), checked by `web/dev.sh ports --check`) :
 

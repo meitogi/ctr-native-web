@@ -57,7 +57,7 @@ globalThis.ctrUI = {
   },
 }
 
-// debug builds : the « Bot » switch (on by itself in the home's second window), Settings › Dev
+// debug builds : the « Bot » switch (on by itself in Settings › Dev's second window), Settings › Dev
 if (__CTR_DEV__) import('./dev/index.js').then((dev) => dev.install({ toast }))
 
 mount(GuestApp, { target: document.getElementById('ctr-ui'), props: { actions } })

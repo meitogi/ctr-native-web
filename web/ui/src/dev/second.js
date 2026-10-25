@@ -1,7 +1,7 @@
-// The home's « Second window » (debug builds) : one click and a one-person race is on.
-//   1. a real window opens beside this one, inside the click (pop-up rule), on a small
-//      same-origin file while the room does not exist yet ;
-//   2. this window boots and hosts the room of the mode (Online for VS / Battle, Share) ;
+// Settings › Dev's « Second window » (debug builds) : one click and a one-person race is on.
+//   1. Settings closes (the game gets the keys again) and a real window opens beside this one,
+//      inside the click (pop-up rule), on a small same-origin file while the room does not exist ;
+//   2. this window's running game hosts the room of the mode (Online for VS / Battle, Share) ;
 //   3. the second window goes to the room link with ?bot&mute&dev=<mode> : it boots by itself
 //      (main.js), keeps its own settings (« Bot », the keyboard : store.js) and its Bot switch is
 //      on (src/dev/index.js) ;
@@ -9,14 +9,17 @@
 //      BATTLE (Share : VS.) → players → this player's character → the defaults to the start.
 // The race itself is the player's (or this window's Bot switch).
 import { MAIN_MENU, menuTo, onMainMenu } from '../lib/autopilot.js'
-import { SECOND, secondWindowUrl, waitFor, windowFeatures } from '../lib/home.js'
+import { SECOND, host, secondWindowUrl, waitFor, windowFeatures } from '../lib/second-window.js'
 import { frames, out } from './keys.js'
 import { D } from './strings.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const game = () => globalThis.__ctr ?? null
 
-/** The room's guests as this window's host sees them ([{ slot, name, state }]). */
+/**
+ * The room's guests as this window's host sees them ([{ slot, name, state }]) : 'streaming', or
+ * 'nomedia' for an Online guest on the relay (no picture, its pad works : LOG 14).
+ */
 function guests(room) {
   if (room === 'share') return globalThis.__ctrShare?.state().guests ?? []
   return globalThis.__ctrOnline?.state().share?.guests ?? []
@@ -28,7 +31,7 @@ async function until(label, pred, timeout) {
   return s
 }
 
-/** This window's menus, from the main menu to the race's start (`spec` : lib/home.js SECOND). */
+/** This window's menus, from the main menu to the race's start (`spec` : lib/second-window.js SECOND). */
 export async function walkToRace(spec, { step = () => {} } = {}) {
   const read = async () => game()
   await until('main menu', onMainMenu, 60_000)
@@ -55,23 +58,23 @@ export async function walkToRace(spec, { step = () => {} } = {}) {
 }
 
 /**
- * Opens the second window for `mode` ('vs' | 'battle' | 'share') ; `startGame(room, opts)` boots
- * this window and hosts (main.js). Progress in ui.second ({ mode, text, error }).
+ * Opens the second window for `mode` ('vs' | 'battle' | 'share') beside this window, whose game
+ * runs. Progress in ui.second ({ mode, text, error }).
  */
-export function openSecond(mode, { ui, startGame }) {
+export function openSecond(mode, { ui }) {
   const spec = SECOND[mode]
   const steps = D.secondSteps
   const say = (key, error = false) => { ui.second = { mode, text: steps[key] ?? key, error } }
   const win = window.open(new URL('preload-flag.js', location.href).href, 'ctr-second', windowFeatures(window))
   if (!win) { say('blocked', true); return null }
+  ui.settingsOpen = false
+  document.getElementById('canvas')?.focus()
   say('hosting')
-  ui.mode = spec.room
   return (async () => {
-    const link = await startGame(spec.room, { show: false })
-    if (!link) throw new Error('no room')
+    const link = await host(spec.room)
     win.location.replace(secondWindowUrl(link, mode))
     say('joining')
-    const bot = await waitFor(() => guests(spec.room).find((g) => g.slot > 0 && g.state === 'streaming'), { timeout: 180_000, every: 250 })
+    const bot = await waitFor(() => guests(spec.room).find((g) => g.slot > 0 && (g.state === 'streaming' || g.state === 'nomedia')), { timeout: 180_000, every: 250 })
     if (!bot) throw new Error('Bot never joined the room (see the second window)')
     say('menus')
     await walkToRace(spec)

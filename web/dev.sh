@@ -104,8 +104,8 @@ Ready : http://localhost:$PAGE/$query
   Forward $PAGE in VS Code's Ports panel$([ "$relay" = local ] && echo " (and $RELAY, the local relay)"), same local number.
   The page's sources reload as you edit them ; the game : wtf ctr build in another terminal,
   then reload the page.
-  Debug build : the home's « Second window » row opens a pre-configured guest beside this window
-  (Online VS, Online Battle or Share) playing as Bot ; Settings › Dev has the log and the game state.
+  Debug build, from the main menu : Settings › Dev › « Second window » (Online VS, Online Battle
+  or Share) opens a guest beside this window, playing as Bot ; the log and the game state too.
 Vite log : $build.vite.log   (Ctrl-C here stops everything)
 EOF
   wait

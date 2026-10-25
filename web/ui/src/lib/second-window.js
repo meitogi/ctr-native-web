@@ -1,8 +1,6 @@
-// The home screen's logic (Home.svelte, main.js), no DOM : the modes, what a choice does once the
-// game runs, and the second window of a debug build — its address, its place beside this one,
-// its own settings. test/home.test.js drives it.
-
-export const MODES = ['solo', 'share', 'online']
+// The second window of Settings › Dev (debug builds, src/dev/second.js), no DOM : the room it
+// joins and how this window hosts it, its address, its place beside this one, its own settings.
+// test/second-window.test.js drives it.
 
 /**
  * The second window's modes (debug builds) : which room this window hosts, and the game menu
@@ -24,10 +22,10 @@ export async function waitFor(get, { timeout = 60_000, every = 100, sleep = (ms)
 }
 
 /**
- * Hosts the room of `mode` once the game runs : Share through the Share panel
+ * Hosts the room of `mode` in the running game : Share through the Share panel
  * (web/share/panel.js ctrShareApi.start), Online through the Online panel (web/online/page.js
  * __ctrOnline.host, P2P or relay from its saved settings). Resolves with the room link (the
- * guest's address), or null for solo. `g` : globalThis.
+ * guest's address). `g` : globalThis.
  */
 export async function host(mode, g = globalThis, opts) {
   if (mode === 'share') {
@@ -46,7 +44,7 @@ export async function host(mode, g = globalThis, opts) {
     if (!link) throw new Error(online.state().error || 'the room did not open (see Settings › Multiplayer)')
     return link
   }
-  return null
+  throw new Error(`no room for ${mode}`)
 }
 
 /** The second window's address : the room link with ?bot (the bot's pad and state), ?mute, ?dev=<mode>. */

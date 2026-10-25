@@ -78,8 +78,8 @@ The host sees who joins and leaves (a toast, names in Settings › Multiplayer �
 ## By hand
 
 `web/dev.sh dev relay=local` (or `wtf ctr dev relay=local` in the workspace) : the page on 8090,
-a local relay with a fresh key on 8787, the host address printed ; the home's Share boots and
-shares at once. Alone : the home's « Second window » → Share opens the guest beside it, as Bot.
+a local relay with a fresh key on 8787, the host address printed ; Settings › Multiplayer ›
+Share starts it. Alone : Settings › Dev › « Second window » → Share opens the guest beside it, as Bot.
 
 ## Bot : a second player to test with alone
 
