@@ -106,8 +106,8 @@ export async function openRoom({ link, role, mode = 'auto', name = '', iceServer
       let l = r.links[from];
       // A guest coming through the relay : its first frame, or its `join` after giving up on
       // WebRTC. Anything else from a guest with a live WebRTC link is ignored, not a reason
-      // to drop that link.
-      const fallback = !l ? bytes[0] !== TAG.bye : l.backend !== 'ws' && bytes[0] === TAG.join;
+      // to drop that link ; a keepalive still in flight from a guest just dropped opens nothing.
+      const fallback = !l ? bytes[0] !== TAG.bye && bytes[0] !== TAG.alive : l.backend !== 'ws' && bytes[0] === TAG.join;
       if (role === 'host' && fallback) {
         pending[from]?.abort();
         l?.close();

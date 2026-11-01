@@ -8,7 +8,17 @@
 //              `reliable: true` = ordered and reliable (the `ctl` channel) ; WebSocket : always
 //              both, through the relay. OnlineCTR needs both kinds (kart state vs control).
 //   close()
+//   lastSeen   performance.now() of the last frame received from the other side (any frame,
+//              keepalives included) ; a link sends a keepalive every KEEPALIVE_MS it has
+//              sent nothing else, so a silent link is a dead one (web/online/net.js times it out)
 //   events : 'message' (Uint8Array), 'close'
+//
+// The WebSocket link coalesces : what it is given within one JS task (the host's game fans
+// every kart state out to every guest in one frame) leaves as one sealed relay message, split
+// again on the other side before any 'message' event — the receiving game sees each payload
+// on its own, as sent. Only to a peer that announced it reads batches (its `join` frame) ; a
+// relay message holding only unreliable payloads is flagged `lossy`, the relay may drop it
+// under load, never a reliable one (relay/relay.js).
 //
 // WebRTC is end-to-end encrypted by DTLS ; before a WebRTC link is handed out, both sides
 // have proved they know the room secret over both SDPs' DTLS fingerprints, so a relay that
@@ -19,7 +29,13 @@ import { Emitter } from './events.js';
 import { createAnswer, createOffer, pathOf, transcript } from './webrtc.js';
 
 /** First byte of every WebSocket-transport frame (inside the sealed envelope). */
-export const TAG = { game: 0, join: 1, bye: 2 };
+export const TAG = { game: 0, join: 1, bye: 2, batch: 3, alive: 4 };
+
+/** `join` payload bits : what the announcing side can read. */
+const CAN_BATCH = 1;
+
+/** A link that sent nothing for this long sends a keepalive (WebSocket frame / ctl text). */
+export const KEEPALIVE_MS = 500;
 
 export function fail(code, message) {
   const error = new Error(message);
@@ -34,9 +50,40 @@ function frame(tag, bytes) {
   return out;
 }
 
+/** Payloads of one task as one batch frame : [TAG.batch, (u16 length, bytes)…]. */
+function batchFrame(items) {
+  let size = 1;
+  for (const b of items) size += 2 + b.length;
+  const out = new Uint8Array(size);
+  out[0] = TAG.batch;
+  let at = 1;
+  for (const b of items) {
+    out[at] = b.length >> 8;
+    out[at + 1] = b.length & 0xff;
+    out.set(b, at + 2);
+    at += 2 + b.length;
+  }
+  return out;
+}
+
+/** Sends a keepalive on `link` every KEEPALIVE_MS it has sent nothing else ; stops at close. */
+function keepAlive(link, ping) {
+  link.lastSent = performance.now();
+  const timer = setInterval(() => {
+    if (link.closed) return clearInterval(timer);
+    if (performance.now() - link.lastSent >= KEEPALIVE_MS) {
+      link.lastSent = performance.now();
+      ping();
+    }
+  }, KEEPALIVE_MS / 2);
+  timer.unref?.();
+  link.on('close', () => clearInterval(timer));
+}
+
 /**
  * A link through the relay. `receive(bytes)` is fed by the room with what signaling opened
- * from that peer ; `announce()` tells the host a guest is there before any game message.
+ * from that peer ; `announce()` tells the host a guest is there before any game message, and
+ * that it reads batches.
  * @param {ReturnType<import('./signaling.js').relaySignaling>} sig
  */
 export function wsLink(sig, peerId) {
@@ -45,21 +92,53 @@ export function wsLink(sig, peerId) {
   link.backend = 'ws';
   link.path = 'relay';
   link.closed = false;
+  link.batching = false; // the other side announced it reads batches
+  link.lastSeen = performance.now();
   const end = () => {
     if (link.closed) return;
     link.closed = true;
     link.emit('close');
   };
-  link.send = (bytes) => { if (!link.closed) sig.data(peerId, frame(TAG.game, bytes)); };
-  link.announce = () => sig.data(peerId, frame(TAG.join, new Uint8Array(0)));
+  let pending = [];
+  let pendingLossy = true;
+  const flush = () => {
+    const items = pending;
+    const lossy = pendingLossy;
+    pending = [];
+    pendingLossy = true;
+    if (link.closed || !items.length) return;
+    sig.data(peerId, items.length === 1 ? frame(TAG.game, items[0]) : batchFrame(items), { lossy });
+  };
+  link.send = (bytes, { reliable = false } = {}) => {
+    if (link.closed) return;
+    link.lastSent = performance.now();
+    if (!link.batching) return sig.data(peerId, frame(TAG.game, bytes), { lossy: !reliable });
+    if (!pending.length) queueMicrotask(flush);
+    pending.push(bytes.slice());
+    pendingLossy &&= !reliable;
+  };
+  link.announce = () => sig.data(peerId, frame(TAG.join, Uint8Array.of(CAN_BATCH)));
   link.receive = (bytes) => {
-    if (bytes[0] === TAG.game) link.emit('message', bytes.subarray(1));
-    else if (bytes[0] === TAG.bye) end();
+    link.lastSeen = performance.now();
+    const tag = bytes[0];
+    if (tag === TAG.game) link.emit('message', bytes.subarray(1));
+    else if (tag === TAG.batch) {
+      for (let at = 1; at + 2 <= bytes.length;) {
+        const len = (bytes[at] << 8) | bytes[at + 1];
+        link.emit('message', bytes.subarray(at + 2, at + 2 + len));
+        at += 2 + len;
+      }
+    } else if (tag === TAG.join) link.batching = bytes.length > 1 && (bytes[1] & CAN_BATCH) !== 0;
+    else if (tag === TAG.bye) end();
   };
   link.close = () => {
-    if (!link.closed) sig.data(peerId, frame(TAG.bye, new Uint8Array(0)));
+    if (!link.closed) {
+      flush();
+      sig.data(peerId, frame(TAG.bye, new Uint8Array(0)));
+    }
     end();
   };
+  keepAlive(link, () => sig.data(peerId, frame(TAG.alive, new Uint8Array(0)), { lossy: true }));
   return link;
 }
 
@@ -96,15 +175,23 @@ async function rtcLink(pc, ctl, game, peerId) {
   link.path = (await pathOf(pc)) ?? 'direct-nat';
   link.pc = pc;
   link.closed = false;
+  link.lastSeen = performance.now();
   const end = () => {
     if (link.closed) return;
     link.closed = true;
     pc.close();
     link.emit('close');
   };
-  game.addEventListener('message', ({ data }) => link.emit('message', new Uint8Array(data)));
-  // On ctl, text is the handshake / control JSON ; binary is the caller's reliable messages.
-  ctl.addEventListener('message', ({ data }) => { if (typeof data !== 'string') link.emit('message', new Uint8Array(data)); });
+  game.addEventListener('message', ({ data }) => {
+    link.lastSeen = performance.now();
+    link.emit('message', new Uint8Array(data));
+  });
+  // On ctl, text is the handshake / control JSON (and the keepalive) ; binary is the caller's
+  // reliable messages.
+  ctl.addEventListener('message', ({ data }) => {
+    link.lastSeen = performance.now();
+    if (typeof data !== 'string') link.emit('message', new Uint8Array(data));
+  });
   ctl.addEventListener('close', end);
   pc.addEventListener('connectionstatechange', () => {
     const state = pc.connectionState;
@@ -112,9 +199,11 @@ async function rtcLink(pc, ctl, game, peerId) {
   });
   link.send = (bytes, { reliable = false } = {}) => {
     const channel = reliable ? ctl : game;
+    link.lastSent = performance.now();
     if (channel.readyState === 'open') channel.send(bytes);
   };
   link.close = end;
+  keepAlive(link, () => { if (ctl.readyState === 'open') ctl.send('{"t":"alive"}'); });
   return link;
 }
 

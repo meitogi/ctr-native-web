@@ -9,7 +9,8 @@
 //   leave()
 //   events : 'peers' (list), 'signal' ({from, payload}), 'close' ({code, reason})
 // Only ctr-relay also carries game traffic, for the WebSocket transport :
-//   data(to, bytes)        sealed, through the relay
+//   data(to, bytes, {lossy}?)  sealed, through the relay ; `lossy` : the relay may drop it
+//                          under load (unreliable payloads only — never a reliable one)
 //   events : 'data' ({from, bytes})
 // `transport.js` uses `data` when the backend has it ; a backend without it is signaling only.
 import { b64u, createSealer } from './crypto.js';
@@ -117,7 +118,7 @@ export function relaySignaling({ url, rk = '', room, aead, id = crypto.randomUUI
   });
 
   sig.signal = (to, payload) => sendSealed(to, utf8.encode(JSON.stringify(payload)), { type: 'signal', kind: 'sealed' });
-  sig.data = (to, bytes) => sendSealed(to, bytes, { type: 'data' });
+  sig.data = (to, bytes, { lossy = false } = {}) => sendSealed(to, bytes, lossy ? { type: 'data', lossy: true } : { type: 'data' });
 
   sig.leave = () => {
     clearInterval(ping);

@@ -75,7 +75,7 @@ How a room uses the list :
 | `signaling-mqtt.js` | backend `mqtt` : public MQTT brokers, a minimal MQTT-over-WebSocket client |
 | `signaling-paste.js` | backend `paste` : the two blobs |
 | `webrtc.js` | non-trickle offer and answer, channels `ctl` (reliable) and `game` (unordered, `maxRetransmits: 0`), public STUN only, DTLS fingerprints, path labels |
-| `transport.js` | the link contract (header comment) over WebRTC and over the relay ; the identity proof |
+| `transport.js` | the link contract (header comment) over WebRTC and over the relay ; the identity proof ; keepalives and `lastSeen` (a silent link is a dead one) ; the WebSocket link's coalescing (one relay message per task, to a peer that announced it reads batches) and its `lossy` flag |
 | `room.js` | `openRoom({link, role, mode})` : star around the host, signaling backends in the link's order, WebRTC first with automatic fallback to the relay, or forced relay (`mode: 'ws'`) |
 
 Path labels a link reports : `direct-ipv6`, `direct-lan`, `direct-nat` (WebRTC),
@@ -104,6 +104,9 @@ toHost.send(new Uint8Array([9]), { reliable: true });   // ordered, reliable
 node --test web/net/test/*.test.js         # links, crypto, copy-paste, backend order and fallback, the relay path
 web/net/test/mqtt/run.sh                   # the mqtt backend against Mosquitto in Docker
 ```
+
+`test/impair.js` is not a test : a player suite injects it into its pages (delay, jitter,
+loss, reorder, a cut of every send) — the browser has no netem (`web/test/player/online-net.suite.mjs`).
 
 `mqtt.test.js` is skipped without `MQTT_URL` ; `run.sh` sets it. Pointing `MQTT_URL` at a
 public broker runs the same tests on the real thing.
