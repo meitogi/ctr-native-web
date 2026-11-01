@@ -189,6 +189,8 @@ async function hostRace(ctx) {
 		s = await until(ctx, 'the race to load', n => n.screen !== 'menu' && n.screen !== 'loading' && n.karts?.length >= 2, { timeout: 90_000, every: 500 })
 		const laps = s.numLaps
 		say(`race on level ${s.levelID}, ${laps} laps : P1 drives here, Bot drives P2 from browser ${instance}`)
+		// --set count=1 : the debug bridge's kart / flicker counter over the race (split.suite.mjs)
+		if (ctx.args.count === '1') await ctx.js('globalThis.__ctrFlicker = {}; return true')
 
 		let p2 = { lap: 0, finished: false }
 		let p1 = null
@@ -212,6 +214,14 @@ async function hostRace(ctx) {
 			await watch
 		})
 		await ctx.shot('race-end')
+		let counted = ''
+		if (ctx.args.count === '1') {
+			const f = await ctx.js('const f = globalThis.__ctrFlicker; globalThis.__ctrFlicker = null; const { kept, prev, ...o } = f; return o')
+			const k = f.karts ?? {}
+			counted = ` · counted ${f.frames} presents : karts ahead of a view ${k.ahead}, drawn ${k.seen}, hidden by the game's rules ${k.ruled}, hidden otherwise ${k.hidden}`
+			say(counted)
+			if (k.log?.length) say(`hidden : ${JSON.stringify(k.log.slice(0, 20))}`)
+		}
 		if (!p2.finished) throw new Error(`P2 did not finish : lap ${p2.lap + 1} of ${laps}${dead() ? `, ${dead()}` : ''}`)
 		if (maxLap < laps - 1) throw new Error(`P2 finished without its laps counted (${maxLap + 1} of ${laps})`)
 
@@ -221,7 +231,7 @@ async function hostRace(ctx) {
 		if (!e) throw new Error('the bot did not leave within 60 s of the host stopping')
 		if (e.code !== 0) throw new Error(`the bot exited ${e.code}`)
 		if (!/race 1 : finished/.test(e.out)) throw new Error('the bot did not report its race finished')
-		return `Bot as P2 over ${guest.path} · ${laps} laps : P2 crossed the line, rank ${p2.rank + 1} · P1 ${p1.finished ? `finished, rank ${p1.rank + 1}` : 'did not finish'} · the bot left with the host`
+		return `Bot as P2 over ${guest.path} · ${laps} laps : P2 crossed the line, rank ${p2.rank + 1} · P1 ${p1.finished ? `finished, rank ${p1.rank + 1}` : 'did not finish'} · the bot left with the host${counted}`
 	} finally {
 		if (!exit) b.child.kill('SIGINT')
 	}

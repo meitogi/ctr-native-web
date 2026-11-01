@@ -53,6 +53,11 @@
 //                wumpa numWumpas · item heldItemID (DriverHeldItem, 0xf none) · roll itemRollTimer
 //                (> 0 while the ? roulette runs) · crates numTimesHitWeaponBox — the item
 //                path, for the online tests (RB_Crate.c, VehPickupItem.c)
+//                invisible invisibleTimer · invincible invincibleTimer · drawn bit v set when
+//                the kart's instance was drawn in view v this frame (DRAW_SUCCESSFUL) · lods
+//                byte v = the LOD index (idpp[v].lodIndex) it was queued with in view v ·
+//                impostor bit v set when view v shows it as the split-screen impostor sprite
+//                (HIDE_MODEL in its idpp[v], set by DecalMP_02)
 //   pools        { thread, small } : free entries of gGT->JitPools.thread / .smallStack, -1 while a level loads (a
 //                crate's thread is born on first contact, RB_CrateAny_LInC_Birth ; an empty
 //                pool leaves it intact)
@@ -148,16 +153,275 @@ EM_JS(void, WebDebugBridge_PushMoreJS,
 	c.charSelect = charSelect < 0 ? null : { locked: charSelect };
 	c.karts = [];
 	for (let i = 0; i < players; i++) {
-		const k = HEAP32.subarray((karts >> 2) + i * 17, (karts >> 2) + (i + 1) * 17);
+		const k = HEAP32.subarray((karts >> 2) + i * 22, (karts >> 2) + (i + 1) * 22);
 		c.karts.push(k[0] ? {
 			lap: k[1], speed: k[2], rank: k[3], finished: !!k[4],
 			pos: { x: k[5], y: k[6], z: k[7] }, angle: k[8],
 			checkpoint: k[9], target: k[9] < 0 ? null : { x: k[10], z: k[11] }, toFinish: k[12] >>> 0,
 			wumpa: k[13], item: k[14], roll: k[15], crates: k[16],
+			invisible: k[17], invincible: k[18], drawn: k[19], lods: k[20], impostor: k[21],
 		} : null);
+	}
+	// The kart counter (session 22), with the flicker counter on : per present, for each view
+	// and each other kart, was it drawn there (DRAW_SUCCESSFUL of its instance in that view) ?
+	// Hidden by the game's own rules = its invisibleTimer runs (the Invisibility item, hidden
+	// in the other views, RB_Player_ToggleInvisible) or the odd-frame flicker of invincibleTimer
+	// > 0x2a0 (RB_Player_ToggleFlicker). `ahead` : the kart within `near` world units and 35°
+	// of the view's own kart heading, where the camera looks. lod[n] : drawn at LOD n ; impostor :
+	// drawn as the split-screen impostor sprite (its 3D model hidden in that view, DecalMP_02).
+	const f = globalThis.__ctrFlicker;
+	if (f && players >= 2) {
+		const k = f.karts = f.karts ?? { frames: 0, ahead: 0, seen: 0, ruled: 0, hidden: 0, lod: [0, 0, 0, 0], impostor: 0, log: [] };
+		const near = f.near ?? 2000;
+		k.frames++;
+		for (let v = 0; v < players; v++) {
+			for (let j = 0; j < players; j++) {
+				const a = c.karts[v];
+				const b = c.karts[j];
+				if (j === v || !a || !b) continue;
+				const drawn = (b.drawn >> v) & 1;
+				const ruled = b.invisible > 0 || b.invincible > 0x2a0;
+				const dx = b.pos.x - a.pos.x;
+				const dz = b.pos.z - a.pos.z;
+				const dist = Math.hypot(dx, dz);
+				const t = (a.angle * 2 * Math.PI) / 4096;
+				const ahead = dist > 0 && dist < near && (dx * Math.sin(t) + dz * Math.cos(t)) / dist > Math.cos(Math.PI * 35 / 180);
+				if (!ahead) continue;
+				k.ahead++;
+				if (drawn) {
+					k.seen++;
+					// the LOD the kart was queued with in that view
+					const lod = (b.lods >> (v * 8)) & 3;
+					k.lod[lod]++;
+					if ((b.impostor >> v) & 1) k.impostor++;
+					// kept : 2 per LOD, the kart within 10° of the heading and 300–1500 units away (not
+					// behind the view's own kart)
+					const centred = (dx * Math.sin(t) + dz * Math.cos(t)) / dist > Math.cos(Math.PI / 18) && dist > 300 && dist < 1500;
+					const shot = k.shot ?? (k.shot = [0, 0, 0, 0]);
+					if (f.keepLods && centred && shot[lod] < 2 && k.frames - (k.lastShot ?? -99) > 30) { shot[lod]++; k.lastShot = k.frames; f.grab = `lod${lod}-view${v}-kart${j}-d${Math.round(dist)}`; }
+				}
+				else if (ruled) k.ruled++;
+				else {
+					k.hidden++;
+					if (k.log.length < 200) k.log.push({ frame: c.frame, view: v, kart: j, dist: Math.round(dist) });
+				}
+			}
+		}
 	}
 	if (c.kart && c.karts[0]) Object.assign(c.kart, { wumpa: c.karts[0].wumpa, item: c.karts[0].item, roll: c.karts[0].roll, crates: c.karts[0].crates });
 });
+
+// prim  { used, guard, cap } : gGT->backBuffer->primMem for the frame just presented —
+//       cursor - start, guardEnd - start, end - start, in bytes. The game's allocators refuse
+//       a primitive that would cross guardEnd, so used close to guard = something not drawn.
+EM_JS(void, WebDebugBridge_PushPrimJS, (int used, int guard, int cap),
+{
+	const c = globalThis.__ctr;
+	if (c) {
+		c.prim = { used, guard, cap };
+	}
+});
+
+// The flicker counter (session 22), off until a page sets globalThis.__ctrFlicker = {} (a
+// suite) : then, per present, the displayed VRAM rectangle cut in 32 × 16 tiles, one hash per
+// tile ; a tile whose hash goes A B A over three presents blinked (the middle frame). Counts
+// accumulate on the object : frames, bad (frames with a blink), events (tiles × blinks),
+// tiles[] (blinks per tile, row-major, cols × rows), log (the first 400 bad frames), primMax /
+// primGuard (the highest `prim.used` of the counted frames, the guard). With
+// keep: n, the first n blinked frames are kept as RGBA (kept[], { frame, w, h, rgba }).
+EM_JS(int, WebDebugBridge_FlickerOnJS, (void), { return globalThis.__ctrFlicker ? 1 : 0; });
+
+EM_JS(void, WebDebugBridge_FlickerJS,
+      (int w, int h, int cols, int rows, const u8 *blink, int count, const u16 *pixels, int vblank, int used, int guard, int tile0, int tile1, int fruitPx),
+{
+	const f = globalThis.__ctrFlicker;
+	const c = globalThis.__ctr;
+	if (!f) return;
+	const frame = c ? c.frame : 0;
+	if (f.cols !== cols || f.rows !== rows) Object.assign(f, { cols, rows, tiles: new Array(cols * rows).fill(0) });
+	f.w = w;
+	f.h = h;
+	f.frames = (f.frames ?? 0) + 1;
+	f.primMax = Math.max(f.primMax ?? 0, used);
+	// split screen : a kart shown as an impostor in view v (DecalMP, its 3D model hidden there)
+	// samples atlas tile v, the HUD fruit samples its own VRAM area — empty = nothing on screen
+	if (tile0 >= 0) {
+		const imp = f.impostor = f.impostor ?? { frames: 0, empty: 0, fruitFrames: 0, fruitEmpty: 0 };
+		[tile0, tile1].forEach((lit, v) => {
+			if (!(c?.karts ?? []).some(k => k && ((k.impostor >> v) & 1))) return;
+			imp.frames++;
+			if (lit === 0) imp.empty++;
+		});
+		if (fruitPx >= 0) {
+			imp.fruitFrames++;
+			if (fruitPx === 0) imp.fruitEmpty++;
+		}
+	}
+	f.primGuard = guard;
+	f.bad = f.bad ?? 0;
+	f.events = f.events ?? 0;
+	f.log = f.log ?? [];
+	f.kept = f.kept ?? [];
+	const rgba = p => {
+		const out = new Uint8ClampedArray(w * h * 4);
+		const px = HEAPU16.subarray(p >> 1, (p >> 1) + w * h);
+		for (let i = 0; i < w * h; i++) {
+			const v = px[i];
+			out[i * 4] = (v & 31) << 3;
+			out[i * 4 + 1] = ((v >> 5) & 31) << 3;
+			out[i * 4 + 2] = ((v >> 10) & 31) << 3;
+			out[i * 4 + 3] = 255;
+		}
+		return out;
+	};
+	if (count > 0) {
+		const at = [];
+		for (let t = 0; t < cols * rows; t++) if (HEAPU8[blink + t]) { f.tiles[t]++; at.push(t); }
+		f.bad++;
+		f.events += count;
+		if (f.log.length < 400) f.log.push({ frame: frame - 1, vblank, tiles: at, used, guard });
+		// the blinked frame is the previous one : kept from the last call
+		if (f.kept.length < (f.keep ?? 0) && f.prev) f.kept.push({ frame: frame - 1, w, h, rgba: f.prev, next: rgba(pixels) });
+	}
+	f.prev = (f.keep ?? 0) > f.kept.length ? rgba(pixels) : null;
+	if (f.grab) { f.kept.push({ frame, w, h, rgba: rgba(pixels), tag: f.grab }); f.grab = null; }
+});
+
+// With vram: n on the flicker object, the whole 1024 × 512 VRAM is kept n times (kept[],
+// tag « vram »), a second apart, from vramAfter counted presents : the off-screen areas (the 2P
+// impostor atlas, the HUD fruit).
+EM_JS(int, WebDebugBridge_VramWantedJS, (void),
+{
+	const f = globalThis.__ctrFlicker;
+	if (!f || !f.vram || (f.frames ?? 0) < (f.vramAfter ?? 0)) return 0;
+	const now = performance.now();
+	if (f.vramAt && now - f.vramAt < 1000) return 0;
+	return 1;
+});
+
+EM_JS(void, WebDebugBridge_VramJS, (const u16 *pixels, int w, int h),
+{
+	const f = globalThis.__ctrFlicker;
+	if (!f) return;
+	const out = new Uint8ClampedArray(w * h * 4);
+	const px = HEAPU16.subarray(pixels >> 1, (pixels >> 1) + w * h);
+	for (let i = 0; i < w * h; i++) {
+		const v = px[i];
+		out[i * 4] = (v & 31) << 3;
+		out[i * 4 + 1] = ((v >> 5) & 31) << 3;
+		out[i * 4 + 2] = ((v >> 10) & 31) << 3;
+		out[i * 4 + 3] = 255;
+	}
+	f.kept = f.kept ?? [];
+	f.kept.push({ frame: globalThis.__ctr ? globalThis.__ctr.frame : 0, w, h, rgba: out, tag: 'vram' });
+	f.vram--;
+	f.vramAt = performance.now();
+});
+
+#define WEB_FLICKER_TILE_W 32
+#define WEB_FLICKER_TILE_H 16
+#define WEB_FLICKER_TILES ((VRAM_WIDTH / WEB_FLICKER_TILE_W) * (VRAM_HEIGHT / WEB_FLICKER_TILE_H))
+
+internal void WebDebugBridge_Flicker(struct GameTracker *gGT)
+{
+	local_persist u32 s_hash[3][WEB_FLICKER_TILES];
+	local_persist RECT16 s_rect;
+	local_persist int s_filled = 0;
+	local_persist int s_slot = 0;
+	u8 blink[WEB_FLICKER_TILES];
+	const RECT16 r = { activeDispEnv.disp.x, activeDispEnv.disp.y, activeDispEnv.disp.w, activeDispEnv.disp.h };
+	const int cols = (r.w + WEB_FLICKER_TILE_W - 1) / WEB_FLICKER_TILE_W;
+	const int rows = (r.h + WEB_FLICKER_TILE_H - 1) / WEB_FLICKER_TILE_H;
+	const u16 *px;
+	struct PrimMem *pm = &gGT->backBuffer->primMem;
+	int count = 0;
+
+	if (!WebDebugBridge_FlickerOnJS())
+	{
+		s_filled = 0;
+		return;
+	}
+	if (WebDebugBridge_VramWantedJS())
+	{
+		WebDebugBridge_VramJS(NativeRenderer_DebugReadDisplay(0, 0, VRAM_WIDTH, VRAM_HEIGHT), VRAM_WIDTH, VRAM_HEIGHT);
+	}
+	px = NativeRenderer_DebugReadDisplay(r.x, r.y, r.w, r.h);
+	if (px == NULL)
+	{
+		return;
+	}
+	// the double buffer moves the rectangle between two VRAM halves every present : only a new
+	// size restarts the history
+	if ((s_rect.w != r.w) || (s_rect.h != r.h))
+	{
+		s_rect = r;
+		s_filled = 0;
+	}
+	s_slot = (s_slot + 1) % 3;
+	for (int t = 0; t < cols * rows; t++)
+	{
+		const int tx = (t % cols) * WEB_FLICKER_TILE_W;
+		const int ty = (t / cols) * WEB_FLICKER_TILE_H;
+		u32 h = 2166136261u;
+
+		for (int y = ty; (y < ty + WEB_FLICKER_TILE_H) && (y < r.h); y++)
+		{
+			for (int x = tx; (x < tx + WEB_FLICKER_TILE_W) && (x < r.w); x++)
+			{
+				h = (h ^ (px[y * r.w + x] & 0x7fff)) * 16777619u;
+			}
+		}
+		s_hash[s_slot][t] = h;
+	}
+	if (s_filled < 2)
+	{
+		s_filled++;
+		return;
+	}
+	for (int t = 0; t < cols * rows; t++)
+	{
+		const u32 a = s_hash[(s_slot + 1) % 3][t];
+		const u32 b = s_hash[(s_slot + 2) % 3][t];
+		const u32 n = s_hash[s_slot][t];
+
+		blink[t] = (u8)((a == n) && (a != b));
+		count += blink[t];
+	}
+	{
+		// 2P : the impostor atlas right of the framebuffers — DecalMP_01 fills its entries view by
+		// view, DecalMP_03 gives them the 0x60 × 0x40 tiles at x 0x200 (view 0) and 0x260 (view 1),
+		// y 0x180 : the lit pixels of each ; the HUD fruit's area (UI_RenderFrame_Wumpa3D_2P3P4P),
+		// while the race HUD is on. -1 when not measured.
+		int tile[2] = { -1, -1 };
+		int fruitPx = -1;
+
+		if (gGT->numPlyrCurrGame == 2)
+		{
+			const RECT16 fr = { GAME_WUMPA_HUD_VIEWPORTS[0].x, GAME_WUMPA_HUD_VIEWPORTS[0].y, GAME_WUMPA_HUD_VIEWPORTS[0].w, GAME_WUMPA_HUD_VIEWPORTS[0].h };
+			const u16 *a = NativeRenderer_DebugReadDisplay(0x200, 0x180, 0xc0, 0x40);
+
+			tile[0] = 0;
+			tile[1] = 0;
+			for (int i = 0; (a != NULL) && (i < 0xc0 * 0x40); i++)
+			{
+				tile[(i % 0xc0) >= 0x60] += (a[i] & 0x7fff) != 0;
+			}
+			if ((gGT->hudFlags & HUD_FLAG_RACE_HUD) != 0)
+			{
+				a = NativeRenderer_DebugReadDisplay(fr.x, fr.y, fr.w, fr.h);
+				fruitPx = 0;
+				for (int i = 0; (a != NULL) && (i < fr.w * fr.h); i++)
+				{
+					fruitPx += (a[i] & 0x7fff) != 0;
+				}
+			}
+			// the read-backs reused the display buffer : read the display again for the RGBA copies
+			px = NativeRenderer_DebugReadDisplay(r.x, r.y, r.w, r.h);
+		}
+		WebDebugBridge_FlickerJS(r.w, r.h, cols, rows, blink, count, px, VSync(-1), (int)((u8 *)pm->cursor - (u8 *)pm->start),
+		                         (int)((u8 *)pm->guardEnd - (u8 *)pm->start), tile[0], tile[1], fruitPx);
+	}
+}
 
 internal const char *WebDebugBridge_String(s16 stringIndex)
 {
@@ -278,7 +542,7 @@ internal void WebDebugBridge_Publish(void)
 		struct RectMenu *sub = NULL;
 		const char *subTitle = NULL;
 		const char *subLabel = NULL;
-		s32 karts[4 * 17];
+		s32 karts[4 * 22];
 		int players = gGT->numPlyrCurrGame;
 
 		for (struct RectMenu *m = menu; (m != NULL) && (m->state & DRAW_NEXT_MENU_IN_HIERARCHY) && (m->ptrNextBox_InHierarchy != NULL);
@@ -301,7 +565,7 @@ internal void WebDebugBridge_Publish(void)
 		for (int i = 0; i < players; i++)
 		{
 			struct Driver *k = gGT->drivers[i];
-			s32 *o = &karts[i * 17];
+			s32 *o = &karts[i * 22];
 			int tx = 0;
 			int tz = 0;
 
@@ -326,9 +590,33 @@ internal void WebDebugBridge_Publish(void)
 			o[14] = (s32)k->heldItemID;
 			o[15] = k->itemRollTimer;
 			o[16] = k->numTimesHitWeaponBox;
+			o[17] = k->invisibleTimer;
+			o[18] = k->invincibleTimer;
+			o[19] = 0;
+			o[20] = 0;
+			o[21] = 0;
+			// drivers[] is stale in the menus and while a level loads (lap 40, rank 2397) : its
+			// instSelf is a pointer to follow in a race only
+			const int racing = (sdata->Loading.stage == LOAD_IDLE) && ((gGT->gameMode1 & (MAIN_MENU | LOADING)) == 0);
+
+			for (int v = 0; racing && (k->instSelf != NULL) && (v < players); v++)
+			{
+				o[19] |= ((k->instSelf->idpp[v].instFlags & DRAW_SUCCESSFUL) != 0) << v;
+				o[20] |= (k->instSelf->idpp[v].lodIndex & 0xff) << (v * 8);
+				o[21] |= ((k->instSelf->idpp[v].instFlags & HIDE_MODEL) != 0) << v;
+			}
 		}
 		WebDebugBridge_PushMoreJS(sub != NULL, subTitle, sub ? sub->rowSelected : -1, subLabel, sub ? (int)sub->state : 0, players, karts,
 		                          menu == &D230.menuCharacterSelect ? (int)(sdata->characterSelectFlags & 0xf) : -1,
 		                          WebDebugBridge_PoolFree(&gGT->JitPools.thread), WebDebugBridge_PoolFree(&gGT->JitPools.smallStack));
+	}
+
+	if (gGT->backBuffer != NULL)
+	{
+		struct PrimMem *pm = &gGT->backBuffer->primMem;
+
+		WebDebugBridge_PushPrimJS((int)((u8 *)pm->cursor - (u8 *)pm->start), (int)((u8 *)pm->guardEnd - (u8 *)pm->start),
+		                          (int)((u8 *)pm->end - (u8 *)pm->start));
+		WebDebugBridge_Flicker(gGT);
 	}
 }

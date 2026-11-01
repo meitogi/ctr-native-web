@@ -2215,6 +2215,42 @@ void NativeRenderer_PresentVRAMRect(int displayX, int displayY, int displayW, in
 #endif
 }
 
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+// NOTE: the flicker counter (web_debug_bridge.c, debug web builds only). The
+// displayed VRAM rectangle as 16-bit PS1 pixels, read straight from the GPU
+// copy : the CPU mirror and its dirty / newer tiles are left as they are.
+// Valid until the next VRAM read-back. NULL when the rectangle is outside VRAM.
+const u16 *NativeRenderer_DebugReadDisplay(int x, int y, int w, int h)
+{
+	local_persist u16 s_display[VRAM_WIDTH * VRAM_HEIGHT];
+	GLint previousReadFramebuffer;
+	GLint previousPackRowLength;
+	GLint previousPackAlignment;
+
+	if (x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > VRAM_WIDTH || y + h > VRAM_HEIGHT)
+	{
+		return NULL;
+	}
+
+	NativeRenderer_UpdateVRAM();
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previousReadFramebuffer);
+	glGetIntegerv(GL_PACK_ROW_LENGTH, &previousPackRowLength);
+	glGetIntegerv(GL_PACK_ALIGNMENT, &previousPackAlignment);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_glVramFramebuffer);
+	glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, s_vramReadbackRGBA);
+	for (int i = 0; i < w * h; i++)
+	{
+		s_display[i] = (u16)(s_vramReadbackRGBA[i * 4] | (s_vramReadbackRGBA[i * 4 + 1] << 8));
+	}
+	glPixelStorei(GL_PACK_ROW_LENGTH, previousPackRowLength);
+	glPixelStorei(GL_PACK_ALIGNMENT, previousPackAlignment);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)previousReadFramebuffer);
+	return s_display;
+}
+#endif
+
 void NativeRenderer_PresentVRAMDisplay(void)
 {
 	// NOTE(aalhendi): ctr-native local divergence. Retail presents this boot
