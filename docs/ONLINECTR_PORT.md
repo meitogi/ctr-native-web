@@ -860,15 +860,15 @@ the relay (WebSocket). These answer the open risks:
 
 ### Measured limits for session 11
 
-- **Relay rate.** `ctr-relay` allows 120 messages/s per socket by default
-  (`RELAY_RATE`). It drops the excess, closing only after 240 drops in a row,
-  and that drop can hit reliable control messages too.
-  - At 30 fps, a host whose guests are all on the relay sends
-    (N − 1)² × 30 `SG_RACEDATA` per second: 120/s with 3 players, 1470/s
-    with 8.
-  - Three players are at the default limit. More players on the WebSocket
-    path need a higher `RELAY_RATE` on that relay, or fewer, coalesced
-    sends.
+Session 9's notes, kept as they were measured then ; session 11 re-measured them on the
+one build of session 14 and changed what follows (« Session 11 findings » at the end).
+
+- **Relay rate.** `ctr-relay` allowed 120 messages/s per socket by default
+  (`RELAY_RATE`) and dropped the excess, reliable control messages included.
+  Session 9 counted (N − 1)² × 30 `SG_RACEDATA` per second at the host ; the
+  server also echoes each kart state to its sender (upstream's broadcast), so it
+  was N × (N − 1) × 30 : already 172/s with 3 players. Session 11 : coalesced
+  sends and a 300/s default (below).
 - **Backlog.** The headless clients run at about 500 frames/s. At that rate,
   the WebSocket path (sealed one message at a time) queued seconds of kart
   states ahead of a weapon message. At the game's 30 fps it keeps up. A
@@ -1134,3 +1134,65 @@ from it (a hash), so the relay still never sees the secret ; the link is
 defaults. The relay URL and key come from the page's settings (the first link
 received, or the site's defaults). Joining by code : a field on the boot
 screen and in the panel ; a guest without game data lands in Share.
+
+## Session 11 findings
+
+Hardening of our own Online mode (session 11 ; smoothing, rejoin and the end-of-race
+timeout are session 11b's). Measured on two agent browsers with the test-only impairment
+shim (`web/net/test/impair.js`) and the debug build's remote-kart counter (`window.__ctr.net`,
+`platform/web_debug_bridge.c`), and in node with wasm clients through a real relay
+(`web/online/test/relay-load.test.mjs`). Nothing here changes the wire : no new `CG_*` /
+`SG_*`, `VERSION` 1021, every OnlineCTR payload still reaches the other side's bridge on
+its own ; `sv_core.c` is unchanged.
+
+| Item | Before | After |
+|---|---|---|
+| 4 players, all guests on the relay | 126 of 144 weapons lost, host 352 msg/s | 0 lost, host 86 msg/s |
+| 8 players on the relay | the race never starts (`SG_STARTRACE` dropped) | 0 lost, host 203 msg/s |
+| A guest's page goes silent (link left open) | not noticed after 45 s (P2P and WS) | dropped after 5.1 s, the race goes on |
+| The host leaves | the guest on its title, no word | « The host left the room. Your game is back to solo. » within ~2 s |
+| The host on its pause menu | the room frozen : 0 kart states | the guests keep ~30 kart states / s |
+| The host's tab hidden (agent browser, no throttling) | 24–30 / s | unchanged |
+
+**Relay rate (`web/net/transport.js`, `relay/relay.js`).** The WebSocket link coalesces what
+it is given within one JS task — the host's server fans every kart state out to every guest
+in one game frame — into one sealed relay message, split again on the other side before any
+`message` event. Only towards a peer that announced it reads batches (a bit in its `join`
+frame), so an older page still gets one payload per message. This is our own framing inside
+the sealed envelope : the relay forwards ciphertext as before, and the « one payload per
+transport message » rule of D5 is about what reaches the bridge, which session 10's gateway
+sees as ENet payloads. A relay message carrying only unreliable payloads is flagged `lossy`
+(one bit the relay can see) : under load the relay drops those, and lets anything else borrow
+one more burst before closing the socket with 4429, which the page reports. Defaults
+300 / s, burst 600 : N players on the relay cost the host (N − 1) × 30 messages / s, 210 with
+8 (TEST-PLAN-9 row 3, session 23).
+
+**A vanished peer (`web/online/net.js`, `platform/web_online_transport.c`).** Upstream drops a
+silent ENet peer after `enet_peer_timeout` : 2 s from connect, 5 s once in a room
+(`sv_core.c` `SetTimeout`). The web adapter now implements `SvCoreHost.setTimeout` : the page
+closes a guest link silent that long, which is its `DISCONNECTED`, as upstream. Links send a
+keepalive (`ctl` text on WebRTC, a sealed `alive` frame on the relay) whenever they have sent
+nothing for 500 ms ; ICE consent and the relay's own pings sit below that layer and kept a
+frozen peer « alive » before. A guest gives its host 5 s.
+
+**The host leaves (`web/online/page.js`).** A guest's game already left the room on its
+bridge's `DISCONNECTED` (`thread.c`, back to the title). The page now says why — the host is no
+longer on the meeting point (« left ») or still is (« connection lost ») — and closes its room.
+No host migration (star topology, the server is in the host's wasm).
+
+**The host's server while the host is out of the race (`web_online_transport.c`,
+`native_platform.c`, `native_online_loopback.c`).** Session 9 serviced the server from the
+bridge only, which the pause menu stops calling. `WebOnline_FrameEnd()`, at the start of
+`Platform_EndScene` (web ON builds), services it when the bridge did not that frame — still
+from the game loop (D6). The loopback queue to the host's own client, which nobody drains
+meanwhile, drops its oldest kart state when full, never a reliable message
+(`tests/online/loopback_test.c`). Settings over the game only blocks local input : the game,
+and so the server, keep running. A hidden tab's loop wakes on the audio clock (session 18) :
+~23 server ticks / s.
+
+**Relay `Origin` (`RELAY_ORIGINS`).** Opt-in, empty by default : a browser-only fence, the key
+gates the relay.
+
+**Still open** (rows of their own) : remote-kart smoothing, rejoin at the next lobby and an
+end-of-race timeout (11b) ; ICE restart ; a second STUN server — an unreachable STUN server
+stalls ICE gathering past 12 s in Chrome, the 3 s cap of `webrtc.js` bounds it.
