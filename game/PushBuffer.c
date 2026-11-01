@@ -178,6 +178,14 @@ void PushBuffer_SetDrawEnv_DecalMP(void *ot, struct DB *backBuffer, RECT *viewpo
 	newDrawEnv.b0 = b0;
 	newDrawEnv.isbg = isbg;
 	newDrawEnv.dtd = dtd;
+#ifdef CTR_NATIVE
+	// NOTE: ctr-native-web (session 22). The multiplayer impostors (DecalMP_03) and the 2P–4P HUD
+	// fruit render into a VRAM atlas off the frame, then sample it as sprites. The copied frame
+	// env carries dfe=1, which the native GPU reads as « draw on screen » (DrawSplit) : the draw
+	// went to the frame's render target scissored outside it, the atlas stayed black, distant
+	// karts and the fruit vanished in split screen. dfe=0 sends it off-screen, into VRAM.
+	newDrawEnv.dfe = 0;
+#endif
 
 	prim = NULL;
 	if (primMem->cursor <= primMem->guardEnd)
