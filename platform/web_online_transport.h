@@ -20,4 +20,9 @@ extern const OnlineTransport WebOnline_Transport;
 // connect(), which hands the bridge the page's player name, keeps it.
 void WebOnline_SetBridgeTransport(const OnlineTransport *t);
 
+// Once per drawn frame (Platform_EndScene) : services the host's server when
+// the bridge did not this frame — the host on the pause menu, out of the
+// driver stages that call the bridge — so the guests' room never freezes.
+void WebOnline_FrameEnd(void);
+
 #endif

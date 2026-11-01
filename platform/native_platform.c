@@ -365,6 +365,12 @@ void Platform_EndScene(void)
 	NativePerf_BeginScope(NATIVE_PERF_BUCKET_PLATFORM_END_SCENE);
 	s_platformBeginScene = 0;
 
+#if defined(__EMSCRIPTEN__) && defined(USE_ONLINE)
+	void WebOnline_FrameEnd(void); // platform/web_online_transport.h
+	// the host's server, every frame the game draws (paused or not) : web_online_transport.c
+	WebOnline_FrameEnd();
+#endif
+
 	NativeRenderer_EndScene();
 
 	if (s_pinnedVramDisplayFrames > 0)

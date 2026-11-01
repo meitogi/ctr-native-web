@@ -226,3 +226,55 @@ test('stats : messages counted by OnlineCTR type, both ways', async () => {
   await tick();
   assert.deepEqual([net.stats.sent[6], hostNet.stats.received[6], hostNet.stats.sent[8], net.stats.received[8]], [1, 1, 1, 1]);
 });
+
+test('host : a guest silent past the core\'s timeout is closed and reported DISCONNECTED (ENet\'s peer timeout)', async () => {
+  const fake = fakeNetwork();
+  const hostNet = createOnlineNet();
+  hostNet.host(fake.hostRoom('A'));
+  const net = createOnlineNet();
+  net.guest(fake.guestRoom('B'));
+  net.connect();
+  await tick();
+  const [connected] = drain(hostNet);
+  const link = hostNet.links[connected.peer];
+  hostNet.setTimeout(connected.peer, 2000);
+  link.lastSeen = performance.now() - 1000;
+  await tick(400);
+  assert.equal(link.closed, false, 'within its timeout : kept');
+  link.lastSeen = performance.now() - 2500;
+  await tick(400);
+  assert.equal(link.closed, true);
+  assert.deepEqual(drain(hostNet), [{ peer: connected.peer, event: EVENT.DISCONNECTED }]);
+  assert.equal(hostNet.timedOut, 1);
+});
+
+test('guest : a host silent past HOST_TIMEOUT_MS is DISCONNECTED and onHostLost is called', async () => {
+  const fake = fakeNetwork();
+  createOnlineNet().host(fake.hostRoom('A'));
+  const net = createOnlineNet();
+  net.guest(fake.guestRoom('B'));
+  let lost = 0;
+  net.onHostLost = () => lost++;
+  net.connect();
+  await tick();
+  drain(net);
+  net.hostLink.lastSeen = performance.now() - 6000;
+  await tick(400);
+  assert.equal(net.hostLink, null);
+  assert.deepEqual(drain(net), [{ peer: -1, event: EVENT.DISCONNECTED }]);
+  assert.equal(lost, 1);
+});
+
+test('guest : its own disconnect is not a lost host', async () => {
+  const fake = fakeNetwork();
+  createOnlineNet().host(fake.hostRoom('A'));
+  const net = createOnlineNet();
+  net.guest(fake.guestRoom('B'));
+  let lost = 0;
+  net.onHostLost = () => lost++;
+  net.connect();
+  await tick();
+  net.disconnect();
+  await tick(50);
+  assert.equal(lost, 0);
+});

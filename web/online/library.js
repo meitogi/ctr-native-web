@@ -83,6 +83,8 @@ addToLibrary({
 
   ctr_web_online_kick: (peer) => { Module.ctrOnlineNet?.kick(peer); },
 
+  ctr_web_online_timeout: (peer, ms) => { Module.ctrOnlineNet?.setTimeout?.(peer, ms); },
+
   // Next queued event : its payload into buf, info = [peer, event, reliable, key low,
   // key high] ; returns the payload length, or -1 when the queue is empty.
   ctr_web_online_poll: (buf, cap, info) => {

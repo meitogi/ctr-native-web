@@ -95,6 +95,9 @@ const STRINGS = {
     lobby: ['', 'In the host\'s menus', 'Starting the race', 'Racing'],
     inRoom: (list) => `In the room : ${list}`,
     noPicture: 'No direct path to the host : your pad plays, the host\'s screen is not shown.',
+    hostLeft: 'The host left the room.',
+    hostLost: 'Connection to the host lost.',
+    backToSolo: 'Your game is back to solo.',
     paths: { 'direct-ipv6': 'direct (IPv6)', 'direct-lan': 'direct (local network)', 'direct-nat': 'direct (through NAT)', relay: 'via the relay' },
     meets: { relay: 'our relay', mqtt: 'public brokers', paste: 'copy-paste' },
     states: ['starting', 'server menu', 'room list', 'version error', 'joining', 'track choice', 'waiting for the track', 'character choice', 'waiting for the others', 'loading', 'start line', 'racing', 'results'],
@@ -165,6 +168,9 @@ const STRINGS = {
     lobby: ['', 'Dans les menus de l\'hôte', 'Lancement de la course', 'Course'],
     inRoom: (list) => `Dans la partie : ${list}`,
     noPicture: 'Pas de chemin direct vers l\'hôte : ta manette joue, l\'écran de l\'hôte n\'est pas affiché.',
+    hostLeft: 'L\'hôte a quitté la partie.',
+    hostLost: 'Connexion à l\'hôte perdue.',
+    backToSolo: 'Ton jeu repasse en solo.',
     paths: { 'direct-ipv6': 'en direct (IPv6)', 'direct-lan': 'en direct (réseau local)', 'direct-nat': 'en direct (à travers le NAT)', relay: 'via le relais' },
     meets: { relay: 'notre relais', mqtt: 'les serveurs publics', paste: 'copier-coller' },
     states: ['démarrage', 'menu des serveurs', 'liste des salles', 'erreur de version', 'arrivée', 'choix du circuit', 'attente du circuit', 'choix du perso', 'attente des autres', 'chargement', 'ligne de départ', 'course', 'résultats'],
@@ -448,6 +454,23 @@ export function attach(Module) {
     }
     render();
   }
+
+  // The link to the host closed or went silent past its timeout (web/online/net.js) : the game
+  // already left the room (its bridge's DISCONNECTED, game/OnlineCTR/thread.c : back to the
+  // title, solo). Say why — the host is no longer on the meeting point, or we lost it — and
+  // close the page's room so nothing waits on it.
+  net.onHostLost = () => {
+    const room = net.room;
+    setTimeout(() => {
+      if (net.role !== 'guest' || net.room !== room) return;
+      const hostThere = room.signaling?.peers?.some((p) => p.kind === 'host');
+      const why = hostThere ? T.hostLost : T.hostLeft;
+      ui?.toast(why, T.backToSolo);
+      leave();
+      error = `${why} ${T.backToSolo}`;
+      render();
+    }, 1000); // the meeting point's peer list catches up with a host that just left
+  };
 
   // The host's screen and our pad ride the game's own link to the host (web/share/guest.js) ;
   // ?bot : a scripted guest (web/online/bot.sh) asks a debug host for its kart as Share's bot does.

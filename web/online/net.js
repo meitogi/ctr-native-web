@@ -8,6 +8,11 @@
 // Guest : one link to the room's host, `peer` -1. Host : one int peer id per guest link for
 // the server core (sv_core.c), never the loopback id the host's own client uses ; the address
 // key that replaces upstream's same-IP-and-port check is a hash of the guest's id in the room.
+//
+// Timeouts, as ENet's : the server core sets each guest's (sv_core.c SetTimeout : 2 s on
+// connect, 5 s once in a room, upstream's enet_peer_timeout values), a guest gives its host
+// HOST_TIMEOUT_MS. A link silent that long (no game message and no keepalive, web/net/transport.js)
+// is closed here, which is its DISCONNECTED : a vanished peer, not only a closed one.
 
 /** enum OnlineTransportEvent (platform/native_online_transport.h) */
 export const EVENT = { DATA: 1, CONNECTED: 2, DISCONNECTED: 3 };
@@ -32,6 +37,10 @@ const tagged = (bytes) => {
 };
 const untagged = (bytes) => (bytes.length && bytes[0] === ONLINE_TAG ? bytes.subarray(1) : null);
 
+/** A guest's limit on its host's silence (ENet's client side) ; the host's are set by the core. */
+export const HOST_TIMEOUT_MS = 5000;
+const CHECK_MS = 250;
+
 /** FNV-1a 64 of a room peer id, as [low, high] unsigned 32-bit halves. */
 export function addressKey(id) {
   let h = 0xcbf29ce484222325n;
@@ -55,16 +64,38 @@ export function createOnlineNet({ name = 'Player' } = {}) {
     queue: [],
     /** host : peer id → link */
     links: Object.create(null),
+    /** host : peer id → ms of silence before its link is dropped (set by the server core) */
+    timeouts: Object.create(null),
     /** guest : the link to the host, its pending connect, the last connect error */
     hostLink: null,
     pending: null,
     lastError: null,
+    /** guest : called when the link to the host closed or timed out (not by disconnect()) */
+    onHostLost: null,
     /** messages by OnlineCTR type (low nibble of the first byte), for the debug getter */
     stats: { sent: {}, received: {} },
   };
   let attached = false; // guest : the game is waiting for this connect
 
   const push = (entry) => { net.queue.push(entry); };
+
+  // Silence past a link's timeout closes it ; its 'close' handler below reports DISCONNECTED.
+  const silent = (link, ms) => ms > 0 && link.lastSeen !== undefined && !link.closed && performance.now() - link.lastSeen > ms;
+  const check = setInterval(() => {
+    for (const peer in net.links) {
+      const link = net.links[peer];
+      if (silent(link, net.timeouts[peer])) {
+        net.timedOut++;
+        link.close();
+      }
+    }
+    if (net.hostLink && silent(net.hostLink, HOST_TIMEOUT_MS)) {
+      net.timedOut++;
+      net.hostLink.close();
+    }
+  }, CHECK_MS);
+  check.unref?.();
+  net.timedOut = 0;
   const count = (table, bytes) => { const t = bytes[0] & 0xf; table[t] = (table[t] ?? 0) + 1; };
 
   // ---- page side ----
@@ -88,6 +119,7 @@ export function createOnlineNet({ name = 'Player' } = {}) {
       link.on('close', () => {
         if (net.links[peer] !== link) return; // kicked : the core already forgot it
         delete net.links[peer];
+        delete net.timeouts[peer];
         push({ peer, event: EVENT.DISCONNECTED });
       });
     });
@@ -123,9 +155,10 @@ export function createOnlineNet({ name = 'Player' } = {}) {
         push({ peer: -1, event: EVENT.DATA, bytes });
       });
       link.on('close', () => {
-        if (net.hostLink !== link) return;
+        if (net.hostLink !== link) return; // our own disconnect
         net.hostLink = null;
         if (attached) push({ peer: -1, event: EVENT.DISCONNECTED });
+        net.onHostLost?.();
       });
       if (attached) push({ peer: -1, event: EVENT.CONNECTED });
     }, (error) => {
@@ -181,7 +214,13 @@ export function createOnlineNet({ name = 'Player' } = {}) {
   net.kick = (peer) => {
     const link = net.links[peer];
     delete net.links[peer];
+    delete net.timeouts[peer];
     link?.close();
+  };
+
+  /** Host : the core's enet_peer_timeout for that guest. */
+  net.setTimeout = (peer, ms) => {
+    if (net.links[peer]) net.timeouts[peer] = ms;
   };
 
   return net;

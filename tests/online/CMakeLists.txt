@@ -58,7 +58,8 @@ target_compile_options(ctr_srv_upstream PRIVATE
 target_link_libraries(ctr_srv_upstream enet)
 
 # D4 — sv_core.c behind ENet
-set(SV_CORE ${ROOT}/platform/online_server/sv_core.c ${ROOT}/platform/online_server/sv_enet.c)
+set(SV_CORE_ONLY ${ROOT}/platform/online_server/sv_core.c)
+set(SV_CORE ${SV_CORE_ONLY} ${ROOT}/platform/online_server/sv_enet.c)
 add_executable(ctr_srv_core ${SV_CORE} ${ROOT}/platform/online_server/sv_enet_main.c)
 target_compile_options(ctr_srv_core PRIVATE -Wall -Wextra)
 target_link_libraries(ctr_srv_core enet)
@@ -73,6 +74,11 @@ add_executable(online_test
 target_compile_definitions(online_test PRIVATE NATIVE_ONLINE_HAS_ENET _GNU_SOURCE)
 target_compile_options(online_test PRIVATE -Wall -Wextra)
 target_link_libraries(online_test enet)
+
+# the loopback queue when the host's client does not drain it (session 11)
+add_executable(online_loopback_test loopback_test.c ${ROOT}/platform/native_online_loopback.c ${SV_CORE_ONLY})
+target_compile_options(online_loopback_test PRIVATE -Wall -Wextra)
+add_test(NAME online_loopback_full COMMAND online_loopback_test)
 
 set(TRACES ${CMAKE_BINARY_DIR}/traces)
 add_test(NAME online_a2_a3_upstream_server

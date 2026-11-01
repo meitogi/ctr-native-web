@@ -30,11 +30,33 @@ int NativeOnlineLoopback_LastReceivedReliable(void)
 	return lastReceivedReliable;
 }
 
+// A full queue (the host's client not draining it : paused while the web
+// host's server keeps serving the guests) makes room by dropping its oldest
+// unreliable entry, a kart state, never a reliable message.
+static int EvictOldestUnreliable(void)
+{
+	for (int k = 0; k < queueCount; k++)
+	{
+		int i = (queueHead + k) % LOOPBACK_QUEUE;
+
+		if (queue[i].event != ONLINE_EVENT_DATA || queue[i].reliable)
+			continue;
+		for (; k + 1 < queueCount; k++)
+		{
+			int to = (queueHead + k) % LOOPBACK_QUEUE;
+			queue[to] = queue[(to + 1) % LOOPBACK_QUEUE];
+		}
+		queueCount--;
+		return 1;
+	}
+	return 0;
+}
+
 static void Push(int event, const void *buf, int len, int reliable)
 {
 	int i;
 
-	if (queueCount == LOOPBACK_QUEUE)
+	if (queueCount == LOOPBACK_QUEUE && !EvictOldestUnreliable())
 		return;
 
 	if (len > LOOPBACK_MAX_PACKET)

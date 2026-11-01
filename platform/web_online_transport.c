@@ -37,6 +37,7 @@ extern int ctr_web_online_connect(void);
 extern void ctr_web_online_disconnect(void);
 extern void ctr_web_online_send(int peer, const void *buf, int len, int reliable);
 extern void ctr_web_online_kick(int peer);
+extern void ctr_web_online_timeout(int peer, int ms);
 // info: peer, event, reliable, address key low, address key high
 extern int ctr_web_online_poll(void *buf, int cap, int *info);
 // the page's command queue (native_online.h NativeOnlineControl), arg out
@@ -46,8 +47,8 @@ static const OnlineTransport *active;
 static const OnlineTransport *bridgeTransport = &WebOnline_Transport;
 static int boolHost;
 static int boolServerStarted;
-static int boolServicedOnce;
-static unsigned int servicedFrame;
+static unsigned int drawnFrame;    // frames ended (WebOnline_FrameEnd)
+static unsigned int servicedFrame; // the drawnFrame the server was last serviced in, + 1
 static unsigned int sampledFrame;
 
 // For the page's debug getter, sampled at the first poll of each bridge frame,
@@ -90,28 +91,32 @@ static void WebHost_Kick(int peerId)
 	ctr_web_online_kick(peerId);
 }
 
-// No setTimeout: a dead guest is its link closing (WebRTC connection
-// failed, WebSocket bye or the relay's peer list), not an ENet idle timer.
+// ENet's peer timeout: the page closes a guest's link once it has been silent
+// that long (its keepalives included), which is its DISCONNECTED.
+static void WebHost_SetTimeout(int peerId, int ms)
+{
+	ctr_web_online_timeout(peerId, ms);
+}
+
 static const SvCoreHost webCoreHost = {
 	WebHost_Send,
 	WebHost_Kick,
-	NULL,
+	WebHost_SetTimeout,
 	NativeOnlineGame_Log,
 };
 
-// The guests' events into the core, then one tick ; once per bridge frame
-// (D4), whichever poll() of that frame comes first.
+// The guests' events into the core, then one tick ; once per drawn frame
+// (D4) : the bridge's first poll() of the frame, else WebOnline_FrameEnd when
+// the bridge did not run (paused). D6 : called from the game loop only.
 static void WebHost_Service(void)
 {
 	unsigned char packet[WEB_ONLINE_MAX_PACKET];
-	unsigned int frame = NativeOnline_FrameCount();
 	int info[5];
 	int len;
 
-	if (boolServicedOnce && frame == servicedFrame)
+	if (servicedFrame == drawnFrame + 1)
 		return;
-	boolServicedOnce = 1;
-	servicedFrame = frame;
+	servicedFrame = drawnFrame + 1;
 
 	while ((len = ctr_web_online_poll(packet, sizeof(packet), info)) >= 0)
 	{
@@ -238,6 +243,13 @@ const OnlineTransport WebOnline_Transport = {
 	Web_Poll,
 	Web_Disconnect,
 };
+
+void WebOnline_FrameEnd(void)
+{
+	if (boolHost && boolServerStarted && active)
+		WebHost_Service();
+	drawnFrame++;
+}
 
 void WebOnline_SetBridgeTransport(const OnlineTransport *t)
 {

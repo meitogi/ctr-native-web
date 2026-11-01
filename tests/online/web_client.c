@@ -176,6 +176,7 @@ int main(void)
 
 		NativeOnline_Frame();
 		StubGame_Frame();
+		WebOnline_FrameEnd(); // the game's Platform_EndScene
 		Publish();
 
 		emscripten_sleep(webtest_frame_ms());
