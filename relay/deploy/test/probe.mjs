@@ -43,7 +43,7 @@ const waitFor = async (pred, ms) => {
 };
 
 // The proxy picks the relay up a moment after it is healthy : wait for the route first.
-const healthUrl = url.replace(/^wss:/, 'https:') + '/healthz';
+const healthUrl = url.replace(/^ws(s?):/, 'http$1:') + '/healthz'; // ws:// too : a relay probed without its proxy
 let routed = false;
 for (const end = Date.now() + 30_000; !routed && Date.now() < end;) {
   routed = (await fetch(healthUrl).catch(() => ({ status: 0 }))).status === 200;

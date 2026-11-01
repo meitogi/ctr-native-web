@@ -192,21 +192,85 @@ describe('limits', () => {
     await relay.close();
   });
 
-  test('rate limit : the burst passes, the excess is dropped, sustained flooding closes 4429', async () => {
-    const relay = await createRelay({ port: 0, host: '127.0.0.1', log: quiet, rate: 10, burst: 20 });
+  test('rate limit : lossy data over the burst is dropped, sustained lossy flooding closes 4429', async () => {
+    const relay = await createRelay({ port: 0, host: '127.0.0.1', log: quiet, rate: 10, burst: 20, stats: true });
     const url = `ws://127.0.0.1:${relay.port}`;
     const a = await join(url, { id: 'fl-a', room: 'fl' }); // the hello took one token
     const b = await join(url, { id: 'fl-b', room: 'fl' });
     let received = 0;
     b.ws.on('message', (raw) => { if (JSON.parse(raw).type === 'data') received++; });
-    for (let i = 0; i < 30; i++) a.send({ type: 'data', to: 'fl-b', data: 'AA' });
+    for (let i = 0; i < 30; i++) a.send({ type: 'data', to: 'fl-b', data: 'AA', lossy: true });
     await new Promise((r) => setTimeout(r, 300));
     assert.ok(received >= 19 && received <= 23, `received ${received} of 30`);
     assert.equal(a.ws.readyState, a.ws.OPEN, 'a short excess only drops');
-    for (let i = 0; i < 40; i++) a.send({ type: 'data', to: 'fl-b', data: 'AA' });
+    assert.ok(relay.stats().droppedLossy >= 7, JSON.stringify(relay.stats()));
+    for (let i = 0; i < 40; i++) a.send({ type: 'data', to: 'fl-b', data: 'AA', lossy: true });
     assert.equal(await a.closed, CLOSE.rate);
+    assert.equal(relay.stats().closedRate, 1);
     b.close();
     await relay.close();
+  });
+
+  test('rate limit : a reliable message is never dropped — it borrows one burst, then the socket closes 4429', async () => {
+    const relay = await createRelay({ port: 0, host: '127.0.0.1', log: quiet, rate: 10, burst: 20, stats: true });
+    const url = `ws://127.0.0.1:${relay.port}`;
+    const a = await join(url, { id: 'rl-a', room: 'rl' });
+    const b = await join(url, { id: 'rl-b', room: 'rl' });
+    let received = 0;
+    b.ws.on('message', (raw) => { if (JSON.parse(raw).type === 'data') received++; });
+    for (let i = 0; i < 35; i++) a.send({ type: 'data', to: 'rl-b', data: 'AA' });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(received, 35, 'over the bucket, under the borrow : all forwarded');
+    assert.equal(relay.stats().droppedLossy, 0);
+    for (let i = 0; i < 30; i++) a.send({ type: 'data', to: 'rl-b', data: 'AA' });
+    assert.equal(await a.closed, CLOSE.rate);
+    assert.equal(relay.stats().droppedLossy, 0, 'closed, not dropped');
+    b.close();
+    await relay.close();
+  });
+
+  test('defaults : 300 / s sustained, 600 at once (8 players on the relay, coalesced)', async () => {
+    const relay = await createRelay({ port: 0, host: '127.0.0.1', log: quiet, stats: true });
+    const url = `ws://127.0.0.1:${relay.port}`;
+    const a = await join(url, { id: 'df-a', room: 'df' });
+    const b = await join(url, { id: 'df-b', room: 'df' });
+    let received = 0;
+    b.ws.on('message', (raw) => { if (JSON.parse(raw).type === 'data') received++; });
+    for (let i = 0; i < 700; i++) a.send({ type: 'data', to: 'df-b', data: 'AA', lossy: true });
+    await new Promise((r) => setTimeout(r, 500));
+    assert.ok(received >= 595 && received <= 640, `received ${received} of 700`);
+    b.close();
+    a.close();
+    await relay.close();
+  });
+});
+
+describe('Origin allow-list and stats', () => {
+  test('RELAY_ORIGINS : a listed page connects, another site is refused, a client without Origin passes', async () => {
+    const relay = await createRelay({ port: 0, host: '127.0.0.1', log: quiet, origins: ['https://ctr.suuuper.app'], stats: true });
+    const url = `ws://127.0.0.1:${relay.port}`;
+    const ok = await join(url, { id: 'or-a', room: 'or' }, { origin: 'https://ctr.suuuper.app' });
+    const bare = await join(url, { id: 'or-b', room: 'or' });
+    const other = connect(url, { origin: 'https://evil.example' });
+    await assert.rejects(other.opened);
+    assert.equal(relay.stats().refusedOrigin, 1);
+    ok.close();
+    bare.close();
+    await relay.close();
+  });
+
+  test('/stats answers only when enabled', async () => {
+    const off = await createRelay({ port: 0, host: '127.0.0.1', log: quiet });
+    assert.equal((await fetch(`http://127.0.0.1:${off.port}/stats`)).status, 426);
+    await off.close();
+    const on = await createRelay({ port: 0, host: '127.0.0.1', log: quiet, stats: true });
+    const a = await join(`ws://127.0.0.1:${on.port}`, { id: 'st-a', room: 'st' });
+    const body = await (await fetch(`http://127.0.0.1:${on.port}/stats`)).json();
+    assert.equal(body.sockets, 1);
+    assert.equal(body.rooms, 1);
+    assert.equal(body.droppedLossy, 0);
+    a.close();
+    await on.close();
   });
 });
 

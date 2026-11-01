@@ -28,11 +28,21 @@ reverse proxy ([deploy/](deploy/), next section), or give it a certificate with
 | `TLS_CERT` / `TLS_KEY` | — | PEM files : serve `wss://` without a proxy |
 | `TLS_WATCH_MS` | `60000` | how often the TLS files are checked for a renewal ; `0` = only on `SIGHUP` |
 | `RELAY_MAX_BYTES` | `16384` | largest message ; above it the socket is closed (1009) |
-| `RELAY_RATE` / `RELAY_BURST` | `120` / `240` | messages per second per socket, sustained / at once |
+| `RELAY_RATE` / `RELAY_BURST` | `300` / `600` | messages per second per socket, sustained / at once (below) |
 | `RELAY_ROOM_MAX` | `8` | peers per room |
+| `RELAY_ORIGINS` | empty | pages allowed to connect, comma-separated `Origin`s (`https://ctr.suuuper.app`) ; empty = any. Only fences other sites' pages off a relay : a client without an `Origin` header (not a browser) still connects, the key is what gates it |
+| `RELAY_STATS` | — | `1` answers `GET /stats` with counters (sockets, rooms, forwarded, `droppedLossy`, `closedRate`, `refusedOrigin`) |
 | `RELAY_LOG_DATA` | — | `1` logs the first characters of each forwarded message (ciphertext), for debugging |
 
 `GET /healthz` answers `200 ok` (Docker healthcheck, proxy health checks).
+
+**Rate.** Each socket has a token bucket (`RELAY_RATE` per second, `RELAY_BURST` at once). A
+`data` message its sender flagged `lossy` (the browser does it for kart states only) is dropped
+when the bucket is empty. Anything else — control messages, signaling — may borrow one more
+burst, then the socket is closed with 4429 : a reliable message is never dropped silently,
+the player's page reports the close. The browser coalesces what a host sends to a guest in one
+game frame into one message, so a room of N players on the relay costs the host (N − 1) × 30
+messages per second : 210 with 8 players.
 
 A renewed certificate is picked up without a restart : when `TLS_CERT` / `TLS_KEY`
 change on disk, or on `SIGHUP` (`docker kill -s HUP ctr-relay`), the relay re-reads them

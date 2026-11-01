@@ -5,6 +5,11 @@
 // for players with no direct WebRTC path. The relay never reads what it
 // forwards : the browsers encrypt it with the room secret, which it never sees.
 //
+// Rate : a token bucket per socket. A `data` message the sender flagged `lossy`
+// (kart states only, nothing the game must receive) is dropped when the bucket is
+// empty ; anything else may borrow up to one more burst, then the socket is closed
+// 4429 — a reliable message is never dropped silently, the client reports the close.
+//
 // Run : `node relay.js` — env in README.md. Import `createRelay()` to embed it.
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFileSync, watchFile } from 'node:fs';
@@ -32,6 +37,11 @@ function validField(value, required) {
   return typeof value === 'string' && value.length <= FIELD_MAX && (!required || value.length > 0);
 }
 
+/** Forwarding counters since start (`GET /stats` with `stats: true`). */
+function newStats() {
+  return { since: new Date().toISOString(), sockets: 0, rooms: 0, forwarded: 0, droppedLossy: 0, closedRate: 0, refusedOrigin: 0 };
+}
+
 /**
  * Starts a relay and resolves once it listens.
  * @param {object} [options]
@@ -40,13 +50,18 @@ function validField(value, required) {
  * @param {string} [options.key=''] - RELAY_KEY ; empty = open relay
  * @param {{cert: string|Buffer, key: string|Buffer}} [options.tls] - serve wss:// itself
  * @param {number} [options.maxBytes=16384] - largest WebSocket message accepted
- * @param {number} [options.rate=120] - messages per second per socket, sustained
- * @param {number} [options.burst=240] - messages a socket may send at once
+ * @param {number} [options.rate=300] - messages per second per socket, sustained (8 players
+ *   on the relay : the host sends 7 × 30 coalesced messages / s, web/net/transport.js)
+ * @param {number} [options.burst=600] - messages a socket may send at once
  * @param {number} [options.roomMax=8] - peers per room (OnlineCTR MAX_NUM_PLAYERS)
  * @param {number} [options.helloTimeoutMs=5000] - a socket without a valid hello by then is closed
  * @param {boolean} [options.logData=false] - log the head of each forwarded `data` (ciphertext)
+ * @param {string[]} [options.origins=[]] - browser pages allowed to connect (their `Origin`
+ *   header) ; empty = any. A client without the header (not a browser) is not refused : the
+ *   key gates the relay, this only fences other sites' pages off it
+ * @param {boolean} [options.stats=false] - answer `GET /stats` with the counters (JSON)
  * @param {(line: string) => void} [options.log=console.log]
- * @returns {Promise<{port: number, setTls(tls: {cert, key}): void, close(): Promise<void>}>}
+ * @returns {Promise<{port: number, stats(): object, setTls(tls: {cert, key}): void, close(): Promise<void>}>}
  *   `setTls` swaps the certificate for new TLS handshakes ; open sockets keep theirs.
  */
 export function createRelay({
@@ -55,24 +70,42 @@ export function createRelay({
   key = '',
   tls,
   maxBytes = 16384,
-  rate = 120,
-  burst = 240,
+  rate = 300,
+  burst = 600,
   roomMax = 8,
   helloTimeoutMs = 5000,
   logData = false,
+  origins = [],
+  stats: statsOn = false,
   log = console.log,
 } = {}) {
   const keyDigest = key ? digest(key) : null;
   /** room name → peer id → client */
   const rooms = Object.create(null);
+  const stats = newStats();
+  const snapshot = () => {
+    let roomCount = 0;
+    for (const _ in rooms) roomCount++;
+    return { ...stats, sockets: wss.clients.size, rooms: roomCount };
+  };
 
   const onRequest = (req, res) => {
+    if (statsOn && req.url === '/stats') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(`${JSON.stringify(snapshot())}\n`);
+    }
     const ok = req.url === '/healthz';
     res.writeHead(ok ? 200 : 426, { 'content-type': 'text/plain' });
     res.end(ok ? 'ok\n' : 'ctr-relay : WebSocket only\n');
   };
   const server = tls ? createHttpsServer({ cert: tls.cert, key: tls.key }, onRequest) : createHttpServer(onRequest);
-  const wss = new WebSocketServer({ server, maxPayload: maxBytes });
+  const verifyClient = ({ origin }) => {
+    if (!origins.length || origin === undefined || origins.includes(origin)) return true;
+    stats.refusedOrigin++;
+    log(`- refused origin ${String(origin).slice(0, 80)}`);
+    return false;
+  };
+  const wss = new WebSocketServer({ server, maxPayload: maxBytes, verifyClient });
 
   function peerList(room) {
     const list = [];
@@ -133,6 +166,7 @@ export function createRelay({
       } else {
         room[to]?.send(raw);
       }
+      stats.forwarded++;
       if (logData) log(`  data ${client.id.slice(0, 6)}→${to === undefined ? '*' : String(to).slice(0, 6)} ${data.slice(0, 24)}…`);
     }
   }
@@ -159,21 +193,35 @@ export function createRelay({
 
     ws.on('pong', () => { client.alive = true; });
     ws.on('message', (raw, isBinary) => {
-      const now = Date.now();
-      client.tokens = Math.min(burst, client.tokens + ((now - client.stamp) * rate) / 1000);
-      client.stamp = now;
-      if (client.tokens < 1) {
-        if (++client.drops >= burst) ws.close(CLOSE.rate, 'rate limit');
-        return;
-      }
-      client.tokens--;
-      client.drops = 0;
-
+      if (ws.readyState !== ws.OPEN) return; // closing : what is still buffered goes nowhere
       let msg = null;
       if (!isBinary) {
         try { msg = JSON.parse(raw.toString()); } catch { /* not JSON */ }
       }
       const valid = msg !== null && typeof msg === 'object';
+
+      const now = Date.now();
+      client.tokens = Math.min(burst, client.tokens + ((now - client.stamp) * rate) / 1000);
+      client.stamp = now;
+      if (client.tokens < 1) {
+        // a lossy data message (kart states) is dropped ; sustained flooding still closes
+        if (valid && msg.type === 'data' && msg.lossy === true) {
+          stats.droppedLossy++;
+          if (++client.drops >= burst) {
+            stats.closedRate++;
+            ws.close(CLOSE.rate, 'rate limit');
+          }
+          return;
+        }
+        // anything else borrows up to one more burst, then the socket closes : never a silent drop
+        if (client.tokens < 1 - burst) {
+          stats.closedRate++;
+          return ws.close(CLOSE.rate, 'rate limit');
+        }
+      }
+      client.tokens--;
+      client.drops = 0;
+
       if (client.id === null) {
         const isHello = valid && msg.type === 'hello';
         if (keyDigest && !(isHello && keyMatches(msg.key))) return ws.close(CLOSE.key, 'key');
@@ -215,6 +263,7 @@ export function createRelay({
       log(`ctr-relay listening ${tls ? 'wss' : 'ws'}://${host}:${actual} ${keyDigest ? 'private (RELAY_KEY set)' : 'OPEN (no RELAY_KEY)'}`);
       resolve({
         port: actual,
+        stats: snapshot,
         setTls(next) {
           if (!tls) throw new Error('setTls() needs a relay started with tls');
           server.setSecureContext({ cert: next.cert, key: next.key });
@@ -245,10 +294,12 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     key: env.RELAY_KEY || '',
     tls,
     maxBytes: envInt('RELAY_MAX_BYTES', 16384),
-    rate: envInt('RELAY_RATE', 120),
-    burst: envInt('RELAY_BURST', 240),
+    rate: envInt('RELAY_RATE', 300),
+    burst: envInt('RELAY_BURST', 600),
     roomMax: envInt('RELAY_ROOM_MAX', 8),
     logData: env.RELAY_LOG_DATA === '1',
+    origins: (env.RELAY_ORIGINS || '').split(',').map((o) => o.trim()).filter(Boolean),
+    stats: env.RELAY_STATS === '1',
   }).then((relay) => {
     if (!tls) return;
     // A renewed certificate (lego, certbot…) is written over the same files : re-read them on
