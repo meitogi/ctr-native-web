@@ -27,4 +27,10 @@ enum NativeOnlineControl
 };
 void NativeOnline_SetControl(int (*poll)(int *arg));
 
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+// Debug web builds (window.__ctr.net, platform/web_debug_bridge.c) : called for
+// each SG_RACEDATA applied to a remote kart, before its pose is written.
+extern void (*NativeOnline_DebugRaceData)(int slot, int posX, int posY, int posZ);
+#endif
+
 #endif

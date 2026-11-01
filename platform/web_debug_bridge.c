@@ -64,6 +64,9 @@
 //   charSelect   while the character select is the active menu (D230.menuCharacterSelect) :
 //                { locked } = sdata->characterSelectFlags, bit n set once player n
 //                locked a character (MM_Characters.c) ; null otherwise
+//   net          ON builds, in an online race : the remote karts as this screen draws them
+//                (per-present position, SG_RACEDATA applied, corrections) — the block above
+//                WebDebugBridge_Publish, `__ctr.net.summary()` / `.reset()`
 //   track        level1->LevNavTable[0], the racing line the AI drives
 //                (BOTS.c ; magic 0xECFD, NAVHEADER_GETFRAME) : { levelID,
 //                path: [{x, y, z}] } in world units, published once per level
@@ -477,6 +480,145 @@ internal int WebDebugBridge_Target(struct GameTracker *gGT, struct Driver *d, in
 	return d->checkpoint.currentIndex;
 }
 
+#ifdef USE_ONLINE
+// ---- window.__ctr.net (session 11) : the remote karts as this screen draws them ----
+//
+// Per present and per remote driver slot (gGT->drivers[1..7]) : its position (posCurr >> 8), the
+// SG_RACEDATA applied to it since the last present (the bridge drains the network once per frame,
+// after the driver stages), and the largest correction one of them made — the received pose minus
+// where the kart's own local physics had taken it (remote karts drive themselves with the received
+// pad between packets, game/OnlineCTR/vehThread.c). Kept in globalThis.__ctrNet (window.__ctr is
+// rewritten every present) ; `__ctr.net.summary()` reduces the last frames to rates and
+// percentiles, `__ctr.net.reset()` starts a new window. Read by web/test/player/online-net.suite.mjs.
+#include <math.h>
+
+#include "native_online.h"
+
+#define WEB_NET_SLOTS 8
+static int s_netPackets[WEB_NET_SLOTS];
+static int s_netJump[WEB_NET_SLOTS];
+
+static void WebDebugBridge_NetRaceData(int slot, int posX, int posY, int posZ)
+{
+	struct Driver *d;
+	int dx, dy, dz, jump;
+
+	if ((slot <= 0) || (slot >= WEB_NET_SLOTS) || (sdata->gGT == NULL) || ((d = sdata->gGT->drivers[slot]) == NULL))
+	{
+		return;
+	}
+	dx = (posX - d->posCurr.x) >> 8;
+	dy = (posY - d->posCurr.y) >> 8;
+	dz = (posZ - d->posCurr.z) >> 8;
+	jump = (int)sqrtf((float)(dx * dx + dy * dy + dz * dz));
+	s_netPackets[slot]++;
+	if (jump > s_netJump[slot])
+	{
+		s_netJump[slot] = jump;
+	}
+}
+
+EM_JS(void, WebDebugBridge_PushNetJS, (const s32 *slots, int count), {
+	// no nullish assignment here : its two question marks and = are a C trigraph
+	const N = globalThis.__ctrNet || (globalThis.__ctrNet = (() => {
+		const KEEP = 1800; // frames per slot : one minute at 30 fps
+		const pct = (xs, p) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))]; };
+		const net = {
+			slots: {},
+			reset() { net.slots = {}; },
+			// per slot, over the frames kept since the last reset : packets per second ; frames with
+			// no packet / with several ; time between frames that got one (ms, frame-quantised) and the
+			// gaps over 100 ms ; the kart's step per frame (world units) and its change from one frame to
+			// the next (a snap is a spike) ; the corrections the packets made
+			summary() {
+				const out = {};
+				for (const slot in net.slots) {
+					const f = net.slots[slot];
+					const n = f.t.length;
+					if (n < 2) continue;
+					const secs = (f.t[n - 1] - f.t[0]) / 1000;
+					const steps = [], jerks = [], gaps = [], jumps = [];
+					let none = 0, multi = 0, packets = 0, lastPacket = -1;
+					for (let i = 0; i < n; i++) {
+						packets += f.p[i];
+						if (f.p[i] === 0) none++;
+						if (f.p[i] > 1) multi++;
+						if (f.p[i] > 0) {
+							jumps.push(f.j[i]);
+							if (lastPacket >= 0) gaps.push(f.t[i] - f.t[lastPacket]);
+							lastPacket = i;
+						}
+						if (i > 0) {
+							const step = Math.hypot(f.x[i] - f.x[i - 1], f.z[i] - f.z[i - 1]);
+							if (steps.length) jerks.push(Math.abs(step - steps[steps.length - 1]));
+							steps.push(step);
+						}
+					}
+					const r = (v) => (v == null ? null : Math.round(v * 10) / 10);
+					out[slot] = {
+						frames: n, secs: r(secs), packetsPerSec: r(packets / secs),
+						noPacketPct: r((100 * none) / n), multiPct: r((100 * multi) / n),
+						interArrival: { p50: r(pct(gaps, 50)), p95: r(pct(gaps, 95)), max: r(Math.max(0, ...gaps)) }, gapsOver100: gaps.filter((g) => g > 100).length,
+						step: { p50: r(pct(steps, 50)), p95: r(pct(steps, 95)), max: r(Math.max(0, ...steps)) },
+						jerk: { p50: r(pct(jerks, 50)), p95: r(pct(jerks, 95)), max: r(Math.max(0, ...jerks)) },
+						jump: { p50: r(pct(jumps, 50)), p95: r(pct(jumps, 95)), max: r(Math.max(0, ...jumps)) },
+					};
+				}
+				return out;
+			},
+			push(slot, t, x, z, p, j) {
+				const f = net.slots[slot] || (net.slots[slot] = { t: [], x: [], z: [], p: [], j: [] });
+				f.t.push(t); f.x.push(x); f.z.push(z); f.p.push(p); f.j.push(j);
+				if (f.t.length > KEEP) for (const k in f) f[k].shift();
+			},
+		};
+		return net;
+	})());
+	const now = performance.now();
+	for (let i = 0; i < count; i++) {
+		const [slot, x, z, p, j] = HEAP32.subarray((slots >> 2) + i * 5, (slots >> 2) + (i + 1) * 5);
+		N.push(slot, now, x, z, p, j);
+	}
+	if (globalThis.__ctr) globalThis.__ctr.net = N;
+});
+
+internal void WebDebugBridge_PublishNet(struct GameTracker *gGT)
+{
+	s32 out[WEB_NET_SLOTS * 5];
+	int count = 0;
+
+	NativeOnline_DebugRaceData = WebDebugBridge_NetRaceData;
+	if (!ONLINE_RACE)
+	{
+		memset(s_netPackets, 0, sizeof(s_netPackets));
+		memset(s_netJump, 0, sizeof(s_netJump));
+		return;
+	}
+	for (int slot = 1; slot < WEB_NET_SLOTS; slot++)
+	{
+		struct Driver *d = gGT->drivers[slot];
+		s32 *o = &out[count * 5];
+
+		if (d == NULL)
+		{
+			continue;
+		}
+		o[0] = slot;
+		o[1] = d->posCurr.x >> 8;
+		o[2] = d->posCurr.z >> 8;
+		o[3] = s_netPackets[slot];
+		o[4] = s_netJump[slot];
+		s_netPackets[slot] = 0;
+		s_netJump[slot] = 0;
+		count++;
+	}
+	if (count > 0)
+	{
+		WebDebugBridge_PushNetJS(out, count);
+	}
+}
+#endif
+
 internal void WebDebugBridge_Publish(void)
 {
 	struct GameTracker *gGT = sdata->gGT;
@@ -619,4 +761,7 @@ internal void WebDebugBridge_Publish(void)
 		                          (int)((u8 *)pm->end - (u8 *)pm->start));
 		WebDebugBridge_Flicker(gGT);
 	}
+#ifdef USE_ONLINE
+	WebDebugBridge_PublishNet(gGT);
+#endif
 }

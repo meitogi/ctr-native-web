@@ -226,10 +226,12 @@ const rates = r6 => {
 }
 
 /**
- * One 2-tab run. `host` is the suite's own tab (ctx) ; the guest gets a tab of its own,
- * driven with the same player harness.
+ * A room and its first race : `host` is the suite's own tab (ctx) ; the guest gets a tab of its
+ * own (or the second browser), driven with the same player harness. `inject` : page scripts
+ * both pages get before they load (web/net/test/impair.js). Resolves at SG_STARTRACE on both
+ * sides with { host, guest, gp, gjs, gl, hl, leave, close } — `close()` lets the guest's browser go.
  */
-async function twoTabs(ctx, mode, { itemRace = false } = {}) {
+export async function roomToRace(ctx, mode, { inject = [] } = {}) {
 	const relay = ctx.args.relay
 	const rk = ctx.args.rk ?? ''
 	if (!relay) ctx.skip('no relay : --set relay=ws://localhost:8787 --set rk=<key> (a local ctr-relay, see RUN)')
@@ -237,6 +239,7 @@ async function twoTabs(ctx, mode, { itemRace = false } = {}) {
 	const navigate = sid => url => ctx.conn.send('Page.navigate', { url }, sid)
 	const host = { name: 'host', js: ctx.js, press: ctx.press, frames: ctx.frames, navigate: navigate(ctx.sid) }
 
+	for (const source of inject) await ctx.conn.send('Page.addScriptToEvaluateOnNewDocument', { source }, ctx.sid)
 	await boot(host, `${origin}/index.html`)
 	await ctx.js(`localStorage.setItem('ctr-online.path', ${JSON.stringify(mode === 'ws' ? 'relay' : 'auto')})
 		localStorage.setItem('ctr-online.points', 'relay')
@@ -287,6 +290,7 @@ async function twoTabs(ctx, mode, { itemRace = false } = {}) {
 	await attachGuest()
 	try {
 		await gconn.send('Page.addScriptToEvaluateOnNewDocument', { source: pageScript(PLAYER) })
+		for (const source of inject) await gconn.send('Page.addScriptToEvaluateOnNewDocument', { source })
 		const gjs = expression => ctx.evaluate(gconn, gs.sid, `(async () => { ${expression} })()`)
 		const guestOwnBrowser = gc !== ctx.conn
 		const gp = makePlayer({ conn: gconn, sid: null, js: gjs, capture, dir: '', current: () => ({ id: 'guest', proofs: [] }), pressFrames: PLAYER.pressFrames })
@@ -350,7 +354,19 @@ async function twoTabs(ctx, mode, { itemRace = false } = {}) {
 		await until(guest, 'the character from the host', s => s.octr.CurrState >= ST.CHARACTER_PICK && s.lobby.phase >= PHASE.starting, 15_000)
 		for (const tab of [host, guest]) await until(tab, 'the race (SG_STARTRACE)', s => s.octr.CurrState === ST.START_RACE, 180_000, 500)
 		for (const tab of [host, guest]) if ((await online(tab)).lobby.phase !== PHASE.race) throw new Error(`${tab.name} : lobby phase ${(await online(tab)).lobby.phase} in the race`)
+		// leave(): the guest's page goes away (navigates off the game : its links close as a closed tab's do)
+		const leave = () => guest.navigate(`${origin}/preload-flag.js`)
+		return { host, guest, gp, gjs, gl, hl, leave, close: () => guestBrowser.close() }
+	} catch (e) {
+		await guestBrowser.close()
+		throw e
+	}
+}
 
+/** One 2-tab run : the room, its race, then 10 s holding Cross or the whole item race. */
+async function twoTabs(ctx, mode, { itemRace = false } = {}) {
+	const { host, guest, gp, gjs, gl, close } = await roomToRace(ctx, mode)
+	try {
 		// `return await` : a bare `return <promise>` would run the finally below — closing the
 		// guest's tab — as soon as the race starts (« Render process gone », LOG T4).
 		if (itemRace) return await itemRaceOn(ctx, { host, guest, gp, gjs })
@@ -381,7 +397,7 @@ async function twoTabs(ctx, mode, { itemRace = false } = {}) {
 		const ctr = await ctx.js('return window.__ctr ? { screen: window.__ctr.screen, fps: window.__ctr.fps } : null')
 		return `${gl.backend}/${gl.path} · moved ${JSON.stringify(m)} · R7 ${crossHeld}/${r7.length} · R6 bridge calls/s by state ${JSON.stringify(r6)} · __ctr ${JSON.stringify(ctr)}`
 	} finally {
-		await guestBrowser.close()
+		await close()
 	}
 }
 

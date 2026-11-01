@@ -44,6 +44,10 @@ static int lastLoggedState = -100;
 static int (*controlPoll)(int *arg);
 static int pendingEnter;
 
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+void (*NativeOnline_DebugRaceData)(int slot, int posX, int posY, int posZ);
+#endif
+
 static void sendToHostUnreliable(const void *data, int size)
 {
 	if (boolConnected)
@@ -301,6 +305,11 @@ static void ProcessReceiveEvent(void *packet, int len)
 				(r->kartRot1) |
 				(r->kartRot2 << 5);
 			angle &= 0xfff;
+
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+			if (NativeOnline_DebugRaceData)
+				NativeOnline_DebugRaceData(slot, ((int)r->posX) * 256, ((int)r->posY) * 256, ((int)r->posZ) * 256);
+#endif
 
 			NativeOnlineGame_SetKartPose(
 				slot,
