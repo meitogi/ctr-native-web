@@ -80,6 +80,11 @@ add_executable(online_loopback_test loopback_test.c ${ROOT}/platform/native_onli
 target_compile_options(online_loopback_test PRIVATE -Wall -Wextra)
 add_test(NAME online_loopback_full COMMAND online_loopback_test)
 
+# remote-kart smoothing : blend, snap, angle wrap (session 11b)
+add_executable(online_smooth_test smooth_test.c stub_game.c ${ROOT}/platform/native_online.c)
+target_compile_options(online_smooth_test PRIVATE -Wall -Wextra)
+add_test(NAME online_smooth COMMAND online_smooth_test)
+
 set(TRACES ${CMAKE_BINARY_DIR}/traces)
 add_test(NAME online_a2_a3_upstream_server
     COMMAND online_test --server $<TARGET_FILE:ctr_srv_upstream> --trace-dir ${TRACES}/upstream)

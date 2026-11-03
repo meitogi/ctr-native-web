@@ -66,6 +66,122 @@ static void ClientSlotPad(int slot, int held)
 	NativeOnlineGame_SetPad(slot, held, 0, 0, held);
 }
 
+// 11b smoothing (ctr-native, not upstream) : upstream writes each SG_RACEDATA pose
+// straight into the remote kart. The pose is a few ms old and the kart has driven on
+// with the received pad meanwhile (vehThread.c), so a varying delay snaps it back and
+// forth every frame (session 11 measured ~100-unit jolts under jitter). Here the
+// difference between the received pose and the kart is closed over a few frames : the
+// errors of one frame's packets are averaged, SMOOTH_DIV-th of what is left is applied
+// each frame, a difference past SMOOTH_SNAP (a respawn, a mask grab) is still a snap.
+// Nothing changes on the wire.
+#define SMOOTH_SNAP (512 * 256)   // posCurr units : 512 world units, ~8 frames at top speed
+#define SMOOTH_SNAP_ANGLE 1024    // a quarter turn, of 4096
+#define SMOOTH_DIV 4
+
+static struct
+{
+	int sumX, sumY, sumZ, sumAngle, count; // this frame's packets, as errors
+	int errX, errY, errZ, errAngle;        // still to apply
+} smooth[8];
+
+static int WrapAngle(int a)
+{
+	return ((a + 2048) & 0xfff) - 2048;
+}
+
+static void SmoothReset(void)
+{
+	memset(smooth, 0, sizeof(smooth));
+}
+
+static void SmoothReceive(int slot, int posX, int posY, int posZ, int angle)
+{
+	struct NativeOnlineKart kart;
+	int dx, dy, dz, da;
+
+	if (!NativeOnlineGame_GetKart(slot, &kart))
+		return;
+
+	dx = posX - kart.posX;
+	dy = posY - kart.posY;
+	dz = posZ - kart.posZ;
+	da = WrapAngle(angle - kart.angle);
+
+	if ((dx > SMOOTH_SNAP) || (dx < -SMOOTH_SNAP) || (dy > SMOOTH_SNAP) || (dy < -SMOOTH_SNAP) ||
+		(dz > SMOOTH_SNAP) || (dz < -SMOOTH_SNAP) || (da > SMOOTH_SNAP_ANGLE) || (da < -SMOOTH_SNAP_ANGLE))
+	{
+		memset(&smooth[slot], 0, sizeof(smooth[slot]));
+		NativeOnlineGame_SetKartPose(slot, posX, posY, posZ, angle);
+		return;
+	}
+
+	smooth[slot].sumX += dx;
+	smooth[slot].sumY += dy;
+	smooth[slot].sumZ += dz;
+	smooth[slot].sumAngle += da;
+	smooth[slot].count++;
+}
+
+// One step towards each remote kart's received pose, once per bridge frame.
+static int SmoothStep(int *err)
+{
+	int step = *err / SMOOTH_DIV;
+
+	// the last bit at once, so the error does not linger at a few units
+	if ((step == 0) || ((*err < 256) && (*err > -256)))
+		step = *err;
+	*err -= step;
+	return step;
+}
+
+static void SmoothFrame(void)
+{
+	struct NativeOnlineKart kart;
+
+	if ((octr->CurrState < GAME_WAIT_FOR_RACE) || (NativeOnlineGame_LoadingStage() != -1))
+	{
+		SmoothReset();
+		return;
+	}
+
+	for (int slot = 1; slot < 8; slot++)
+	{
+		if (smooth[slot].count)
+		{
+			// a newer measure of the same difference replaces what was left of the older one
+			int n = smooth[slot].count;
+			smooth[slot].errX = smooth[slot].sumX / n;
+			smooth[slot].errY = smooth[slot].sumY / n;
+			smooth[slot].errZ = smooth[slot].sumZ / n;
+			smooth[slot].errAngle = smooth[slot].sumAngle / n;
+			smooth[slot].sumX = smooth[slot].sumY = smooth[slot].sumZ = smooth[slot].sumAngle = 0;
+			smooth[slot].count = 0;
+		}
+
+		if (!(smooth[slot].errX | smooth[slot].errY | smooth[slot].errZ | smooth[slot].errAngle))
+			continue;
+
+		if (!NativeOnlineGame_GetKart(slot, &kart))
+		{
+			memset(&smooth[slot], 0, sizeof(smooth[slot]));
+			continue;
+		}
+
+		{
+			int sx = SmoothStep(&smooth[slot].errX);
+			int sy = SmoothStep(&smooth[slot].errY);
+			int sz = SmoothStep(&smooth[slot].errZ);
+			int sa = smooth[slot].errAngle / SMOOTH_DIV;
+
+			if ((sa == 0) || ((smooth[slot].errAngle < 8) && (smooth[slot].errAngle > -8)))
+				sa = smooth[slot].errAngle;
+			smooth[slot].errAngle -= sa;
+
+			NativeOnlineGame_SetKartPose(slot, kart.posX + sx, kart.posY + sy, kart.posZ + sz, (kart.angle + sa) & 0xfff);
+		}
+	}
+}
+
 static void ProcessReceiveEvent(void *packet, int len)
 {
 	// zero-padded copy: a short packet never reads past its end
@@ -311,7 +427,8 @@ static void ProcessReceiveEvent(void *packet, int len)
 				NativeOnline_DebugRaceData(slot, ((int)r->posX) * 256, ((int)r->posY) * 256, ((int)r->posZ) * 256);
 #endif
 
-			NativeOnlineGame_SetKartPose(
+			// 11b smoothing : the pose is blended in over the next frames (SmoothFrame)
+			SmoothReceive(
 				slot,
 				((int)r->posX) * 256,
 				((int)r->posY) * 256,
@@ -930,6 +1047,9 @@ void NativeOnline_Frame(void)
 
 	// now check for new RECV message
 	ProcessNewMessages();
+
+	// 11b smoothing
+	SmoothFrame();
 }
 
 unsigned int NativeOnline_FrameCount(void)
