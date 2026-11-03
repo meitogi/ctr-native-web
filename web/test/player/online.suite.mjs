@@ -50,7 +50,7 @@ export const meta = {
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 // game/OnlineCTR/global.h
-export const ST = { PICK_SERVER: 1, PICK_ROOM: 2, HOST_TRACK_PICK: 5, GUEST_TRACK_WAIT: 6, CHARACTER_PICK: 7, START_RACE: 11 }
+export const ST = { PICK_SERVER: 1, PICK_ROOM: 2, HOST_TRACK_PICK: 5, GUEST_TRACK_WAIT: 6, CHARACTER_PICK: 7, START_RACE: 11, END_RACE: 12 }
 // game/OnlineCTR/native_compat.h OnlineLobbyPhase (window.__ctrOnline.state().lobby.phase)
 export const PHASE = { none: 0, menus: 1, starting: 2, race: 3 }
 const CROSS = 'c' // keyboard C = Cross (platform/native_input.c)

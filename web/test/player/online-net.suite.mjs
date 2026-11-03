@@ -9,12 +9,15 @@
 //   --only NET-P2P,NET-WS,NET-HOST-LEAVES-P2P,NET-HOST-LEAVES-WS
 // 4 players on the relay need four games : node's web/online/test/relay-load.test.mjs runs them
 // (wasm clients, the real sv_core and relay).
+// Session 11b : NET-P2P / NET-WS also check the remote-kart smoothing (jitter `jerk` p95 against
+// the clean window's) ; NET-REJOIN-P2P / -WS (a guest cut off re-links by itself and joins the
+// next lobby) ; NET-END-TIMEOUT (the host's end-of-race timeout ends a guest that stands still).
 // Not a node --test file.
 
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { say } from './ctr.mjs'
-import { drive, online, roomToRace, shot } from './online.suite.mjs'
+import { ST, drive, online, roomToRace, shot, until } from './online.suite.mjs'
 
 export const meta = {
 	url: 'http://localhost:8092/index.html',
@@ -31,6 +34,18 @@ const netOf = tab => tab.js('return window.__ctr?.net?.summary() ?? null')
 const resetNet = tab => tab.js('window.__ctr?.net?.reset(); return true')
 const impair = (tab, cfg) => tab.js(`return window.__ctrImpair.set(${JSON.stringify(cfg)})`)
 const syncOf = tab => tab.js('return window.__ctrOnline?.state().octr?.windowsClientSync ?? null')
+// Every toast a page shows, kept (they fade) : injected with the shim
+const TOASTS = `(() => {
+	globalThis.__toasts = []
+	const seen = new WeakSet()
+	new MutationObserver(() => {
+		for (const t of document.querySelectorAll('.toast')) if (!seen.has(t)) { seen.add(t); __toasts.push(t.innerText.replace(/\\s+/g, ' ').trim()) }
+	}).observe(document, { childList: true, subtree: true })
+})()`
+const toastsOf = tab => tab.js('return globalThis.__toasts ?? []')
+/** 11b : the smoothing target — under jitter, the remote kart's `jerk` p95 at most twice the clean window's (a floor for a near-zero clean one). */
+export const JERK_FLOOR = 8
+const smoothOk = (clean, jitter) => clean && jitter && jitter.jerk.p95 <= Math.max(2 * clean.jerk.p95, JERK_FLOOR)
 
 /** Both karts driven for `ms`, the net counters reset at the start ; each side's view of the other. */
 async function window_(r, label, ms, { drivers = ['host', 'guest'] } = {}) {
@@ -112,10 +127,96 @@ async function measure(ctx, mode) {
 	} finally {
 		await r.close()
 	}
+	res.smoothing = {
+		hostSeesGuest: { clean: res.clean.host?.jerk, jitter: res.jitter.host?.jerk, ok: smoothOk(res.clean.host, res.jitter.host) },
+		guestSeesHost: { clean: res.clean.guest?.jerk, jitter: res.jitter.guest?.jerk, ok: smoothOk(res.clean.guest, res.jitter.guest) },
+	}
+	say(`smoothing : ${JSON.stringify(res.smoothing)}`)
 	file(ctx, `net-${mode}.json`, res)
 	if (!(res.hostPaused.guestKartStatesPerSec >= 20)) throw new Error(`host paused : the room froze (${res.hostPaused.guestKartStatesPerSec} kart states / s at the guest)`)
 	if (!(res.guestCutNoticedMs <= 6500)) throw new Error(`a silent guest noticed after ${res.guestCutNoticedMs} ms`)
 	if (res.guestToldMs == null) throw new Error(`the dropped guest was not told : ${res.guestError}`)
+	if (!(res.smoothing.hostSeesGuest.ok && res.smoothing.guestSeesHost.ok)) throw new Error(`remote karts jerk under jitter : ${JSON.stringify(res.smoothing)}`)
+	return JSON.stringify(res)
+}
+
+/**
+ * 11b : a guest cut off mid-race (every send of its page held) is dropped by the host, sees the
+ * host still on the meeting point and re-links by itself on a fresh link (a new room id) once the
+ * network is back ; the room still races, so its game waits on its title, refused by the locked
+ * room ; the host finishes, the room resets, and the guest is in the next lobby — same name,
+ * same slots.
+ */
+async function rejoin(ctx, mode) {
+	const r = { ctx, ...(await roomToRace(ctx, mode, { inject: [IMPAIR, TOASTS] })) }
+	const res = { mode, path: `${r.gl.backend}/${r.gl.path}` }
+	try {
+		const before = (await online(r.guest)).links[0]?.peerId
+		await sleep(2000)
+		await impair(r.guest, { cut: true })
+		const cutAt = Date.now()
+		res.toldMs = await timeUntil(r.guest, s => HOST_LOST.test(s.error) || s.rejoin > 0, 20_000)
+		res.toldMs = res.toldMs == null ? null : Date.now() - cutAt
+		say(`guest cut : told after ${res.toldMs} ms`)
+		await impair(r.guest, { cut: false })
+		res.relinkMs = await timeUntil(r.guest, s => s.links.length === 1 && s.links[0].peerId !== before, 90_000)
+		res.relinkMs = res.relinkMs == null ? null : Date.now() - cutAt
+		const g1 = await online(r.guest)
+		res.after = { path: g1.links[0] ? `${g1.links[0].backend}/${g1.links[0].path}` : null, peerId: g1.links[0]?.peerId, before }
+		say(`re-linked after ${res.relinkMs} ms : ${JSON.stringify(res.after)}`)
+		if (res.relinkMs == null) throw new Error(`the guest did not re-link : ${JSON.stringify({ error: g1.error, rejoin: g1.rejoin, lastError: g1.lastError })}`)
+		await until(r.guest, 'the guest waits for the race (the room refuses it)', s => s.waitingForRace, 60_000)
+		res.waitingStatus = await r.gjs("return document.getElementById('online-status')?.textContent ?? ''")
+		res.guestScreen = await r.gjs('return window.__ctr?.screen ?? null')
+		say(`the guest waits : ${res.waitingStatus.split('\n').join(' / ')} (screen ${res.guestScreen})`)
+		// the host alone in the race : to the finish line
+		res.host = await drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, Date.now() + 300_000)
+		say(`host race : ${JSON.stringify(res.host)}`)
+		await until(r.guest, 'the guest in the next lobby', s => s.octr.CurrState === ST.GUEST_TRACK_WAIT && s.octr.NumDrivers === 2 && s.octr.names[1] === 'Host' && s.share?.state === 'connected', 90_000)
+		await until(r.host, 'the host sees the guest back', s => s.octr.CurrState === ST.HOST_TRACK_PICK && s.octr.names[1] === 'Guest', 30_000)
+		const g2 = await online(r.guest)
+		res.lobby = { guestSlot: g2.share.slot, driverID: g2.octr.DriverID, names: g2.octr.names.slice(0, 2), media: g2.share.media }
+		res.toasts = await toastsOf(r.guest)
+		await shot(ctx, `rejoin-${mode}-lobby`)
+	} finally {
+		await r.close()
+	}
+	file(ctx, `net-rejoin-${mode}.json`, res)
+	say(JSON.stringify(res))
+	if (res.lobby.guestSlot !== 1 || res.lobby.driverID !== 1) throw new Error(`the guest came back in another slot : ${JSON.stringify(res.lobby)}`)
+	if (!res.toasts.some(t => /racing|course/i.test(t))) throw new Error(`the guest was not told it waits for the race : ${JSON.stringify(res.toasts)}`)
+	return JSON.stringify(res)
+}
+
+/**
+ * 11b : the host's end-of-race timeout (15 s here) — the host drives to the finish, the guest
+ * stands still on the grid ; 15 s after the host's finish the guest's page ends its race (its
+ * game sends an ordinary CG_ENDRACE), the room resets and both are back in the lobby.
+ */
+async function endTimeout(ctx, mode) {
+	const r = { ctx, ...(await roomToRace(ctx, mode, { inject: [TOASTS] })) }
+	const res = { mode, path: `${r.gl.backend}/${r.gl.path}` }
+	try {
+		await ctx.js("const e = document.getElementById('online-end-after'); e.value = '15'; e.dispatchEvent(new Event('change')); return true")
+		res.host = await drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, Date.now() + 300_000)
+		const finishedAt = Date.now()
+		say(`host race : ${JSON.stringify(res.host)}`)
+		if (!res.host.finished) throw new Error(`the host did not finish : ${JSON.stringify(res.host)}`)
+		res.guestEndedMs = await timeUntil(r.guest, s => s.octr.CurrState === ST.END_RACE, 40_000)
+		res.guestEndedMs = res.guestEndedMs == null ? null : Date.now() - finishedAt
+		res.hostEnded = (await online(r.host)).octr.numDriversEnded
+		say(`the guest's race ended ${res.guestEndedMs} ms after the host's finish ; the host counts ${res.hostEnded} finishers`)
+		await shot(ctx, `end-timeout-${mode}-results`)
+		await until(r.guest, 'the guest back in the lobby', s => s.octr.CurrState === ST.GUEST_TRACK_WAIT, 60_000)
+		await until(r.host, 'the host back in the lobby', s => s.octr.CurrState === ST.HOST_TRACK_PICK, 30_000)
+		res.toasts = { host: await toastsOf(r.host), guest: await toastsOf(r.guest) }
+	} finally {
+		await r.close()
+	}
+	file(ctx, `net-end-timeout-${mode}.json`, res)
+	say(JSON.stringify(res))
+	if (res.guestEndedMs == null || res.guestEndedMs < 13_000 || res.guestEndedMs > 25_000) throw new Error(`the guest's race ended ${res.guestEndedMs} ms after the first finish, wanted ~15 s`)
+	if (res.hostEnded !== 2) throw new Error(`the host counts ${res.hostEnded} finishers`)
 	return JSON.stringify(res)
 }
 
@@ -166,6 +267,9 @@ export default async ctx => {
 	await ctx.scenario('NET-WS', () => measure(ctx, 'ws'))
 	await ctx.scenario('NET-HOST-LEAVES-P2P', () => hostLeaves(ctx, 'auto'))
 	await ctx.scenario('NET-HOST-LEAVES-WS', () => hostLeaves(ctx, 'ws'))
+	await ctx.scenario('NET-REJOIN-P2P', () => rejoin(ctx, 'auto'))
+	await ctx.scenario('NET-REJOIN-WS', () => rejoin(ctx, 'ws'))
+	await ctx.scenario('NET-END-TIMEOUT', () => endTimeout(ctx, 'auto'))
 }
 
 export { shot }
