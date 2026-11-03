@@ -495,3 +495,21 @@ void NativeOnlineGame_SetMyCharacter(int characterID)
 {
 	OnlineLobby_SetMyCharacter(characterID);
 }
+
+// The room's end-of-race timeout (session 11b, the page's choice) : this
+// player's race ends where it stands, as a finish line crossed does
+// (PlayLevel.c : the flag, no item, the AI drives on). PlayLevel then runs
+// MainGameEnd_Initialize, OnlineEndOfRace moves to GAME_END_RACE and the
+// bridge sends an ordinary CG_ENDRACE with the time reached.
+void NativeOnlineGame_EndMyRace(void)
+{
+	struct Driver *d = sdata->gGT->drivers[0];
+
+	if (!ONLINE_RACE || (d == NULL) || ((d->actionsFlagSet & ACTION_RACE_FINISHED) != 0))
+		return;
+
+	d->actionsFlagSet |= ACTION_RACE_FINISHED;
+	d->heldItemID = HELD_ITEM_NONE;
+	d->noItemTimer = 0;
+	BOTS_Driver_Convert(d);
+}

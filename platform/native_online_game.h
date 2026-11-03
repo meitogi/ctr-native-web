@@ -52,6 +52,7 @@ void NativeOnlineGame_SyncStats(void);        // StatsUpgrade around the room's 
 int NativeOnlineGame_ExternalLobby(void);     // the lobby is outside the mod (web)
 void NativeOnlineGame_SetMode(int bootOnline, int externalLobby);
 void NativeOnlineGame_SetMyCharacter(int characterID); // a guest's pick, from the page
+void NativeOnlineGame_EndMyRace(void);        // the room's end-of-race timeout : P1 finishes now
 // The lobby state the page reads next to octr (web/online/library.js) : the
 // room flag, the lobby phase (enum OnlineLobbyPhase) and the menus' character
 // per slot at the track lock, int[8].

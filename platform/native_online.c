@@ -979,6 +979,16 @@ static void ProcessControl(void)
 				NativeOnlineGame_SetMyCharacter(arg);
 				break;
 
+			// the room's end-of-race timeout (session 11b) : the game ends this
+			// player's race, StatePC_Game_EndRace then sends its CG_ENDRACE
+			case NATIVE_ONLINE_CTL_END_RACE:
+				if (NativeOnlineGame_Active() && octr->CurrState >= GAME_WAIT_FOR_RACE && octr->CurrState < GAME_END_RACE)
+				{
+					NativeOnlineGame_Log("[OnlineCTR] Race ended by the room's timeout\n");
+					NativeOnlineGame_EndMyRace();
+				}
+				break;
+
 			default:
 				break;
 		}

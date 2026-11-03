@@ -24,6 +24,7 @@ enum NativeOnlineControl
 	NATIVE_ONLINE_CTL_ENTER,     // join the page's room (waits for the title)
 	NATIVE_ONLINE_CTL_LEAVE,     // leave the room
 	NATIVE_ONLINE_CTL_CHARACTER, // arg = this guest's character, picked on the host
+	NATIVE_ONLINE_CTL_END_RACE,  // end this player's race now (the host's end-of-race timeout)
 };
 void NativeOnline_SetControl(int (*poll)(int *arg));
 

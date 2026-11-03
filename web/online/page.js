@@ -29,11 +29,16 @@ import { openRoom } from '../net/room.js';
 import { createShareGuest } from '../share/guest.js';
 import { TAG, encodeControl, nameOf, pickPad } from '../share/protocol.js';
 import { createOnlineNet } from './net.js';
+import { END_AFTER_CHOICES, END_AFTER_DEFAULT, createEndTimer, rejoinLoop } from './rules.js';
 
 /** enum OnlineLobbyPhase (game/OnlineCTR/native_compat.h) */
 export const PHASE = { none: 0, menus: 1, starting: 2, race: 3 };
 /** enum NativeOnlineControl (platform/native_online.h) */
-export const CTL = { enter: 1, leave: 2, character: 3 };
+export const CTL = { enter: 1, leave: 2, character: 3, endRace: 4 };
+/** enum OnlineState (game/OnlineCTR/global.h), the few the page reads */
+const ST = { pickRoom: 2, assignRole: 4, waitForRace: 10, endRace: 12 };
+/** The page's one OnlineCTR room (OnlineExternal_State) ; SG_ROOMS adds 8 to a locked room's count. */
+const ROOM = 5;
 
 const DEFAULT_RELAY = 'wss://ctr-relay.suuuper.app';
 const NAME_LEN = 9; // game/OnlineCTR/global.h
@@ -98,6 +103,18 @@ const STRINGS = {
     hostLeft: 'The host left the room.',
     hostLost: 'Connection to the host lost.',
     backToSolo: 'Your game is back to solo.',
+    reconnecting: 'Reconnecting…',
+    reconnectTry: (n) => `Reconnecting to the host (try ${n})…`,
+    reconnected: 'Reconnected to the host.',
+    noReconnect: 'Could not reconnect to the host.',
+    roomRacing: 'The room is racing.',
+    nextLobby: 'You join at the next lobby, when this race ends.',
+    endAfter: 'End the race after the first finisher',
+    endAfterOff: 'never (wait for everyone)',
+    seconds: (n) => `${n} s`,
+    endIn: (n) => `The race ends in ${n} s.`,
+    endInDetail: 'A player finished : the others have that long.',
+    endedByTimeout: 'Time is up : your race is over.',
     paths: { 'direct-ipv6': 'direct (IPv6)', 'direct-lan': 'direct (local network)', 'direct-nat': 'direct (through NAT)', relay: 'via the relay' },
     meets: { relay: 'our relay', mqtt: 'public brokers', paste: 'copy-paste' },
     states: ['starting', 'server menu', 'room list', 'version error', 'joining', 'track choice', 'waiting for the track', 'character choice', 'waiting for the others', 'loading', 'start line', 'racing', 'results'],
@@ -171,6 +188,18 @@ const STRINGS = {
     hostLeft: 'L\'hôte a quitté la partie.',
     hostLost: 'Connexion à l\'hôte perdue.',
     backToSolo: 'Ton jeu repasse en solo.',
+    reconnecting: 'Reconnexion…',
+    reconnectTry: (n) => `Reconnexion à l'hôte (essai ${n})…`,
+    reconnected: 'Reconnecté à l\'hôte.',
+    noReconnect: 'Impossible de se reconnecter à l\'hôte.',
+    roomRacing: 'La partie est en pleine course.',
+    nextLobby: 'Tu la rejoins au prochain salon, à la fin de cette course.',
+    endAfter: 'Finir la course après le premier arrivé',
+    endAfterOff: 'jamais (attendre tout le monde)',
+    seconds: (n) => `${n} s`,
+    endIn: (n) => `La course se termine dans ${n} s.`,
+    endInDetail: 'Un joueur a fini : les autres ont ce temps-là.',
+    endedByTimeout: 'Temps écoulé : ta course est terminée.',
     paths: { 'direct-ipv6': 'en direct (IPv6)', 'direct-lan': 'en direct (réseau local)', 'direct-nat': 'en direct (à travers le NAT)', relay: 'via le relais' },
     meets: { relay: 'notre relais', mqtt: 'les serveurs publics', paste: 'copier-coller' },
     states: ['démarrage', 'menu des serveurs', 'liste des salles', 'erreur de version', 'arrivée', 'choix du circuit', 'attente du circuit', 'choix du perso', 'attente des autres', 'chargement', 'ligne de départ', 'course', 'résultats'],
@@ -326,12 +355,18 @@ export function attach(Module) {
   const linkBox = el('input', { type: 'text', id: 'online-link', readOnly: true });
   const copyButton = el('button', { type: 'button', id: 'online-copy', textContent: T.copy });
   const linkRow = el('div', {}, el('label', {}, T.link), el('div', { className: 'row' }, linkBox, copyButton));
+  // the end-of-race timeout (session 11b) : the host's rule, changeable any time
+  const savedEndAfter = Number(load('endAfter', String(END_AFTER_DEFAULT)));
+  const endAfter = el('select', { id: 'online-end-after' },
+    ...END_AFTER_CHOICES.map((n) => el('option', { value: String(n), textContent: n ? T.seconds(n) : T.endAfterOff, selected: n === savedEndAfter })));
+  endAfter.addEventListener('change', () => save('endAfter', endAfter.value));
   const hostBox = el('section', { id: 'online-host-box' },
     el('h3', {}, T.hostTitle),
     el('div', { className: 'help wide' }, T.meet),
     el('div', { className: 'help wide' }, T.meetHelp),
     ...meets.map((m) => m.node),
-    createButton, linkRow);
+    createButton, linkRow,
+    el('label', {}, T.endAfter, ' ', endAfter));
 
   // ---- join ----
   const joinInput = el('input', { type: 'text', id: 'online-join-link', placeholder: T.joinPlaceholder });
@@ -413,6 +448,8 @@ export function attach(Module) {
 
   /** Leaves the room : the game drops the mod, the lobby share stops, the room closes. */
   function leave() {
+    rejoinToken++;
+    rejoinTry = 0;
     Module.ctrOnlineControl?.(CTL.leave);
     globalThis.ctrShareApi?.stopOn({ keepRoom: true });
     shareHost = null;
@@ -431,6 +468,7 @@ export function attach(Module) {
 
   // A guest's room : opened at once from the page's link, and its link to the host started at
   // once ; reopened when the connection setting changes before the game is connected.
+  // Resolves once the room is open and the link started : null, or the error.
   async function guest() {
     error = '';
     codeOut = null;
@@ -448,29 +486,69 @@ export function attach(Module) {
       net.preconnect();
       setLobbyGuest(true); // before the game's ENTER is processed, the keys are the host's
       Module.ctrOnlineControl?.(CTL.enter);
-      await lobbyGuestOn(room);
+      lobbyGuestOn(room).catch(fail).finally(render);
     } catch (e) {
       fail(e);
+      render();
+      return e;
     }
     render();
+    return null;
   }
 
   // The link to the host closed or went silent past its timeout (web/online/net.js) : the game
   // already left the room (its bridge's DISCONNECTED, game/OnlineCTR/thread.c : back to the
-  // title, solo). Say why — the host is no longer on the meeting point, or we lost it — and
-  // close the page's room so nothing waits on it.
+  // title, solo). A host no longer on the meeting point left : say so and close the page's room.
+  // A host still there means we lost it (session 11b) : rejoin on a fresh link — guest() opens
+  // the room again, so a new relay id and sealer (web/net/crypto.js pins an id's first IV prefix),
+  // WebRTC else the relay as the path setting says, the same name ; the game waits on its title
+  // for the room's race to end (a locked room refuses the join, OnlineExternal_State retries).
+  let rejoinToken = 0;
+  let rejoinTry = 0; // the attempt in flight, for the status line (0 : none)
+  const hostLeft = (why) => {
+    ui?.toast(why, T.backToSolo);
+    leave();
+    error = `${why} ${T.backToSolo}`;
+    render();
+  };
   net.onHostLost = () => {
     const room = net.room;
     setTimeout(() => {
       if (net.role !== 'guest' || net.room !== room) return;
       const hostThere = room.signaling?.peers?.some((p) => p.kind === 'host');
-      const why = hostThere ? T.hostLost : T.hostLeft;
-      ui?.toast(why, T.backToSolo);
-      leave();
-      error = `${why} ${T.backToSolo}`;
-      render();
+      if (!hostThere) return hostLeft(T.hostLeft);
+      ui?.toast(T.hostLost, T.reconnecting);
+      rejoin();
     }, 1000); // the meeting point's peer list catches up with a host that just left
   };
+  async function rejoin() {
+    const token = ++rejoinToken;
+    error = `${T.hostLost} ${T.reconnecting}`;
+    render();
+    const result = await rejoinLoop({
+      cancelled: () => token !== rejoinToken,
+      onAttempt: (n) => { rejoinTry = n; render(); },
+      async attempt() {
+        const e = await guest();
+        if (e) return e.code === 'absent' ? 'gone' : 'retry';
+        const room = net.room;
+        for (let i = 0; i < 300; i++) { // 30 s : WebRTC's 5 s, then the relay
+          if (net.room !== room || token !== rejoinToken) return 'retry';
+          if (net.hostLink) return 'ok';
+          if (net.lastError) return net.lastError.code === 'absent' ? 'gone' : 'retry';
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        return 'retry';
+      },
+    });
+    if (token !== rejoinToken) return;
+    rejoinTry = 0;
+    if (result === 'ok') {
+      error = '';
+      ui?.toast(T.reconnected);
+    } else hostLeft(result === 'gone' ? T.hostLeft : T.noReconnect);
+    render();
+  }
 
   // The host's screen and our pad ride the game's own link to the host (web/share/guest.js) ;
   // ?bot : a scripted guest (web/online/bot.sh) asks a debug host for its kart as Share's bot does.
@@ -486,21 +564,66 @@ export function attach(Module) {
       },
     });
     shareGuest = g;
+    let seen = null; // each LOBBY message once
     g.on('change', () => {
       const body = g.lobby;
       if (body && body.phase === PHASE.starting && Number.isInteger(body.character)) Module.ctrOnlineControl?.(CTL.character, body.character);
+      if (body && body !== seen && body.phase === PHASE.race && lobby().phase === PHASE.race) {
+        // the host's end-of-race timeout (session 11b)
+        const st = Module.ctrOnlineOctr?.().CurrState ?? 0;
+        if (body.endIn > 0 && st < ST.endRace) ui?.toast(T.endIn(Math.round(body.endIn / 1000)), T.endInDetail);
+        if (body.endRace) endMyRace();
+      }
+      seen = body;
       render();
     });
     await g.connect();
   }
 
   // ---- the lobby, every 100 ms : what the game's phase asks of the page ----
+  // A guest's game is in the room once the server took it (a guest waiting for the room's race to
+  // end sits on its own title : no host picture over it, no pad sent into the host's race)
+  const joined = () => (Module.ctrOnlineOctr?.().CurrState ?? 0) >= ST.assignRole;
+  const inHostMenus = () => lobby().phase === PHASE.menus && joined();
   const setLobbyGuest = (on) => {
     ui?.lobby?.(on);
-    lobbyVideo.classList.toggle('hidden', !(on && shareGuest?.media && lobbyStream.getTracks().length));
+    lobbyVideo.classList.toggle('hidden', !(on && joined() && shareGuest?.media && lobbyStream.getTracks().length));
+  };
+  // guest : the game asked the room and was refused because it is racing
+  const waitingForRace = () => {
+    const o = Module.ctrOnlineOctr?.();
+    return net.role === 'guest' && lobby().active && o?.CurrState === ST.pickRoom && o.clientCount[ROOM] >= 8;
+  };
+  let toldWaiting = false;
+  const endTimer = createEndTimer();
+  // to every guest of the lobby share that listens : our framing (Share's LOBBY message), not the game's
+  const toGuests = (body) => {
+    for (const id in shareHost?.guests ?? {}) {
+      const g = shareHost.guests[id];
+      if (g.listening) g.link.send(encodeControl(TAG.lobby, body), { reliable: true });
+    }
+  };
+  // this game's race ends now, if it still runs
+  const endMyRace = () => {
+    const st = Module.ctrOnlineOctr?.().CurrState ?? 0;
+    if (st < ST.waitForRace || st >= ST.endRace) return;
+    ui?.toast(T.endedByTimeout);
+    Module.ctrOnlineControl?.(CTL.endRace);
   };
   function lobbyTick() {
     const l = lobby();
+    if (net.role === 'host') {
+      const step = endTimer.tick({ race: l.active && l.phase === PHASE.race, finished: Module.ctrOnlineOctr?.().numDriversEnded ?? 0, endAfterMs: Number(endAfter.value) * 1000, now: Date.now() });
+      if (step?.notice) {
+        const secs = Math.round(step.notice / 1000);
+        if ((Module.ctrOnlineOctr?.().CurrState ?? 0) < ST.endRace) ui?.toast(T.endIn(secs), T.endInDetail);
+        toGuests({ phase: PHASE.race, endIn: step.notice });
+      }
+      if (step?.end) {
+        toGuests({ phase: PHASE.race, endRace: true });
+        endMyRace();
+      }
+    }
     if (net.role === 'host' && shareHost) {
       // the track lock : each guest gets the character its pad locked on this screen
       if (l.active && l.phase === PHASE.starting && !startSent) {
@@ -517,7 +640,11 @@ export function attach(Module) {
       // our game ignores the local devices from the room's join to its race load (and again on
       // the title reloaded after a race) ; the pad goes to the host only while its menus run
       setLobbyGuest(l.active && l.phase !== PHASE.race);
-      if (l.active && l.phase === PHASE.menus && shareGuest?.state === 'connected') sendPad();
+      if (l.active && inHostMenus() && shareGuest?.state === 'connected') sendPad();
+      const waiting = waitingForRace();
+      if (waiting && !toldWaiting) ui?.toast(T.roomRacing, T.nextLobby);
+      if (waiting) toldWaiting = true;
+      else if (joined()) toldWaiting = false;
     }
   }
   setInterval(lobbyTick, 100);
@@ -531,12 +658,12 @@ export function attach(Module) {
   for (const type of ['keydown', 'keyup']) {
     window.addEventListener(type, (e) => {
       held[e.code] = type === 'keydown';
-      if (shareGuest?.state === 'connected' && lobby().phase === PHASE.menus) sendPad();
+      if (shareGuest?.state === 'connected' && inHostMenus()) sendPad();
     });
   }
   window.addEventListener('blur', () => { for (const k in held) held[k] = false; });
   (function padLoop() {
-    if (shareGuest?.state === 'connected' && lobby().phase === PHASE.menus) sendPad();
+    if (shareGuest?.state === 'connected' && inHostMenus()) sendPad();
     requestAnimationFrame(padLoop);
   })();
   // the lobby's sound follows the page's volume
@@ -599,7 +726,8 @@ export function attach(Module) {
     const l = lobby();
     const lines = [];
     if (net.role === 'host') lines.push(list.length ? list.map((l) => T.player(l.peer + 1, ...say(l))).join('\n') : T.waiting);
-    if (net.role === 'guest') lines.push(net.hostLink ? T.toHost(...say(list[0])) : net.pending ? T.connecting : T.notConnected);
+    if (net.role === 'guest') lines.push(net.hostLink ? T.toHost(...say(list[0])) : rejoinTry ? T.reconnectTry(rejoinTry) : net.pending ? T.connecting : T.notConnected);
+    if (waitingForRace()) lines.push(`${T.roomRacing} ${T.nextLobby}`);
     const players = net.role === 'host' ? shareHost?.players() : shareGuest?.list;
     if (players?.length) lines.push(T.inRoom(players.map((p) => `P${p.slot + 1} ${nameOf(p.slot, p.name)}`).join(' · ')));
     if (l.active && T.lobby[l.phase]) lines.push(T.lobby[l.phase]);
@@ -628,6 +756,8 @@ export function attach(Module) {
         octr: Module.ctrOnlineOctr?.() ?? null,
         karts: Module.ctrOnlineKarts?.() ?? null,
         lobby: lobby(),
+        rejoin: rejoinTry,
+        waitingForRace: waitingForRace(),
         share: net.role === 'host'
           ? { guests: shareHost ? Object.values(shareHost.guests).map((g) => ({ slot: g.slot, name: g.name, state: g.state, path: g.path, bot: !!g.bot })) : [] }
           : shareGuest ? { state: shareGuest.state, media: shareGuest.media, slot: shareGuest.slot, list: shareGuest.list, lobby: shareGuest.lobby, video: [lobbyVideo.videoWidth, lobbyVideo.videoHeight] } : null,

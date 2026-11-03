@@ -184,6 +184,7 @@ void NativeOnlineGame_SyncStats(void) {}
 int NativeOnlineGame_ExternalLobby(void) { return 0; }
 void NativeOnlineGame_SetMode(int bootOnline, int externalLobby) { (void)bootOnline; (void)externalLobby; }
 void NativeOnlineGame_SetMyCharacter(int characterID) { (void)characterID; }
+void NativeOnlineGame_EndMyRace(void) {}
 void NativeOnlineGame_LobbyPointers(int **active, int **phase, int **characters)
 {
 	static int active_ = 1, phase_, characters_[8];
