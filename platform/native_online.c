@@ -76,7 +76,7 @@ static void ClientSlotPad(int slot, int held)
 // Nothing changes on the wire.
 #define SMOOTH_SNAP (512 * 256)   // posCurr units : 512 world units, ~8 frames at top speed
 #define SMOOTH_SNAP_ANGLE 1024    // a quarter turn, of 4096
-#define SMOOTH_DIV 4
+#define SMOOTH_DIV 12             // measured : 4 and 8 left jitter jerk p95 at ~25 / ~10, 12 at ~6 (session 11b)
 
 static struct
 {
