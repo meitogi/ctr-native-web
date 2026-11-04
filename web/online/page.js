@@ -34,7 +34,7 @@ import { END_AFTER_CHOICES, END_AFTER_DEFAULT, createEndTimer, rejoinLoop } from
 /** enum OnlineLobbyPhase (game/OnlineCTR/native_compat.h) */
 export const PHASE = { none: 0, menus: 1, starting: 2, race: 3 };
 /** enum NativeOnlineControl (platform/native_online.h) */
-export const CTL = { enter: 1, leave: 2, character: 3, endRace: 4 };
+export const CTL = { enter: 1, leave: 2, character: 3, endRace: 4, endBots: 5 };
 /** enum OnlineState (game/OnlineCTR/global.h), the few the page reads */
 const ST = { pickRoom: 2, assignRole: 4, waitForRace: 10, endRace: 12 };
 /** The page's one OnlineCTR room (OnlineExternal_State) ; SG_ROOMS adds 8 to a locked room's count. */
@@ -95,7 +95,7 @@ const STRINGS = {
       '  A gamepad works as is (standard mapping). F4 moves the keyboard to the next player.',
     ],
     leave: 'Leave the room',
-    hostHint: 'Create the room and send the link. Then, in the game : ONLINE → VS or BATTLE. The others play P2–P4 on your screen ; at the track lock everyone races on their own screen.',
+    hostHint: 'Create the room and send the link. Then, in the game : ONLINE → VS, BATTLE or ARCADE (bots fill the race up to 8 karts). The others play P2–P4 on your screen ; at the track lock everyone races on their own screen.',
     guestHint: 'Once in the room, the host\'s screen shows here while it picks : press Cross to join, pick your character with your own keys or pad. The race then runs on your own screen.',
     lobby: ['', 'In the host\'s menus', 'Starting the race', 'Racing'],
     inRoom: (list) => `In the room : ${list}`,
@@ -115,6 +115,7 @@ const STRINGS = {
     endIn: (n) => `The race ends in ${n} s.`,
     endInDetail: 'A player finished : the others have that long.',
     endedByTimeout: 'Time is up : your race is over.',
+    botTakesOver: (name) => `${name || 'A player'} left : a bot finishes their race.`,
     paths: { 'direct-ipv6': 'direct (IPv6)', 'direct-lan': 'direct (local network)', 'direct-nat': 'direct (through NAT)', relay: 'via the relay' },
     meets: { relay: 'our relay', mqtt: 'public brokers', paste: 'copy-paste' },
     states: ['starting', 'server menu', 'room list', 'version error', 'joining', 'track choice', 'waiting for the track', 'character choice', 'waiting for the others', 'loading', 'start line', 'racing', 'results'],
@@ -180,7 +181,7 @@ const STRINGS = {
       '  Une manette marche telle quelle (mapping standard). F4 passe le clavier au joueur suivant.',
     ],
     leave: 'Quitter la partie',
-    hostHint: 'Crée la partie et envoie le lien. Puis, dans le jeu : ONLINE → VS ou BATTLE. Les autres jouent P2–P4 sur ton écran ; au choix du circuit, chacun court sur son propre écran.',
+    hostHint: 'Crée la partie et envoie le lien. Puis, dans le jeu : ONLINE → VS, BATTLE ou ARCADE (des bots complètent la course jusqu’à 8 karts). Les autres jouent P2–P4 sur ton écran ; au choix du circuit, chacun court sur son propre écran.',
     guestHint: 'Une fois dans la partie, l\'écran de l\'hôte s\'affiche ici pendant qu\'il choisit : appuie sur Croix pour entrer, choisis ton perso avec tes touches ou ta manette. La course tourne ensuite sur ton écran.',
     lobby: ['', 'Dans les menus de l\'hôte', 'Lancement de la course', 'Course'],
     inRoom: (list) => `Dans la partie : ${list}`,
@@ -200,6 +201,7 @@ const STRINGS = {
     endIn: (n) => `La course se termine dans ${n} s.`,
     endInDetail: 'Un joueur a fini : les autres ont ce temps-là.',
     endedByTimeout: 'Temps écoulé : ta course est terminée.',
+    botTakesOver: (name) => `${name || 'Un joueur'} est parti : un bot finit sa course.`,
     paths: { 'direct-ipv6': 'en direct (IPv6)', 'direct-lan': 'en direct (réseau local)', 'direct-nat': 'en direct (à travers le NAT)', relay: 'via le relais' },
     meets: { relay: 'notre relais', mqtt: 'les serveurs publics', paste: 'copier-coller' },
     states: ['démarrage', 'menu des serveurs', 'liste des salles', 'erreur de version', 'arrivée', 'choix du circuit', 'attente du circuit', 'choix du perso', 'attente des autres', 'chargement', 'ligne de départ', 'course', 'résultats'],
@@ -574,6 +576,7 @@ export function attach(Module) {
         const st = Module.ctrOnlineOctr?.().CurrState ?? 0;
         if (body.endIn > 0 && st < ST.endRace) ui?.toast(T.endIn(Math.round(body.endIn / 1000)), T.endInDetail);
         if (body.endRace) endMyRace();
+        if (body.takeover !== undefined) ui?.toast(T.botTakesOver(body.takeover));
       }
       seen = body;
       render();
@@ -600,6 +603,7 @@ export function attach(Module) {
   let toldWaiting = false;
   const waitingForRace = () => toldWaiting && net.role === 'guest' && !joined();
   const endTimer = createEndTimer();
+  let knownBots = 0; // host : the bots' slots at the race's start, then the takeovers told
   // to every guest of the lobby share that listens : our framing (Share's LOBBY message), not the game's
   const toGuests = (body) => {
     for (const id in shareHost?.guests ?? {}) {
@@ -617,7 +621,9 @@ export function attach(Module) {
   function lobbyTick() {
     const l = lobby();
     if (net.role === 'host') {
-      const step = endTimer.tick({ race: l.active && l.phase === PHASE.race, finished: Module.ctrOnlineOctr?.().numDriversEnded ?? 0, endAfterMs: Number(endAfter.value) * 1000, now: Date.now() });
+      // the players who finished : the host's bots (session 23) never start the clock
+      const finished = (Module.ctrOnlineOctr?.().raceStats ?? []).filter((x) => !((l.hostBots ?? 0) >> x.slot & 1)).length;
+      const step = endTimer.tick({ race: l.active && l.phase === PHASE.race, finished, endAfterMs: Number(endAfter.value) * 1000, now: Date.now() });
       if (step?.notice) {
         const secs = Math.round(step.notice / 1000);
         if ((Module.ctrOnlineOctr?.().CurrState ?? 0) < ST.endRace) ui?.toast(T.endIn(secs), T.endInDetail);
@@ -626,6 +632,19 @@ export function attach(Module) {
       if (step?.end) {
         toGuests({ phase: PHASE.race, endRace: true });
         endMyRace();
+        Module.ctrOnlineControl?.(CTL.endBots);
+      }
+      // ONLINE > ARCADE : a slot the host's AI took over mid-race was a leaver's (D11.6)
+      const bots = l.hostBots ?? 0;
+      if (!(l.active && l.phase === PHASE.race)) knownBots = bots;
+      else if (bots & ~knownBots) {
+        const names = Module.ctrOnlineOctr?.().names ?? [];
+        for (let slot = 1; slot < 8; slot++) {
+          if (!((bots & ~knownBots) >> slot & 1)) continue;
+          ui?.toast(T.botTakesOver(names[slot]));
+          toGuests({ phase: PHASE.race, takeover: names[slot] ?? '' });
+        }
+        knownBots = bots;
       }
     }
     if (net.role === 'host' && shareHost) {

@@ -37,9 +37,12 @@ export async function walkToRace(spec, { step = () => {} } = {}) {
   await until('main menu', onMainMenu, 60_000)
   await menuTo({ read, out, label: spec.menu, rows: MAIN_MENU, settle: () => frames(8) })
   // ONLINE → VS (first row) or BATTLE (second) → players ; VS. → single race → players
-  for (let i = 0; i < 3; i++) {
-    if (i === 1 && spec.battle) { await out.press('ArrowDown'); await frames(15) }
-    await out.press('c')
+  // ONLINE → ARCADE (third) → single race → 2P (Bot is P2) → the difficulty's default
+  const presses = spec.arcade
+    ? ['c', 'ArrowDown', 'ArrowDown', 'c', 'c', 'ArrowDown', 'c', 'c']
+    : ['c', ...(spec.battle ? ['ArrowDown'] : []), 'c', 'c']
+  for (const key of presses) {
+    await out.press(key)
     await frames(15)
   }
   // a menu more on the way (Battle's) : Cross on its default until the character select
@@ -58,7 +61,7 @@ export async function walkToRace(spec, { step = () => {} } = {}) {
 }
 
 /**
- * Opens the second window for `mode` ('vs' | 'battle' | 'share') beside this window, whose game
+ * Opens the second window for `mode` ('vs' | 'battle' | 'share' | 'arcade') beside this window, whose game
  * runs. Progress in ui.second ({ mode, text, error }).
  */
 export function openSecond(mode, { ui }) {

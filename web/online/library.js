@@ -10,7 +10,7 @@ addToLibrary({
   ctr_web_online_init__deps: ['$UTF8ToString'],
   ctr_web_online_init: (octr, layout, layoutLen, karts, lobby) => {
     const l = Array.from(HEAP32.subarray(layout >> 2, (layout >> 2) + layoutLen));
-    const [curr, numDrivers, driverID, levelID, numRooms, numEnded, country, room, busy, clientCount, sync, names, nameStride, maxPlayers, lockIn1] = l;
+    const [curr, numDrivers, driverID, levelID, numRooms, numEnded, country, room, busy, clientCount, sync, names, nameStride, maxPlayers, lockIn1, raceStats] = l;
     const u8 = (off) => HEAPU8[octr + off];
     Module.ctrOnlineOctr = () => ({
       CurrState: HEAP32[(octr + curr) >> 2],
@@ -25,18 +25,25 @@ addToLibrary({
       clientCount: Array.from(HEAP8.subarray(octr + clientCount, octr + clientCount + 16)),
       windowsClientSync: HEAPU8[octr + sync],
       names: Array.from({ length: maxPlayers }, (_, i) => UTF8ToString(octr + names + i * nameStride, nameStride)),
+      // the finishers in order : {slot, finalTime, bestLap} (raceStats, 3 ints each)
+      raceStats: Array.from({ length: u8(numEnded) }, (_, i) => {
+        const [slot, finalTime, bestLap] = HEAP32.subarray((octr + raceStats) / 4 + i * 3, (octr + raceStats) / 4 + i * 3 + 3);
+        return { slot, finalTime, bestLap };
+      }),
     });
     void lockIn1;
     // One build : the mod is on while a room is joined. The page asks with
     // commands the wasm polls once per frame (ctr_web_online_control, D6) and
     // reads the state back from the heap : active, the lobby phase
     // (0 none, 1 menus, 2 starting, 3 race) and, at the track lock, the menus'
-    // character per slot (-1 = empty).
-    const [activePtr, phasePtr, charsPtr] = Array.from(HEAP32.subarray(lobby >> 2, (lobby >> 2) + 3));
+    // character per slot (-1 = empty) ; on the host, the slots its AI drives (bit per slot,
+    // docs/ONLINECTR_PORT.md D11).
+    const [activePtr, phasePtr, charsPtr, botsPtr] = Array.from(HEAP32.subarray(lobby >> 2, (lobby >> 2) + 4));
     Module.ctrOnlineLobby = () => ({
       active: HEAP32[activePtr >> 2] !== 0,
       phase: HEAP32[phasePtr >> 2],
       characters: Array.from(HEAP32.subarray(charsPtr >> 2, (charsPtr >> 2) + 8)),
+      hostBots: HEAP32[botsPtr >> 2],
     });
     Module.ctrOnlineControlQueue = [];
     // cmd : 1 enter the page's room, 2 leave, 3 this guest's character (arg)

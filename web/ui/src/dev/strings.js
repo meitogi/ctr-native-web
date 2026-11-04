@@ -5,7 +5,7 @@ import { LANG } from '../lib/strings.js'
 const en = {
   second: 'Second window',
   secondHelp: 'From the main menu : a window opens beside this one, joins the room as Bot, and this game walks its menus to the race.',
-  secondModes: { vs: 'Online VS', battle: 'Online Battle', share: 'Share' },
+  secondModes: { vs: 'Online VS', battle: 'Online Battle', share: 'Share', arcade: 'Online Arcade' },
   secondSteps: { hosting: 'Opening the room…', joining: 'Waiting for Bot in the room…', menus: 'Walking the menus to the race…', racing: 'Race on.', blocked: 'The browser blocked the window : allow pop-ups for this page.' },
   bot: 'Bot (autopilot)',
   botHelp: 'This window drives itself : the character browsed and locked, the racing line, an item every 1.5 s. Debug builds only.',
@@ -22,7 +22,7 @@ const en = {
 const fr = {
   second: 'Deuxième fenêtre',
   secondHelp: 'Depuis le menu principal : une fenêtre s\'ouvre à côté, rejoint la salle en Bot, et ce jeu parcourt ses menus jusqu\'à la course.',
-  secondModes: { vs: 'En ligne VS', battle: 'En ligne Combat', share: 'Partage' },
+  secondModes: { vs: 'En ligne VS', battle: 'En ligne Combat', share: 'Partage', arcade: 'En ligne Arcade' },
   secondSteps: { hosting: 'Ouverture de la salle…', joining: 'En attente de Bot dans la salle…', menus: 'Menus parcourus jusqu\'à la course…', racing: 'Course lancée.', blocked: 'Le navigateur a bloqué la fenêtre : autorise les pop-ups pour cette page.' },
   bot: 'Bot (pilote auto)',
   botHelp: 'Cette fenêtre joue toute seule : le personnage parcouru puis verrouillé, la trajectoire, un objet toutes les 1,5 s. Builds debug seulement.',

@@ -10,6 +10,7 @@ export const SECOND = {
   vs: { room: 'online', menu: 'ONLINE', battle: false },
   battle: { room: 'online', menu: 'ONLINE', battle: true },
   share: { room: 'share', menu: 'VS.', battle: false },
+  arcade: { room: 'online', menu: 'ONLINE', battle: false, arcade: true },
 }
 
 /** Polls `get()` until it returns something, every `every` ms ; null after `timeout`. */

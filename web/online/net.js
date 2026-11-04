@@ -20,6 +20,9 @@ export const EVENT = { DATA: 1, CONNECTED: 2, DISCONNECTED: 3 };
 /** SV_CORE_MAX_PEERS - 1 (platform/native_online_loopback.h) : the host's own client */
 export const LOOPBACK_PEER = 259;
 
+/** NATIVE_ONLINE_BOT_PEER_FIRST (platform/native_online_bots.h) : the host's bots from here */
+export const GUEST_PEER_LIMIT = 252;
+
 /** enum WebOnlineRole (platform/web_online_transport.c) */
 export const ROLE = { none: 0, host: 1, guest: 2 };
 
@@ -64,6 +67,8 @@ export function createOnlineNet({ name = 'Player' } = {}) {
     queue: [],
     /** host : peer id → link */
     links: Object.create(null),
+    /** host : the next link's peer id — never one freed this room (a bot may hold it, D11.6) */
+    nextPeer: 0,
     /** host : peer id → ms of silence before its link is dropped (set by the server core) */
     timeouts: Object.create(null),
     /** guest : the link to the host, its pending connect, the last connect error */
@@ -105,8 +110,12 @@ export function createOnlineNet({ name = 'Player' } = {}) {
     net.role = 'host';
     net.room = room;
     room.on('link', (link) => {
-      let peer = 0;
-      while (net.links[peer]) peer++;
+      // a closed link's id may still be a kept peer of the server core (a bot drives
+      // the leaver's kart, docs/ONLINECTR_PORT.md D11.6) : ids only grow, up to the
+      // bots' own (platform/native_online_bots.h), then the lowest free one
+      let peer = net.nextPeer;
+      if (peer < GUEST_PEER_LIMIT) net.nextPeer++;
+      else for (peer = 0; net.links[peer]; peer++);
       net.links[peer] = link;
       link.ctrPeer = peer;
       push({ peer, event: EVENT.CONNECTED, key: addressKey(link.peerId) });
