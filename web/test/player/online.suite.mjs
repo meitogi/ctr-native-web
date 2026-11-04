@@ -230,8 +230,10 @@ const rates = r6 => {
  * own (or the second browser), driven with the same player harness. `inject` : page scripts
  * both pages get before they load (web/net/test/impair.js). Resolves at SG_STARTRACE on both
  * sides with { host, guest, gp, gjs, gl, hl, leave, close } — `close()` lets the guest's browser go.
+ * `arcade` : ONLINE → ARCADE → single race → 2P → the difficulty's default (session 23, the
+ * host's bots fill the race up to 8 karts) instead of ONLINE → VS → 2P.
  */
-export async function roomToRace(ctx, mode, { inject = [] } = {}) {
+export async function roomToRace(ctx, mode, { inject = [], arcade = false } = {}) {
 	const relay = ctx.args.relay
 	const rk = ctx.args.rk ?? ''
 	if (!relay) ctx.skip('no relay : --set relay=ws://localhost:8787 --set rk=<key> (a local ctr-relay, see RUN)')
@@ -328,8 +330,9 @@ export async function roomToRace(ctx, mode, { inject = [] } = {}) {
 		// The lobby is the host's own menus : ONLINE → VS → 2 players (open : the guest's pad is
 		// plugged as P2 by the Share host) → the character select
 		await menuTo(host, 'ONLINE', dir => host.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
-		for (let i = 0; i < 3; i++) {
-			await host.press(CROSS)
+		const presses = arcade ? [CROSS, 'ArrowDown', 'ArrowDown', CROSS, CROSS, 'ArrowDown', CROSS, CROSS] : [CROSS, CROSS, CROSS]
+		for (const key of presses) {
+			await host.press(key)
 			await host.frames(15)
 		}
 		await untilGame(host, 'the character select', s => s.charSelect != null, 15_000)
@@ -486,7 +489,7 @@ export async function shot(ctx, label) {
  * The item race : both drive the whole race and fire, both screens are filmed with their
  * sound, then put side by side in one MP4 (H.264 + MP3, what VS Code's preview plays).
  */
-async function itemRaceOn(ctx, { host, guest, gp, gjs }) {
+export async function itemRaceOn(ctx, { host, guest, gp, gjs }) {
 	const start = await shot(ctx, 'item-race-start')
 	const dir = runDirOf(ctx.args.proofs, start.file)
 	const guestCur = { id: 'ONLINE-ITEM-RACE', proofs: [] }

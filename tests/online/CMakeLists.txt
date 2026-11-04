@@ -31,6 +31,7 @@ if(EMSCRIPTEN)
         ${ROOT}/platform/native_online.c
         ${ROOT}/platform/native_online_loopback.c
         ${ROOT}/platform/online_server/sv_core.c
+        ${ROOT}/platform/native_online_bots.c
         ${ROOT}/platform/web_online_transport.c)
     target_compile_options(online_web_client PRIVATE -Wall -Wextra)
     target_link_options(online_web_client PRIVATE
@@ -102,3 +103,8 @@ set_tests_properties(online_a5_traces_loopback_vs_upstream PROPERTIES
     DEPENDS "online_a2_a3_upstream_server;online_a5_loopback_host")
 set_tests_properties(online_a2_a3_upstream_server online_a4_core_server online_a5_loopback_host
     PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
+
+# the host's bots as virtual clients of its server core (session 23)
+add_executable(online_bots_test bots_test.c stub_game.c ${ROOT}/platform/native_online_bots.c ${SV_CORE_ONLY})
+target_compile_options(online_bots_test PRIVATE -Wall -Wextra)
+add_test(NAME online_bots COMMAND online_bots_test)

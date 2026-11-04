@@ -2,7 +2,7 @@
 //   node --test web/online/test/net.test.mjs
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { EVENT, LOOPBACK_PEER, ONLINE_TAG, addressKey, createOnlineNet } from '../net.js';
+import { EVENT, GUEST_PEER_LIMIT, LOOPBACK_PEER, ONLINE_TAG, addressKey, createOnlineNet } from '../net.js';
 import { fakeNetwork } from './fake-room.mjs';
 
 const tick = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -120,7 +120,7 @@ test('guest : SELECT closes the link ; the host side sees DISCONNECTED ; the hos
   assert.deepEqual(drain(net), [{ peer: -1, event: EVENT.DISCONNECTED }]);
 });
 
-test('host : one int peer id per link, lowest free, never the loopback id ; address keys from the room id', async () => {
+test('host : one int peer id per link, never a freed one, never the loopback id ; address keys from the room id', async () => {
   const fake = fakeNetwork();
   const hostNet = createOnlineNet();
   hostNet.host(fake.hostRoom('A'));
@@ -142,7 +142,23 @@ test('host : one int peer id per link, lowest free, never the loopback id ; addr
   assert.deepEqual(drain(hostNet), [{ peer: 1, event: EVENT.DISCONNECTED }]);
   guests[1].connect();
   await tick();
-  assert.deepEqual(drain(hostNet).map((e) => [e.peer, e.event]), [[1, 2]], 'id 1 reused');
+  assert.deepEqual(drain(hostNet).map((e) => [e.peer, e.event]), [[3, 2]], 'id 1 not reused : a bot may hold it (D11.6)');
+});
+
+test('host : past the bots\' first id, a link takes the lowest free id', async () => {
+  const fake = fakeNetwork();
+  const hostNet = createOnlineNet();
+  hostNet.host(fake.hostRoom('A'));
+  hostNet.nextPeer = GUEST_PEER_LIMIT - 1;
+  const guests = ['B', 'C'].map((n) => {
+    const g = createOnlineNet();
+    g.guest(fake.guestRoom(n));
+    g.connect();
+    return g;
+  });
+  await tick();
+  assert.deepEqual(drain(hostNet).map((e) => e.peer), [GUEST_PEER_LIMIT - 1, 0]);
+  assert.ok(guests.length === 2);
 });
 
 test('host : messages keep their link\'s peer id and order ; a kick closes the link without an event', async () => {

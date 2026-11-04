@@ -33,6 +33,7 @@ enum Op
 	OP_FINISH,
 	OP_DUMP,
 	OP_SLEEP, // web only: one frame that sleeps a ms while the network delivers
+	OP_BOTS,  // session 23 : the host's track lock comes from ONLINE > ARCADE, its players' characters
 };
 
 // next script command, 0 when there is none
@@ -116,6 +117,11 @@ static void HandleCmd(const int *c)
 			o->CurrState = GAME_END_RACE; // OnlineEndOfRace
 			break;
 		case OP_SLEEP: emscripten_sleep(c[1]); break;
+		case OP_BOTS:
+			stub.lobbyBots = 1;
+			stub.lobbyCharacters[0] = c[1]; stub.lobbyCharacters[1] = c[2]; stub.lobbyCharacters[2] = c[3];
+			stub.lobbyCharacters[3] = -1;
+			break;
 		default: break;
 	}
 }
@@ -131,6 +137,7 @@ static void Publish(void)
 	PUT("{\"frames\":%u,\"CurrState\":%d,\"DriverID\":%d,\"NumDrivers\":%d,\"numRooms\":%d,\"ver_server\":%d,",
 		NativeOnline_FrameCount(), o->CurrState, o->DriverID, o->NumDrivers, o->numRooms, o->ver_server);
 	PUT("\"serverLockIn1\":%d,\"boolClientBusy\":%d,", o->serverLockIn1, o->boolClientBusy);
+	PUT("\"hostBots\":%d,", stub.hostBots);
 	PUT("\"levelID\":%d,\"lapID\":%d,\"numLaps\":%d,\"gameMode2\":%d,\"numDriversEnded\":%d,",
 		o->levelID, o->lapID, stub.numLaps, stub.gameMode2, o->numDriversEnded);
 	PUT("\"clientCount\":[");

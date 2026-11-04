@@ -28,6 +28,16 @@ struct StubGame
 	struct NativeOnlineKart karts[8];
 	int kartExists[8];
 
+	// the host's bots (session 23) : the track lock's mode, the menus'
+	// characters, the slots the host's AI drives, finish flags, a pending shot
+	int lobbyBots;
+	int lobbyCharacters[4];
+	int hostBots;
+	int kartFinished[8];
+	int raceClock;
+	int botShot[8];
+	int takenOver[8];
+
 	// script inputs for the local player
 	int localHeld;
 	int loadFrames;

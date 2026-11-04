@@ -29,7 +29,7 @@ const traceDir = process.env.CTR_WEB_TRACE_DIR;
 const createWebClient = clientJs ? createRequire(import.meta.url)(resolve(clientJs)) : null;
 
 // tests/online/online_test.c
-const OP = { PICK_SERVER: 1, JOIN_ROOM: 2, PICK_TRACK: 3, CHARACTER: 4, KART: 5, KART_ITEMS: 6, HOLD: 7, FIRE: 8, FINISH: 9, SLEEP: 11 };
+const OP = { PICK_SERVER: 1, JOIN_ROOM: 2, PICK_TRACK: 3, CHARACTER: 4, KART: 5, KART_ITEMS: 6, HOLD: 7, FIRE: 8, FINISH: 9, SLEEP: 11, BOTS: 12 };
 // game/OnlineCTR/global.h
 const ST = { PICK_SERVER: 1, PICK_ROOM: 2, HOST_TRACK_PICK: 5, GUEST_TRACK_WAIT: 6, CHARACTER_PICK: 7, WAIT_FOR_LOADING: 8, WAIT_FOR_RACE: 10, START_RACE: 11 };
 const SG_RACEDATA = 7;
@@ -311,5 +311,41 @@ test('room script over web/net/ and a local ctr-relay (WebSocket path, sealed)',
     C.close();
   } finally {
     await relay.close();
+  }
+});
+
+// Session 23 (docs/ONLINECTR_PORT.md D11) : the host's bots are virtual clients of its own
+// sv_core in wasm ; the guests see them as players, with no change on their side.
+test('ONLINE > ARCADE : the host\'s bots fill the room to 8, the guests get their names, characters and kart states', { skip }, async () => {
+  const fake = fakeNetwork();
+  const rooms = [fake.hostRoom('A'), fake.guestRoom('B'), fake.guestRoom('C')];
+  const clients = [];
+  for (let i = 0; i < 3; i++) clients.push(await startClient(i, rooms[i]));
+  const [A, B, C] = clients;
+  try {
+    await waitFor('boot', clients, (s) => s.CurrState === ST.PICK_SERVER, 3000);
+    for (const c of clients) await send(c, OP.PICK_SERVER, 7);
+    await waitFor('room list', clients, (s) => s.CurrState === ST.PICK_ROOM, 10000);
+    await send(A, OP.JOIN_ROOM, TEST_ROOM);
+    await waitFor('A hosts', [A], (s) => s.CurrState === ST.HOST_TRACK_PICK, 3000);
+    for (const c of [B, C]) {
+      await send(c, OP.JOIN_ROOM, TEST_ROOM);
+      await waitFor('a guest joins', [c], (s) => s.CurrState === ST.GUEST_TRACK_WAIT, 3000);
+    }
+    await waitFor('3 names', clients, (s) => s.NumDrivers === 3, 3000);
+    await send(A, OP.BOTS, 2, 5, 0);
+    await send(A, OP.PICK_TRACK, 3, 1);
+    await waitFor('8 drivers everywhere', clients, (s) => s.NumDrivers === 8 && s.names.every((x) => x !== ''), 3000);
+    assert.equal(A.mod.snapshot.hostBots, 0xf8, 'the host\'s AI drives slots 3-7');
+    assert.deepEqual(B.mod.snapshot.names.slice(3), ['Bot1', 'Bot3', 'Bot4', 'Bot6', 'Bot7'], 'named after the characters left : not 2, 5, 0');
+    for (let i = 0; i < 3; i++) await send(clients[i], OP.CHARACTER, [2, 5, 0][i], 1);
+    await waitFor('the race', clients, (s) => s.CurrState === ST.START_RACE, 8000);
+    assert.deepEqual(C.mod.snapshot.characterIDs.slice(3), [1, 3, 4, 6, 7], 'the bots\' characters, from SG_CHARACTER');
+    // the bots' kart states : Cross held on the wire (D11.3), on both guests
+    await waitFor('the bots\' pads on the guests', [B, C], (s) => [3, 4, 5, 6, 7].every((slot) => (s.pads[slot].held & 0x10) !== 0), 3000);
+    // the host does not apply its own bots' echoes (D11.2)
+    assert.ok([3, 4, 5, 6, 7].every((slot) => (A.mod.snapshot.pads[slot].held & 0x10) === 0), 'the host left its bots\' pads alone');
+  } finally {
+    for (const c of clients) c.mod.running = false;
   }
 });

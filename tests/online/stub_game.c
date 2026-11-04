@@ -185,6 +185,35 @@ int NativeOnlineGame_ExternalLobby(void) { return 0; }
 void NativeOnlineGame_SetMode(int bootOnline, int externalLobby) { (void)bootOnline; (void)externalLobby; }
 void NativeOnlineGame_SetMyCharacter(int characterID) { (void)characterID; }
 void NativeOnlineGame_EndMyRace(void) {}
+int NativeOnlineGame_LobbyBots(void) { return stub.lobbyBots; }
+int NativeOnlineGame_LobbyCharacter(int player) { return (player >= 0 && player < 4) ? stub.lobbyCharacters[player] : -1; }
+void NativeOnlineGame_CharacterName(int characterID, char *out, int cap) { snprintf(out, cap, "Bot%d", characterID); }
+int *NativeOnlineGame_HostBots(void) { return &stub.hostBots; }
+int NativeOnlineGame_KartFinished(int slot) { return stub.kartFinished[slot]; }
+int NativeOnlineGame_RaceClock(void) { return stub.raceClock; }
+int NativeOnlineGame_TakeBotShot(int slot, int *weapon, int *juiced, int *flags)
+{
+	if (!stub.botShot[slot])
+		return 0;
+	*weapon = stub.botShot[slot];
+	*juiced = 0;
+	*flags = 0;
+	stub.botShot[slot] = 0;
+	return 1;
+}
+int NativeOnlineGame_TakeOverKart(int slot)
+{
+	if (!stub.kartExists[slot] || stub.kartFinished[slot] || ((stub.hostBots >> slot) & 1))
+		return 0;
+	stub.takenOver[slot] = 1;
+	stub.hostBots |= 1 << slot;
+	return 1;
+}
+void NativeOnlineGame_EndBotRace(int slot)
+{
+	if (((stub.hostBots >> slot) & 1) && stub.kartExists[slot])
+		stub.kartFinished[slot] = 1;
+}
 void NativeOnlineGame_LobbyPointers(int **active, int **phase, int **characters)
 {
 	static int active_ = 1, phase_, characters_[8];
