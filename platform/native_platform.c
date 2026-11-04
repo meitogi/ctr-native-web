@@ -626,26 +626,25 @@ internal void Native_EnsureVBlankTarget(void)
 // covered window gets no refreshes and its timers are throttled (1 s in
 // Chrome and Firefox) : woken every 100 ms – 1 s, the VBlanks came in
 // bursts and the music, sequenced on VBlanks, lurched. The audio clock keeps
-// running there (SDL's ScriptProcessorNode renders a block every ~43 ms,
-// measured 23 a second) : a hidden page resolves on the next audio block, a
-// visible one on the second audio block without a refresh (a covered window
-// still "visible").
+// running there (the SPU worklet's tick, every 4 render quanta : ~11.6 ms,
+// web/audio/audio.js) : a hidden page resolves on the next tick, a visible
+// one on the fourth tick without a refresh (a covered window still
+// "visible").
 // The 100 ms timer is the last resort : no audio yet, or a suspended context.
 EM_ASYNC_JS(void, NativeWeb_WaitAnimationFrame, (void), {
 	await new Promise((resolve) => {
-		const playback = Module['SDL3'] && Module['SDL3']['audio_playback'];
-		const node = playback && playback['scriptProcessorNode'];
-		let blocks = 0;
+		const ticks = globalThis.ctrAudio && globalThis.ctrAudio.ticks;
+		let count = 0;
 		const done = () => {
 			clearTimeout(timer);
 			cancelAnimationFrame(frame);
-			if (node) node.removeEventListener('audioprocess', onBlock);
+			if (ticks) ticks.removeEventListener('tick', onTick);
 			resolve();
 		};
-		const onBlock = () => { if (document.hidden || ++blocks >= 2) done(); };
+		const onTick = () => { if (document.hidden || ++count >= 4) done(); };
 		const timer = setTimeout(done, 100);
 		const frame = requestAnimationFrame(done);
-		if (node) node.addEventListener('audioprocess', onBlock);
+		if (ticks) ticks.addEventListener('tick', onTick);
 	});
 });
 #endif
@@ -662,6 +661,8 @@ internal void Native_WaitUntilVBlankTarget(void)
 	// the 30 fps menu frames on screen for 3 or 5 refreshes instead of 4 at
 	// 120 Hz. The VBlank clock still paces the game ; only the wake-up moves.
 	(void)freq;
+	// the SPU commands of this frame's game logic leave now, not at the next VBlank
+	NativeAudio_WebFlush();
 	NativePerf_BeginScope(NATIVE_PERF_BUCKET_VSYNC_WAIT);
 	while (SDL_GetPerformanceCounter() < s_nextVBlankCounter)
 	{

@@ -16,9 +16,9 @@ set -euo pipefail
 on=${1:?usage: assemble.sh <on-build-dir> <site-dir>}
 site=${2:?usage: assemble.sh <on-build-dir> <site-dir>}
 
-# Every build (web/emscripten.cmake, web/share/share.cmake).
+# Every build (web/emscripten.cmake, web/share/share.cmake, web/audio/audio.cmake).
 COMMON_FILES=(index.html disc.js preload-flag.js ctr_native.js ctr_native.wasm)
-COMMON_DIRS=(ui share net)
+COMMON_DIRS=(ui share net audio)
 # CTR_ONLINE=ON only (CMakeLists.txt's CTR_ONLINE block, EMSCRIPTEN branch).
 ONLINE_DIRS=(online)
 

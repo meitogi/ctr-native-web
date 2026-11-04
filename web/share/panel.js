@@ -116,7 +116,7 @@ panel.addEventListener('keyup', (e) => e.stopPropagation());
 // In the page's Settings (web/ui, session 12) when it is there : the « Share » tab ; else floating.
 if (!globalThis.ctrUI?.adopt('share', 'Share', panel)) document.body.append(panel);
 
-/** Waits up to `ms` for SDL's audio output, so the guests' stream carries sound from the start. */
+/** Waits up to `ms` for the game's audio output, so the guests' stream carries sound from the start. */
 async function tapAudio(ms) {
   for (const end = Date.now() + ms; Date.now() < end; await sleep(100)) if (capture.tapAudio()) return true;
   return false;
@@ -127,7 +127,7 @@ async function startOn(room, { relayGuests = false, by = 'share' } = {}) {
   if (host) return host;
   owner = by;
   if (!Module.canvas?.captureStream) throw new Error('this browser cannot capture a canvas');
-  capture = createCapture(Module.canvas, Module, { onScale: (scale) => host?.setScale(scale) });
+  capture = createCapture(Module.canvas, globalThis.ctrAudio, { onScale: (scale) => host?.setScale(scale) });
   audioOn = true;
   if (!(await tapAudio(3000))) error = 'No game audio yet : guests get video only.';
   room.on('warning', (w) => { error = `${w.code}: ${w.message}`; render(); });
@@ -228,7 +228,7 @@ function render() {
   panel.style.top = online && !open ? '84px' : '32px';
 }
 setInterval(() => {
-  capture?.tapAudio(); // late audio, or SDL recreated its node when the device reopened
+  capture?.tapAudio(); // the game's audio opened late
   render();
 }, 1000);
 render();

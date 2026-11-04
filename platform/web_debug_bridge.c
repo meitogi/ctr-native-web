@@ -621,56 +621,41 @@ internal void WebDebugBridge_PublishNet(struct GameTracker *gGT)
 
 // ---- window.__ctr.audio (session 21) : the audio output, seen from the page ----
 //
-// Kept in globalThis.__ctrAudio (window.__ctr is rewritten every present) :
-//   path          'script-processor' (SDL's node, the main thread mixes)
-//   sampleRate, block (frames per output block), baseLatency / outputLatency (s), state
-//   blocks        output blocks the page filled
-//   underruns     blocks whose playback time did not follow the previous one by one block
-//                 (± 25 %) : Chrome hands a late node a later playbackTime, the audio between
-//                 was silence ; missedMs sums it
-//   longestGapMs  the longest wall-clock gap between two filled blocks
-//   leadMinMs     the least time left between filling a block and its playback
-//   times         performance.now() of each filled block since boot (20 000 at most)
-//   glitches      { at, ms } of each underrun since boot (ms : the playback jump past one block)
-//   spu / spuTotal / mixerMsPerSec  pushed by native_audio.c once per 60 VBlanks
+// Kept in globalThis.__ctrAudio (window.__ctr is rewritten every present), from window.ctrAudio
+// (web/audio/audio.js) and native_audio.c's own push :
+//   path          'worklet' : the SPU mixes in an AudioWorklet (spu.wasm), off the main thread
+//   sampleRate, block (frames per render quantum), baseLatency / outputLatency (s), state,
+//   bufferMs (the command buffer), ready (the worklet runs)
+//   blocks        render quanta the worklet mixed
+//   underruns     null : the worklet mixes on the audio thread, which the page cannot watch ;
+//                 audio.suite.mjs meters the output signal itself (its dropout meter)
+//   batches, lateBatches, worstLateMs  the game's command batches, and those that reached the
+//                 worklet after their stamp + bufferMs (heard late, never as a gap)
+//   longestGapMs  the longest wall-clock gap between two worklet ticks seen by the page (the
+//                 hidden page's wake clock)
+//   workletMixerMsPerSec  the worklet's mixing time (Date.now(), 1 ms steps) ; mixerMsPerSec the
+//                 main thread's (0 : it no longer mixes)
+//   times         performance.now() of each tick since boot (20 000 at most)
+//   late          { at: stamp, ms } of the late batches since boot
+//   spu / spuTotal / spuHistory  pushed by native_audio.c once per 60 VBlanks : the game's SPU
+//                 calls and bytes, and how late each VBlank came against its due time
 //   reset()       starts a new window (counters only)
 // __ctrStall = { ms, every } : a debug busy loop of `ms` in one frame every `every` ms (or once
 // when `every` is 0) — the late frame the audio must survive.
 EM_JS(void, WebDebugBridge_AudioJS, (void), {
 	const A = (globalThis.__ctrAudio = globalThis.__ctrAudio || {});
-	if (!A.reset) {
-		A.times = [];
-		A.glitches = [];
-		A.reset = () => Object.assign(A, { blocks: 0, underruns: 0, missedMs: 0, longestGapMs: 0, leadMinMs: null, lastAt: 0, lastPlay: null });
-		A.reset();
-	}
-	const playback = Module['SDL3'] && Module['SDL3']['audio_playback'];
-	const node = playback && playback['scriptProcessorNode'];
-	if (node && A.node !== node) {
-		const ctx = Module['SDL3']['audioContext'];
-		A.node = node;
-		Object.assign(A, { path: 'script-processor', sampleRate: ctx.sampleRate, block: node.bufferSize, baseLatency: ctx.baseLatency, lastPlay: null });
-		node.addEventListener('audioprocess', (e) => {
-			const now = performance.now();
-			const blockMs = (A.block / A.sampleRate) * 1000;
-			const play = e.playbackTime * 1000;
-			A.blocks++;
-			if (A.times.length < 20000) A.times.push(Math.round(now));
-			if (A.lastAt && now - A.lastAt > A.longestGapMs) A.longestGapMs = Math.round(now - A.lastAt);
-			if (A.lastPlay !== null) {
-				const step = play - A.lastPlay;
-				if (step < blockMs * 0.75 || step > blockMs * 1.25) {
-					A.underruns++;
-					A.missedMs = Math.round(A.missedMs + Math.max(0, step - blockMs));
-					if (A.glitches.length < 2000) A.glitches.push({ at: Math.round(now), ms: Math.round(step - blockMs) });
-				}
-			}
-			const lead = play - ctx.currentTime * 1000;
-			if (A.leadMinMs === null || lead < A.leadMinMs) A.leadMinMs = Math.round(lead);
-			A.lastAt = now;
-			A.lastPlay = play;
-			A.state = ctx.state;
-			A.outputLatency = ctx.outputLatency;
+	const audio = globalThis.ctrAudio;
+	if (!A.reset) A.reset = () => audio && audio.resetStats && audio.resetStats();
+	if (audio && audio.context) {
+		const ctx = audio.context;
+		const s = audio.stats;
+		const secs = (performance.now() - s.since) / 1000;
+		Object.assign(A, {
+			path: 'worklet', sampleRate: ctx.sampleRate, block: 128, baseLatency: ctx.baseLatency, outputLatency: ctx.outputLatency, state: ctx.state,
+			bufferMs: audio.bufferMs, ready: !!audio.node, blocks: s.quanta, underruns: null, missedMs: null, batches: s.batches,
+			lateBatches: s.lateBatches, worstLateMs: s.worstLateMs, longestGapMs: s.longestGapMs,
+			workletMixerMsPerSec: secs > 0 ? Math.round((s.workletMixMs / secs) * 10) / 10 : 0, mixerMsPerSec: 0,
+			times: audio.times, late: audio.late, glitches: [],
 		});
 	}
 	if (globalThis.__ctr) globalThis.__ctr.audio = A;

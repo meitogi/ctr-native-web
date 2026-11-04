@@ -103,3 +103,4 @@ add_custom_command(
 add_custom_target(ctr_web_page ALL DEPENDS "${CMAKE_BINARY_DIR}/index.html" "${CMAKE_BINARY_DIR}/disc.js"
     "${CMAKE_BINARY_DIR}/ui/ui.js" "${CMAKE_BINARY_DIR}/ui/ui.css")
 include(${CMAKE_SOURCE_DIR}/web/share/share.cmake)
+include(${CMAKE_SOURCE_DIR}/web/audio/audio.cmake)

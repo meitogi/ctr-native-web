@@ -62,12 +62,12 @@
       return connect.call(this, dest, ...rest);
     };
   })();
-  // Autoplay : browsers start an AudioContext suspended until the page gets a user gesture. SDL
-  // resumes it from a timer once the page has been activated, which Chrome accepts ; Safari and
-  // Firefox want the resume inside the gesture.
+  // Autoplay : browsers start an AudioContext suspended until the page gets a user gesture.
+  // Chrome lets a page that was already activated start one ; Safari and Firefox want the
+  // resume inside the gesture.
   for (const type of ['pointerdown', 'keydown', 'touchend']) {
     window.addEventListener(type, () => {
-      const ctx = Module.SDL3 && Module.SDL3.audioContext;
+      const ctx = window.ctrAudio.context;
       if (ctx && ctx.state === 'suspended') ctx.resume();
     }, { capture: true });
   }
@@ -78,6 +78,8 @@
     setStatus(text) { if (text) console.log('[status] ' + text); },
   };
 </script>
+<!-- the game's sound : the SPU in an AudioWorklet (web/audio) -->
+<script src="audio/audio.js"></script>
 <script src="preload-flag.js"></script>
 <!-- the interface (web/ui, Svelte) : boot screen, disc drop, Settings ; it injects ctr_native.js -->
 <script type="module" src="ui/ui.js"></script>

@@ -12,8 +12,8 @@
 //             page visible, then hidden behind a new tab for 60 s, then visible
 //             again : VBlanks/s per window (0–5, 5–10, 10–15, 15–60 s) and the
 //             longest wall-clock gap between two game clock moves, sampled on
-//             the audio clock (SDL's ScriptProcessorNode, which keeps running
-//             hidden). A long gap is what the ear hears : the music sequencer
+//             the audio clock (the SPU worklet's tick, web/audio/audio.js, which
+//             keeps running hidden ; SDL's ScriptProcessorNode before session 21). A long gap is what the ear hears : the music sequencer
 //             advances on VBlanks, so a 100 ms gap is a 100 ms lurch.
 //
 // RUN
@@ -58,12 +58,12 @@ const GAP_PROBE = `
 // The game clock sampled on the audio clock : the longest wall time between
 // two moves of __ctr.vblank. reset() starts a new window.
 const CLOCK_PROBE = `
-	const node = globalThis.Module?.SDL3?.audio_playback?.scriptProcessorNode
-	if (!node) return false
+	const ticks = globalThis.ctrAudio?.node && globalThis.ctrAudio.ticks
+	if (!ticks) return false
 	if (!globalThis.__ctrClock) {
 		const C = (globalThis.__ctrClock = { v: -1, at: 0, maxGap: 0, events: 0 })
 		C.reset = () => { C.maxGap = 0; C.events = 0; C.at = performance.now() }
-		node.addEventListener('audioprocess', () => {
+		ticks.addEventListener('tick', () => {
 			const now = performance.now()
 			const v = globalThis.__ctr?.vblank ?? -1
 			C.events++

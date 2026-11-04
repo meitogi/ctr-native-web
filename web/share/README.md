@@ -41,11 +41,11 @@ The host sees who joins and leaves (a toast, names in Settings › Multiplayer �
 | `media.js` | the renegotiation of the link's `RTCPeerConnection`, encoder settings, playout delay, stereo Opus |
 | `host.js` | `createShareHost({room, stream})` : refuses relay links, gives slots, streams to each guest |
 | `guest.js` | `createShareGuest(room)` : connects, refuses itself without a direct path, answers the media offer, sends the pad |
-| `capture.js` | the canvas at one frame per present, SDL's audio output |
+| `capture.js` | the canvas at one frame per present, the game's audio output (`ctrAudio.output`) |
 | `panel.js` | the game page's Share panel ; `Module.ctrShare` (the game's two hooks), `window.__ctrShare` |
 | `guest.html`, `guest-page.js` | the guest page ; `window.__ctrShareGuest` |
 | `share.cmake` | copies `share/*` (and `net/*` unless the CTR_ONLINE build already does) next to `index.html` |
-| `demo/` | the same host on a canvas the page draws, a tone for SDL's audio : Share without the game |
+| `demo/` | the same host on a canvas the page draws, a tone for the game's audio : Share without the game |
 
 - **Media** : the host adds its video and audio tracks to the link's own `RTCPeerConnection`
   (`link.pc`) and renegotiates. The offer and the answer travel as Share messages on the link's
@@ -71,8 +71,8 @@ The host sees who joins and leaves (a toast, names in Settings › Multiplayer �
   scales the 800 × 600 canvas down to the PS1 display width (512 → 512 × 384), caps the bitrate,
   keeps 30 fps (`degradationPreference: 'maintain-framerate'`, `contentHint: 'motion'`). The guest
   asks for the lowest playout delay (`jitterBufferTarget = 0`, else Chrome's `playoutDelayHint`).
-- **Audio** : SDL's ScriptProcessorNode also feeds a `MediaStreamAudioDestinationNode`, before the
-  dev page's mute (`index.html` without `?sound`) : guests hear the game, the host tab stays
+- **Audio** : the page's output node (`ctrAudio.output`, the SPU worklet's sound, `web/audio/`) also
+  feeds a `MediaStreamAudioDestinationNode`, before the page's mute (`index.html` without `?sound`) : guests hear the game, the host tab stays
   muted. Stereo Opus.
 
 ## By hand

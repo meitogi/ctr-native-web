@@ -127,7 +127,7 @@ export async function menuTo(ctx, label, step) {
  */
 export async function recordWithSound(ctx, label, fn) {
 	if (ctx.args?.sound !== '1') return ctx.record(label, fn)
-	const gain = v => ctx.js(`const m = globalThis.Module?.SDL3?.audioContext?.ctrMute; if (m) m.gain.value = ${v}; return !!m`)
+	const gain = v => ctx.js(`const m = globalThis.ctrAudio?.context?.ctrMute; if (m) m.gain.value = ${v}; return !!m`)
 	await gain(1)
 	try {
 		return await ctx.record(label, fn)

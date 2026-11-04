@@ -40,5 +40,9 @@ void NativeAudio_GetOutputStats(int *underrunFrames, int *overflowFrames, int *q
 int NativeAudio_GetStateSize(void);
 int NativeAudio_CaptureState(void *dst, int dstSize);
 int NativeAudio_RestoreState(const void *src, int srcSize);
+#if defined(__EMSCRIPTEN__)
+// Sends the SPU commands recorded since the last VBlank to the audio worklet now (before a wait).
+void NativeAudio_WebFlush(void);
+#endif
 
 #endif

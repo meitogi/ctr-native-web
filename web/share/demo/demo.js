@@ -20,9 +20,9 @@ const heap = new Uint8Array(24);
 const state = { frames: 0, mask: 0, pads: [null, null, null, null], link: '', host: null };
 window.__shareDemo = state;
 
-// SDL3's audio graph, as the game builds it : Module.SDL3.audioContext and a playback
-// ScriptProcessorNode connected to the destination (here, a quiet 440 Hz tone).
-const Module = { canvas, SDL3: null };
+// The game's audio graph, as web/audio/audio.js builds it : window.ctrAudio's context and output
+// node connected to the destination (here, a quiet 440 Hz tone).
+const audio = { context: null, output: null };
 function startAudio() {
   const ctx = new AudioContext();
   const node = ctx.createScriptProcessor(2048, 0, 2);
@@ -33,7 +33,7 @@ function startAudio() {
     for (let i = 0; i < l.length; i++, phase += (2 * Math.PI * 440) / ctx.sampleRate) l[i] = r[i] = 0.1 * Math.sin(phase);
   };
   node.connect(ctx.destination);
-  Module.SDL3 = { audioContext: ctx, audio_playback: { scriptProcessorNode: node } };
+  Object.assign(audio, { context: ctx, output: node });
 }
 
 let capture = null;
@@ -68,7 +68,7 @@ setInterval(frame, 1000 / 30);
 $('start').addEventListener('click', async () => {
   $('start').disabled = true;
   startAudio();
-  capture = createCapture(canvas, Module);
+  capture = createCapture(canvas, audio);
   capture.tapAudio();
   const link = newRoom({ relay: $('relay').value.trim(), rk: $('rk').value.trim() });
   state.link = formatRoomLink(new URL('../guest.html', location.href).href, link);
