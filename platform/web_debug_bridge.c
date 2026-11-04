@@ -619,6 +619,88 @@ internal void WebDebugBridge_PublishNet(struct GameTracker *gGT)
 }
 #endif
 
+// ---- window.__ctr.audio (session 21) : the audio output, seen from the page ----
+//
+// Kept in globalThis.__ctrAudio (window.__ctr is rewritten every present) :
+//   path          'script-processor' (SDL's node, the main thread mixes)
+//   sampleRate, block (frames per output block), baseLatency / outputLatency (s), state
+//   blocks        output blocks the page filled
+//   underruns     blocks whose playback time did not follow the previous one by one block
+//                 (± 25 %) : Chrome hands a late node a later playbackTime, the audio between
+//                 was silence ; missedMs sums it
+//   longestGapMs  the longest wall-clock gap between two filled blocks
+//   leadMinMs     the least time left between filling a block and its playback
+//   times         performance.now() of each filled block since boot (20 000 at most)
+//   glitches      { at, ms } of each underrun since boot (ms : the playback jump past one block)
+//   spu / spuTotal / mixerMsPerSec  pushed by native_audio.c once per 60 VBlanks
+//   reset()       starts a new window (counters only)
+// __ctrStall = { ms, every } : a debug busy loop of `ms` in one frame every `every` ms (or once
+// when `every` is 0) — the late frame the audio must survive.
+EM_JS(void, WebDebugBridge_AudioJS, (void), {
+	const A = (globalThis.__ctrAudio = globalThis.__ctrAudio || {});
+	if (!A.reset) {
+		A.times = [];
+		A.glitches = [];
+		A.reset = () => Object.assign(A, { blocks: 0, underruns: 0, missedMs: 0, longestGapMs: 0, leadMinMs: null, lastAt: 0, lastPlay: null });
+		A.reset();
+	}
+	const playback = Module['SDL3'] && Module['SDL3']['audio_playback'];
+	const node = playback && playback['scriptProcessorNode'];
+	if (node && A.node !== node) {
+		const ctx = Module['SDL3']['audioContext'];
+		A.node = node;
+		Object.assign(A, { path: 'script-processor', sampleRate: ctx.sampleRate, block: node.bufferSize, baseLatency: ctx.baseLatency, lastPlay: null });
+		node.addEventListener('audioprocess', (e) => {
+			const now = performance.now();
+			const blockMs = (A.block / A.sampleRate) * 1000;
+			const play = e.playbackTime * 1000;
+			A.blocks++;
+			if (A.times.length < 20000) A.times.push(Math.round(now));
+			if (A.lastAt && now - A.lastAt > A.longestGapMs) A.longestGapMs = Math.round(now - A.lastAt);
+			if (A.lastPlay !== null) {
+				const step = play - A.lastPlay;
+				if (step < blockMs * 0.75 || step > blockMs * 1.25) {
+					A.underruns++;
+					A.missedMs = Math.round(A.missedMs + Math.max(0, step - blockMs));
+					if (A.glitches.length < 2000) A.glitches.push({ at: Math.round(now), ms: Math.round(step - blockMs) });
+				}
+			}
+			const lead = play - ctx.currentTime * 1000;
+			if (A.leadMinMs === null || lead < A.leadMinMs) A.leadMinMs = Math.round(lead);
+			A.lastAt = now;
+			A.lastPlay = play;
+			A.state = ctx.state;
+			A.outputLatency = ctx.outputLatency;
+		});
+	}
+	if (globalThis.__ctr) globalThis.__ctr.audio = A;
+});
+
+EM_JS(int, WebDebugBridge_StallJS, (void), {
+	const S = globalThis.__ctrStall;
+	if (!S || !S.ms) return 0;
+	const now = performance.now();
+	if (S.at && now - S.at < (S.every || 0)) return 0;
+	if (S.at && !S.every) return 0;
+	S.at = now;
+	S.count = (S.count || 0) + 1;
+	return S.ms | 0;
+});
+
+internal void WebDebugBridge_Stall(void)
+{
+	const int ms = WebDebugBridge_StallJS();
+
+	if (ms > 0)
+	{
+		const double start = emscripten_get_now();
+
+		while (emscripten_get_now() - start < ms)
+		{
+		}
+	}
+}
+
 internal void WebDebugBridge_Publish(void)
 {
 	struct GameTracker *gGT = sdata->gGT;
@@ -764,4 +846,6 @@ internal void WebDebugBridge_Publish(void)
 #ifdef USE_ONLINE
 	WebDebugBridge_PublishNet(gGT);
 #endif
+	WebDebugBridge_AudioJS();
+	WebDebugBridge_Stall();
 }

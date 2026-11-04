@@ -365,6 +365,124 @@ struct NativeAudioSnapshot
 
 global_variable struct NativeAudioState s_audio;
 
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+#include <emscripten.h>
+// __ctr.audio (debug web builds, session 21) : what the game asks of the SPU per second
+// (calls and bytes per entry point, the most bytes in one VBlank) and the main-thread time
+// spent mixing. Pushed once per 60 VBlanks ; web_debug_bridge.c attaches it to __ctr.
+enum NativeAudioWebOp
+{
+	NATIVE_AUDIO_OP_INIT,
+	NATIVE_AUDIO_OP_TRANSFER_ADDR,
+	NATIVE_AUDIO_OP_WRITE,
+	NATIVE_AUDIO_OP_VOICE_ATTR,
+	NATIVE_AUDIO_OP_KEY,
+	NATIVE_AUDIO_OP_REVERB,
+	NATIVE_AUDIO_OP_REVERB_PARAM,
+	NATIVE_AUDIO_OP_REVERB_DEPTH,
+	NATIVE_AUDIO_OP_REVERB_VOICE,
+	NATIVE_AUDIO_OP_MASTER_VOLUME,
+	NATIVE_AUDIO_OP_CD_MIX,
+	NATIVE_AUDIO_OP_CD_VOLUME,
+	NATIVE_AUDIO_OP_CD_REVERB,
+	NATIVE_AUDIO_OP_XA_START,
+	NATIVE_AUDIO_OP_XA_STOP,
+	NATIVE_AUDIO_OP_XA_VOLUME,
+	NATIVE_AUDIO_OP_COUNT
+};
+
+global_variable struct
+{
+	int calls[NATIVE_AUDIO_OP_COUNT];
+	int bytes[NATIVE_AUDIO_OP_COUNT];
+	int vblankBytes;
+	int vblankBytesMax;
+	double mixMs;
+	int vblanks;
+	// posting jitter : each VBlank's time against an ideal 59.82 Hz grid, anchored on the
+	// earliest VBlank and moved forward by the least lateness of each 60-VBlank window (the
+	// game dropped VBlanks after a stall) or at once past 1 s ; lateMs = this window's
+	double lateMs[60];
+} s_audioWebStats;
+global_variable double s_audioWebGridMs;
+global_variable int s_audioWebGridSet;
+
+EM_JS(void, NativeAudio_WebStatsJS, (const int *calls, const int *bytes, int count, int vblankBytesMax, double mixMs, const double *lateMs, int lateCount), {
+	const A = (globalThis.__ctrAudio = globalThis.__ctrAudio || {});
+	const names = ['init', 'transferAddr', 'write', 'voiceAttr', 'key', 'reverb', 'reverbParam', 'reverbDepth', 'reverbVoice',
+	               'masterVolume', 'cdMix', 'cdVolume', 'cdReverb', 'xaStart', 'xaStop', 'xaVolume'];
+	const sec = { calls: {}, bytes: 0, vblankBytesMax, mixerMs: Math.round(mixMs * 10) / 10 };
+	const tot = (A.spuTotal = A.spuTotal || { calls: {}, bytes: 0, vblankBytesMax: 0 });
+	for (let i = 0; i < count; i++) {
+		const c = HEAP32[(calls >> 2) + i], b = HEAP32[(bytes >> 2) + i];
+		if (c) { sec.calls[names[i]] = c; tot.calls[names[i]] = (tot.calls[names[i]] || 0) + c; }
+		sec.bytes += b;
+	}
+	tot.bytes += sec.bytes;
+	tot.vblankBytesMax = Math.max(tot.vblankBytesMax, vblankBytesMax);
+	const late = Array.from(HEAPF64.subarray(lateMs >> 3, (lateMs >> 3) + lateCount)).sort((a, b) => a - b);
+	const pct = (p) => Math.round(late[Math.min(late.length - 1, Math.floor(late.length * p))] * 10) / 10;
+	sec.late = { p50: pct(0.5), p95: pct(0.95), max: pct(1) };
+	const J = (A.jitter = A.jitter || { all: [] });
+	for (const x of late) if (J.all.length < 100000) J.all.push(Math.round(x * 10) / 10);
+	A.spu = sec;
+	A.mixerMsPerSec = sec.mixerMs;
+	(A.spuHistory = A.spuHistory || []).push(sec);
+	if (A.spuHistory.length > 600) A.spuHistory.shift();
+});
+
+internal void NativeAudio_WebCount(int op, int payloadBytes)
+{
+	s_audioWebStats.calls[op]++;
+	s_audioWebStats.bytes[op] += 4 + payloadBytes;
+	s_audioWebStats.vblankBytes += 4 + payloadBytes;
+}
+
+internal void NativeAudio_WebStatsVBlank(void)
+{
+	if (s_audioWebStats.vblankBytes > s_audioWebStats.vblankBytesMax)
+	{
+		s_audioWebStats.vblankBytesMax = s_audioWebStats.vblankBytes;
+	}
+	s_audioWebStats.vblankBytes = 0;
+	{
+		const double now = emscripten_get_now();
+		const double periodMs = 1000.0 * 897619.0 / 53693175.0;
+		double late;
+
+		s_audioWebGridMs += periodMs;
+		if (!s_audioWebGridSet || (now < s_audioWebGridMs))
+		{
+			s_audioWebGridMs = now;
+			s_audioWebGridSet = 1;
+		}
+		late = now - s_audioWebGridMs;
+		// a stall the game rebased past (more than a second late) : re-anchor there
+		if (late > 1000.0)
+		{
+			s_audioWebGridMs = now;
+		}
+		s_audioWebStats.lateMs[s_audioWebStats.vblanks] = late;
+	}
+	if (++s_audioWebStats.vblanks >= 60)
+	{
+		double minLate = s_audioWebStats.lateMs[0];
+
+		for (int i = 1; i < s_audioWebStats.vblanks; i++)
+		{
+			minLate = s_audioWebStats.lateMs[i] < minLate ? s_audioWebStats.lateMs[i] : minLate;
+		}
+		s_audioWebGridMs += minLate;
+		NativeAudio_WebStatsJS(s_audioWebStats.calls, s_audioWebStats.bytes, NATIVE_AUDIO_OP_COUNT, s_audioWebStats.vblankBytesMax, s_audioWebStats.mixMs,
+		                       s_audioWebStats.lateMs, s_audioWebStats.vblanks);
+		memset(&s_audioWebStats, 0, sizeof(s_audioWebStats));
+	}
+}
+#define NATIVE_AUDIO_WEB_COUNT(op, payloadBytes) NativeAudio_WebCount((op), (int)(payloadBytes))
+#else
+#define NATIVE_AUDIO_WEB_COUNT(op, payloadBytes) ((void)0)
+#endif
+
 internal b32 NativeAudio_OutputOpen(void)
 {
 	return s_audio.output.stream != NULL;
@@ -2321,6 +2439,9 @@ internal void SDLCALL NativeAudio_StreamCallback(void *userdata, SDL_AudioStream
 	}
 
 	int framesNeeded = (additional_amount + frameBytes - 1) / frameBytes;
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+	const double mixStart = emscripten_get_now();
+#endif
 #ifdef CTR_INTERNAL
 	if (framesNeeded > s_audio.output.callbackMaxRequestFrames)
 	{
@@ -2361,6 +2482,9 @@ internal void SDLCALL NativeAudio_StreamCallback(void *userdata, SDL_AudioStream
 
 		framesNeeded -= chunkFrames;
 	}
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+	s_audioWebStats.mixMs += emscripten_get_now() - mixStart;
+#endif
 }
 
 void NativeAudio_ClearOutputQueue(void)
@@ -2818,6 +2942,9 @@ void NativeAudio_StepVBlank(void)
 
 	NativeAudio_UnlockOutput();
 	NativePerf_EndScope(NATIVE_PERF_BUCKET_AUDIO_VBLANK);
+#if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
+	NativeAudio_WebStatsVBlank();
+#endif
 
 #ifdef CTR_INTERNAL
 	if (shouldReportStats)
@@ -2942,6 +3069,7 @@ s32 NativeAudio_SpuInit(void)
 
 u32 NativeAudio_SpuSetTransferStartAddr(u32 addr)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_TRANSFER_ADDR, sizeof(addr));
 	if (addr > NATIVE_AUDIO_SPU_MEMSIZE)
 	{
 		return 0;
@@ -2959,6 +3087,7 @@ u32 NativeAudio_SpuSetTransferStartAddr(u32 addr)
 
 u32 NativeAudio_SpuWrite(const u8 *addr, u32 size)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_WRITE, size);
 	NativeAudio_LockOutput();
 
 	int wptrOfs = s_audio.spu.transferOffset;
@@ -2979,6 +3108,7 @@ u32 NativeAudio_SpuWrite(const u8 *addr, u32 size)
 
 void NativeAudio_SpuSetVoiceAttr(SpuVoiceAttr *psxAttrib)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_VOICE_ATTR, sizeof(*psxAttrib));
 	if (!s_audio.init || psxAttrib == NULL)
 	{
 		return;
@@ -3075,6 +3205,7 @@ void NativeAudio_SpuSetVoiceAttr(SpuVoiceAttr *psxAttrib)
 
 void NativeAudio_SpuSetKey(s32 on_off, u32 voice_bit)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_KEY, sizeof(on_off) + sizeof(voice_bit));
 	if (!s_audio.init)
 	{
 		return;
@@ -3125,6 +3256,7 @@ void NativeAudio_SpuSetKey(s32 on_off, u32 voice_bit)
 
 s32 NativeAudio_SpuSetReverb(s32 on_off)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_REVERB, sizeof(on_off));
 	NativeAudio_LockOutput();
 
 	int oldState = s_audio.reverbEnabled;
@@ -3137,6 +3269,7 @@ s32 NativeAudio_SpuSetReverb(s32 on_off)
 
 s32 NativeAudio_SpuSetReverbModeParam(SpuReverbAttr *attr)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_REVERB_PARAM, sizeof(*attr));
 	if (attr == NULL)
 	{
 		return SPU_INVALID_ARGS;
@@ -3179,6 +3312,7 @@ s32 NativeAudio_SpuSetReverbModeParam(SpuReverbAttr *attr)
 
 void NativeAudio_SpuSetReverbModeDepth(s16 left, s16 right)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_REVERB_DEPTH, 4);
 	NativeAudio_LockOutput();
 
 	s_audio.reverbAttr.depth.left = left;
@@ -3190,6 +3324,7 @@ void NativeAudio_SpuSetReverbModeDepth(s16 left, s16 right)
 
 u32 NativeAudio_SpuSetReverbVoice(s32 on_off, u32 voice_bit)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_REVERB_VOICE, 8);
 	NativeAudio_LockOutput();
 
 	if (on_off)
@@ -3216,6 +3351,7 @@ u32 NativeAudio_SpuSetReverbVoice(s32 on_off, u32 voice_bit)
 
 void NativeAudio_SpuSetCommonMasterVolume(s16 left, s16 right)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_MASTER_VOLUME, 4);
 	NativeAudio_LockOutput();
 
 	s_audio.masterVolumeLeft = left;
@@ -3229,6 +3365,7 @@ void NativeAudio_SpuSetCommonMasterVolume(s16 left, s16 right)
 
 void NativeAudio_SpuSetCommonCDMix(s32 enabled)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_CD_MIX, 4);
 	NativeAudio_LockOutput();
 
 	s_audio.cdMixEnabled = enabled != 0;
@@ -3240,6 +3377,7 @@ void NativeAudio_SpuSetCommonCDMix(s32 enabled)
 
 void NativeAudio_SpuSetCommonCDVolume(s16 left, s16 right)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_CD_VOLUME, 4);
 	NativeAudio_LockOutput();
 
 	s_audio.xa.volumeLeft = left;
@@ -3253,6 +3391,7 @@ void NativeAudio_SpuSetCommonCDVolume(s16 left, s16 right)
 
 void NativeAudio_SpuSetCommonCDReverb(s32 enabled)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_CD_REVERB, 4);
 	NativeAudio_LockOutput();
 
 	s_audio.cdReverbEnabled = enabled != 0;
@@ -3276,6 +3415,7 @@ int NativeAudio_GetXATrackLength(int categoryID, int xaID)
 
 void NativeAudio_StopXA(void)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_XA_STOP, 0);
 	NativeAudio_LockOutput();
 
 	NativeAudio_CloseXANoLock();
@@ -3285,6 +3425,7 @@ void NativeAudio_StopXA(void)
 
 void NativeAudio_SetXAVolume(int volumeLeft, int volumeRight)
 {
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_XA_VOLUME, 8);
 	NativeAudio_LockOutput();
 
 	s_audio.xa.volumeLeft = (s16)volumeLeft;
@@ -3337,6 +3478,7 @@ int NativeAudio_PlayXATrack(int categoryID, int xaID, int volumeLeft, int volume
 		return 0;
 	}
 	NativeAudio_XaSourceClose(&source);
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_XA_START, (size_t)prepared.sectorCount * (size_t)prepared.sectorSize);
 
 	NativeAudio_LockOutput();
 
@@ -3383,6 +3525,7 @@ int NativeAudio_PlayXAFile(const char *relativePath, int channelFilter, int volu
 		return 0;
 	}
 	NativeAudio_XaSourceClose(&source);
+	NATIVE_AUDIO_WEB_COUNT(NATIVE_AUDIO_OP_XA_START, (size_t)prepared.sectorCount * (size_t)prepared.sectorSize);
 
 	NativeAudio_LockOutput();
 
