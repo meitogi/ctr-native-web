@@ -151,7 +151,7 @@ async function rejoin(ctx, mode) {
 	const r = { ctx, ...(await roomToRace(ctx, mode, { inject: [IMPAIR, TOASTS] })) }
 	const res = { mode, path: `${r.gl.backend}/${r.gl.path}` }
 	try {
-		const before = (await online(r.guest)).links[0]?.peerId
+		const before = (await online(r.guest)).selfId // the guest's own relay id : a fresh link has a new one
 		await sleep(2000)
 		await impair(r.guest, { cut: true })
 		const cutAt = Date.now()
@@ -159,10 +159,10 @@ async function rejoin(ctx, mode) {
 		res.toldMs = res.toldMs == null ? null : Date.now() - cutAt
 		say(`guest cut : told after ${res.toldMs} ms`)
 		await impair(r.guest, { cut: false })
-		res.relinkMs = await timeUntil(r.guest, s => s.links.length === 1 && s.links[0].peerId !== before, 90_000)
+		res.relinkMs = await timeUntil(r.guest, s => s.links.length === 1 && s.selfId !== before, 90_000)
 		res.relinkMs = res.relinkMs == null ? null : Date.now() - cutAt
 		const g1 = await online(r.guest)
-		res.after = { path: g1.links[0] ? `${g1.links[0].backend}/${g1.links[0].path}` : null, peerId: g1.links[0]?.peerId, before }
+		res.after = { path: g1.links[0] ? `${g1.links[0].backend}/${g1.links[0].path}` : null, selfId: g1.selfId, before }
 		say(`re-linked after ${res.relinkMs} ms : ${JSON.stringify(res.after)}`)
 		if (res.relinkMs == null) throw new Error(`the guest did not re-link : ${JSON.stringify({ error: g1.error, rejoin: g1.rejoin, lastError: g1.lastError })}`)
 		await until(r.guest, 'the guest waits for the race (the room refuses it)', s => s.waitingForRace, 60_000)
@@ -185,6 +185,7 @@ async function rejoin(ctx, mode) {
 	say(JSON.stringify(res))
 	if (res.lobby.guestSlot !== 1 || res.lobby.driverID !== 1) throw new Error(`the guest came back in another slot : ${JSON.stringify(res.lobby)}`)
 	if (!res.toasts.some(t => /racing|course/i.test(t))) throw new Error(`the guest was not told it waits for the race : ${JSON.stringify(res.toasts)}`)
+	if (!/racing|course/i.test(res.waitingStatus) || /host's menus|menus de l'hôte/i.test(res.waitingStatus)) throw new Error(`the waiting guest's status line : ${JSON.stringify(res.waitingStatus)}`)
 	return JSON.stringify(res)
 }
 

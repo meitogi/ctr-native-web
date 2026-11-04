@@ -450,6 +450,7 @@ export function attach(Module) {
   function leave() {
     rejoinToken++;
     rejoinTry = 0;
+    toldWaiting = false;
     Module.ctrOnlineControl?.(CTL.leave);
     globalThis.ctrShareApi?.stopOn({ keepRoom: true });
     shareHost = null;
@@ -590,11 +591,14 @@ export function attach(Module) {
     lobbyVideo.classList.toggle('hidden', !(on && joined() && shareGuest?.media && lobbyStream.getTracks().length));
   };
   // guest : the game asked the room and was refused because it is racing
-  const waitingForRace = () => {
+  const refused = () => {
     const o = Module.ctrOnlineOctr?.();
     return net.role === 'guest' && lobby().active && o?.CurrState === ST.pickRoom && o.clientCount[ROOM] >= 8;
   };
+  // from the first refusal until the server takes the guest : the game retries every 2 s through
+  // its server menu, so refused() alone flickers
   let toldWaiting = false;
+  const waitingForRace = () => toldWaiting && net.role === 'guest' && !joined();
   const endTimer = createEndTimer();
   // to every guest of the lobby share that listens : our framing (Share's LOBBY message), not the game's
   const toGuests = (body) => {
@@ -641,10 +645,10 @@ export function attach(Module) {
       // the title reloaded after a race) ; the pad goes to the host only while its menus run
       setLobbyGuest(l.active && l.phase !== PHASE.race);
       if (l.active && inHostMenus() && shareGuest?.state === 'connected') sendPad();
-      const waiting = waitingForRace();
-      if (waiting && !toldWaiting) ui?.toast(T.roomRacing, T.nextLobby);
-      if (waiting) toldWaiting = true;
-      else if (joined()) toldWaiting = false;
+      if (refused() && !toldWaiting) {
+        ui?.toast(T.roomRacing, T.nextLobby);
+        toldWaiting = true;
+      } else if (joined()) toldWaiting = false;
     }
   }
   setInterval(lobbyTick, 100);
@@ -730,7 +734,7 @@ export function attach(Module) {
     if (waitingForRace()) lines.push(`${T.roomRacing} ${T.nextLobby}`);
     const players = net.role === 'host' ? shareHost?.players() : shareGuest?.list;
     if (players?.length) lines.push(T.inRoom(players.map((p) => `P${p.slot + 1} ${nameOf(p.slot, p.name)}`).join(' · ')));
-    if (l.active && T.lobby[l.phase]) lines.push(T.lobby[l.phase]);
+    if (l.active && T.lobby[l.phase] && !waitingForRace()) lines.push(T.lobby[l.phase]);
     if (net.role === 'guest' && shareGuest?.state === 'connected' && !shareGuest.media) lines.push(T.noPicture);
     if (octr && octr.CurrState >= 0) lines.push(T.game(T.states[octr.CurrState] ?? octr.CurrState));
     status.textContent = lines.join('\n');
@@ -748,6 +752,7 @@ export function attach(Module) {
         link: linkText,
         signaling: link?.signaling ?? null,
         backend: net.room?.backend ?? null,
+        selfId: net.room?.selfId ?? null,
         links: links(),
         queue: net.queue.length,
         stats: net.stats,
