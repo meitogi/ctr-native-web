@@ -38,7 +38,7 @@ const en = {
   mute: 'Mute',
   unmute: 'Unmute',
   volume: 'Volume',
-  tabs: { players: 'Players', controls: 'Controls', multi: 'Multiplayer', system: 'System', online: 'Online', share: 'Share' },
+  tabs: { players: 'Players', controls: 'Controls', multi: 'Multiplayer', system: 'System', online: 'Netplay', share: 'Share' },
   gameData: 'Game',
   about: 'About',
   whoPlays: 'Who plays on this page',
@@ -56,7 +56,7 @@ const en = {
   guestNoLink: 'This page needs the Share link from the host (…/share/guest.html#room=…).',
   guestClickSound: 'Click to play with sound',
   guestClickHelp: 'Your browser starts the sound on a click.',
-  guestOnline: 'No direct connection to the host : Share streams video peer to peer only. Use Online mode (each player with their own disc) to play together over the relay.',
+  guestOnline: 'No direct connection to the host : Share streams video peer to peer only. Use Netplay (each player with their own disc) to play together over the relay.',
   guestFull: 'Three guests are already playing : Share drives P2 to P4.',
   guestHostLeft: 'The host left.',
   guestClosed: 'Disconnected.',
@@ -177,7 +177,7 @@ const fr = {
   mute: 'Couper le son',
   unmute: 'Remettre le son',
   volume: 'Volume',
-  tabs: { players: 'Joueurs', controls: 'Commandes', multi: 'Multijoueur', system: 'Système', online: 'En ligne', share: 'Partage' },
+  tabs: { players: 'Joueurs', controls: 'Commandes', multi: 'Multijoueur', system: 'Système', online: 'Netplay', share: 'Partage' },
   gameData: 'Jeu',
   about: 'À propos',
   whoPlays: 'Qui joue sur cette page',
@@ -195,7 +195,7 @@ const fr = {
   guestNoLink: 'Cette page a besoin du lien Partage de l\'hôte (…/share/guest.html#room=…).',
   guestClickSound: 'Clique pour jouer avec le son',
   guestClickHelp: 'Ton navigateur démarre le son sur un clic.',
-  guestOnline: 'Pas de connexion directe avec l\'hôte : le Partage envoie la vidéo de pair à pair seulement. Utilise le mode En ligne (chaque joueur avec son disque) pour jouer ensemble via le relais.',
+  guestOnline: 'Pas de connexion directe avec l\'hôte : le Partage envoie la vidéo de pair à pair seulement. Utilise le Netplay (chaque joueur avec son disque) pour jouer ensemble via le relais.',
   guestFull: 'Trois invités jouent déjà : le Partage pilote P2 à P4.',
   guestHostLeft: 'L\'hôte est parti.',
   guestClosed: 'Déconnecté.',
@@ -279,7 +279,8 @@ const fr = {
   },
 }
 
-export const LANG = /^fr\b/i.test(globalThis.navigator?.language ?? '') ? 'fr' : 'en'
+// English for everyone for now (the user, 2026-11-04) ; the French strings are kept for later
+export const LANG = 'en'
 export const T = LANG === 'fr' ? fr : en
 export const STRINGS = { en, fr }
 

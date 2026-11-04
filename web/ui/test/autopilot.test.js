@@ -86,7 +86,7 @@ test('menuTo : walks the rows to the label, checking each step', async () => {
   let row = 0
   const out = { press: async (k) => { row += k === 'ArrowDown' ? 1 : -1 } }
   const read = async () => ({ menu: { row, label: MAIN_MENU[row] } })
-  const visited = await menuTo({ read, out, label: 'ONLINE', rows: MAIN_MENU, settle: async () => {}, ...c })
+  const visited = await menuTo({ read, out, label: 'NETPLAY', rows: MAIN_MENU, settle: async () => {}, ...c })
   assert.deepEqual(visited, MAIN_MENU.slice(0, 6))
   await assert.rejects(menuTo({ read, out: { press: async () => {} }, label: 'ADVENTURE', rows: MAIN_MENU, settle: async () => {}, ...c }), /never left row 5/)
 })

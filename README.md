@@ -47,9 +47,9 @@ no dates. no versions. trust the process.
 |---|---|---|
 | cooking | **smoother racing** | keeps its pace while you alt-tab to Discord, no more stutter when the first track loads |
 | next | **Share, upgraded** | guests get the full menu (volume, settings, their own controls) ; everyone gets a name — think `Mad Roo` — so the host knows who joined (and who rammed who) ; pick keyboard *or* gamepad so a drifting stick stops speedrunning the menus |
-| in the oven | **LAN / Online** | netplay like Mario Kart, ported from OnlineCTR, right from the game's own multiplayer menus. everyone on their own screen, full screen, with their own disc — same house or across the internet. private room, invite by link. end-to-end encrypted, so nobody sees your skill issue. except the other racers. wifi dies, you come back, the race remembers you |
+| in the oven | **LAN / Netplay** | netplay like Mario Kart, ported from OnlineCTR, right from the game's own multiplayer menus. everyone on their own screen, full screen, with their own disc — same house or across the internet. private room, invite by link. end-to-end encrypted, so nobody sees your skill issue. except the other racers. wifi dies, you come back, the race remembers you |
 | in the oven | **one game, one link** | one link for everything ; no disc = you land in Share automatically |
-| in the oven | **couch + online** | sofa vs. sofa. 2v2. bring snacks |
+| in the oven | **couch + netplay** | sofa vs. sofa. 2v2. bring snacks |
 | in the oven | **your screen, your shape** | full window resolution + widescreen. 240p was a vibe in 1999, it's 2026 |
 | in the oven | **race the DuckStation crowd** | public OnlineCTR servers, players on the original game. they've been grinding since 1999. gl hf |
 | in the oven | **disc from your own server** | load it from a box on your home network. drop it once per house, not once per device |
@@ -69,7 +69,7 @@ built the first time. rebuild the game with `web/dev.sh build`, then reload the 
 checks it with the guard too). in the devcontainer : `wtf ctr dev`, `wtf ctr build`, `wtf ctr prod`.
 
 testing alone ? on the debug page, from the main menu, Settings › Dev has a **second window** :
-Online VS, Online Battle or Share. one click, a window opens beside the first, joins the room by
+Netplay VS, Netplay Battle, Netplay Arcade or Share. one click, a window opens beside the first, joins the room by
 itself and plays as Bot ; the first window walks its menus to the race. Settings › Players has the
 Bot switch, Settings › Dev the log and the game state too. none of it ships on the site.
 
@@ -107,7 +107,7 @@ has you covered.
   code that parts of CTR Native's platform layer and PsyQ facade headers come from
 - [SDL3](https://github.com/libsdl-org/SDL) — audio, input, windows : the boring
   essentials nobody thanks
-- the browser port — WebAssembly, Share, LAN / Online, the whole web thing :
+- the browser port — WebAssembly, Share, LAN / Netplay, the whole web thing :
   [Meitogi](https://github.com/meitogi)
 - Crash Team Racing is a trademark of Sony Computer Entertainment / Naughty Dog. we're
   just fans with a compiler.

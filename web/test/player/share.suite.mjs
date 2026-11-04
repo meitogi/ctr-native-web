@@ -215,7 +215,7 @@ export default async ctx => {
 		const g = await guestWindow(ctx, link.replace('guest.html#', 'guest.html?mode=ws#'))
 		try {
 			const s = await waitIn(g.js, 'the refusal', "(() => { const s = window.__ctrShareGuest.state(); return s.state === 'refused' || s.state === 'closed' ? s : null })()", 30_000)
-			if (s.state !== 'refused' || s.code !== 'online-mode' || !/Online mode/.test(s.message)) throw new Error(`guest : ${JSON.stringify(s)}`)
+			if (s.state !== 'refused' || s.code !== 'online-mode' || !/Netplay/.test(s.message)) throw new Error(`guest : ${JSON.stringify(s)}`)
 			await sleep(1000)
 			const h = await ctx.js('return window.__ctrShare.state()')
 			if (!h.refusals.some(r => r.code === 'online-mode' && r.path === 'relay')) throw new Error(`host refusals ${JSON.stringify(h.refusals)}`)

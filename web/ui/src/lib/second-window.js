@@ -7,10 +7,10 @@
  * row its own menus are walked to (lib/autopilot.js menuTo, src/dev/second.js).
  */
 export const SECOND = {
-  vs: { room: 'online', menu: 'ONLINE', battle: false },
-  battle: { room: 'online', menu: 'ONLINE', battle: true },
+  vs: { room: 'online', menu: 'NETPLAY', battle: false },
+  battle: { room: 'online', menu: 'NETPLAY', battle: true },
   share: { room: 'share', menu: 'VS.', battle: false },
-  arcade: { room: 'online', menu: 'ONLINE', battle: false, arcade: true },
+  arcade: { room: 'online', menu: 'NETPLAY', battle: false, arcade: true },
 }
 
 /** Polls `get()` until it returns something, every `every` ms ; null after `timeout`. */

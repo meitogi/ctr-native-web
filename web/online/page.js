@@ -46,9 +46,9 @@ const WIDTH = 300; // the sidebar, CSS px
 
 const STRINGS = {
   en: {
-    title: 'Online',
+    title: 'Netplay',
     hide: 'Hide',
-    open: 'Online',
+    open: 'Netplay',
     name: 'Player name',
     hostTitle: 'Host a room',
     meet: 'Meeting point (tried in this order)',
@@ -91,12 +91,12 @@ const STRINGS = {
       '  arrows = D-pad (steer, menus)    C = Cross (accelerate, OK)    V = Circle (use item)',
       '  X = Square (brake, reverse)      Z = Triangle (back)',
       '  L Shift = L1 (hop / drift)       R Shift = R1 (hop / drift)    L Ctrl = L2    R Ctrl = R2',
-      '  Enter = Start (pause)            Space = Select (leave the online room)',
+      '  Enter = Start (pause)            Space = Select (leave the Netplay room)',
       '  A gamepad works as is (standard mapping). F4 moves the keyboard to the next player.',
     ],
     leave: 'Leave the room',
-    hostHint: 'Create the room and send the link. Then, in the game : ONLINE → VS, BATTLE or ARCADE (bots fill the race up to 8 karts). The others play P2–P4 on your screen ; at the track lock everyone races on their own screen.',
-    guestHint: 'Once in the room, the host\'s screen shows here while it picks : press Cross to join, pick your character with your own keys or pad. The race then runs on your own screen.',
+    hostHint: 'Netplay : every player runs their own copy of the game — each one needs their own disc (CTR, NTSC-U) and opens the room link you send. Create the room and send the link. Then, in the game : NETPLAY → VS, BATTLE or ARCADE (bots fill the race up to 8 karts). The others play P2–P4 on your screen ; at the track lock everyone races on their own screen.',
+    guestHint: 'Netplay needs your own copy of the game (your CTR disc, NTSC-U) : open the host\'s room link here. Once in the room, the host\'s screen shows here while it picks : press Cross to join, pick your character with your own keys or pad. The race then runs on your own screen.',
     lobby: ['', 'In the host\'s menus', 'Starting the race', 'Racing'],
     inRoom: (list) => `In the room : ${list}`,
     noPicture: 'No direct path to the host : your pad plays, the host\'s screen is not shown.',
@@ -132,9 +132,9 @@ const STRINGS = {
     },
   },
   fr: {
-    title: 'En ligne',
+    title: 'Netplay',
     hide: 'Masquer',
-    open: 'En ligne',
+    open: 'Netplay',
     name: 'Nom du joueur',
     hostTitle: 'Créer une partie',
     meet: 'Point de rendez-vous (essayés dans cet ordre)',
@@ -177,12 +177,12 @@ const STRINGS = {
       '  flèches = croix directionnelle (diriger, menus)    C = Croix (accélérer, valider)    V = Rond (utiliser l\'objet)',
       '  X = Carré (freiner, reculer)      Z = Triangle (retour)',
       '  Maj gauche = L1 (saut / dérapage)    Maj droite = R1 (saut / dérapage)    Ctrl gauche = L2    Ctrl droite = R2',
-      '  Entrée = Start (pause)            Espace = Select (quitter la salle en ligne)',
+      '  Entrée = Start (pause)            Espace = Select (quitter la salle Netplay)',
       '  Une manette marche telle quelle (mapping standard). F4 passe le clavier au joueur suivant.',
     ],
     leave: 'Quitter la partie',
-    hostHint: 'Crée la partie et envoie le lien. Puis, dans le jeu : ONLINE → VS, BATTLE ou ARCADE (des bots complètent la course jusqu’à 8 karts). Les autres jouent P2–P4 sur ton écran ; au choix du circuit, chacun court sur son propre écran.',
-    guestHint: 'Une fois dans la partie, l\'écran de l\'hôte s\'affiche ici pendant qu\'il choisit : appuie sur Croix pour entrer, choisis ton perso avec tes touches ou ta manette. La course tourne ensuite sur ton écran.',
+    hostHint: 'Netplay : chaque joueur fait tourner son propre jeu — chacun a besoin de son propre disque (CTR, NTSC-U) et ouvre le lien de la partie que tu envoies. Crée la partie et envoie le lien. Puis, dans le jeu : NETPLAY → VS, BATTLE ou ARCADE (des bots complètent la course jusqu’à 8 karts). Les autres jouent P2–P4 sur ton écran ; au choix du circuit, chacun court sur son propre écran.',
+    guestHint: 'Le Netplay demande ton propre jeu (ton disque CTR, NTSC-U) : ouvre ici le lien de la partie de l\'hôte. Une fois dans la partie, l\'écran de l\'hôte s\'affiche ici pendant qu\'il choisit : appuie sur Croix pour entrer, choisis ton perso avec tes touches ou ta manette. La course tourne ensuite sur ton écran.',
     lobby: ['', 'Dans les menus de l\'hôte', 'Lancement de la course', 'Course'],
     inRoom: (list) => `Dans la partie : ${list}`,
     noPicture: 'Pas de chemin direct vers l\'hôte : ta manette joue, l\'écran de l\'hôte n\'est pas affiché.',
@@ -269,7 +269,8 @@ function el(tag, props = {}, ...children) {
 
 /** @param {object} Module - the game's Emscripten module */
 export function attach(Module) {
-  const T = /^fr\b/i.test(navigator.language ?? '') ? STRINGS.fr : STRINGS.en;
+  // English for everyone for now (the user, 2026-11-04) ; STRINGS.fr is kept for later
+  const T = STRINGS.en;
   const query = new URLSearchParams(location.search);
   const net = createOnlineNet({ name: globalThis.ctrUI?.settings.get().name || load('name', 'Player') });
   Module.ctrOnlineNet = net;

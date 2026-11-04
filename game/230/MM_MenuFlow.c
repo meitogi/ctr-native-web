@@ -250,7 +250,7 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 #ifdef USE_ONLINE
 	if (!octrBootOnline) // ctr-native: one build, runtime
 	{
-		GAME_LANGUAGE_STRINGS[ONLINE_LNG_ROW] = "ONLINE";
+		GAME_LANGUAGE_STRINGS[ONLINE_LNG_ROW] = "NETPLAY";
 		MM_MENU_MAIN.rows = (MM_MENU_MAIN.rows == MM_ROWS_MAIN_WITH_SCRAPBOOK) ? onlineRowsMainWithScrapbook : onlineRowsMainBasic;
 		onlineMenu.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
 		onlineMenu.posY_curr = MM_MENU_RACE_TYPE.posY_curr;

@@ -125,7 +125,7 @@ export function cleanName(name) {
 export const nameOf = (slot, name) => cleanName(name).trim() || `P${slot + 1}`;
 
 /** Why a guest on the relay is refused (ROLLOUT : Share is P2P only, no TURN). */
-export const ONLINE_MODE = 'No direct connection to the host : Share streams video peer to peer only. Use Online mode (each player with their own disc) to play together over the relay.';
+export const ONLINE_MODE = 'No direct connection to the host : Share streams video peer to peer only. Use Netplay (each player with their own disc) to play together over the relay.';
 
 // ---- the guest's pad, from the Gamepad API or the keyboard ----
 

@@ -329,7 +329,7 @@ export async function roomToRace(ctx, mode, { inject = [], arcade = false } = {}
 
 		// The lobby is the host's own menus : ONLINE → VS → 2 players (open : the guest's pad is
 		// plugged as P2 by the Share host) → the character select
-		await menuTo(host, 'ONLINE', dir => host.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
+		await menuTo(host, 'NETPLAY', dir => host.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
 		const presses = arcade ? [CROSS, 'ArrowDown', 'ArrowDown', CROSS, CROSS, 'ArrowDown', CROSS, CROSS] : [CROSS, CROSS, CROSS]
 		for (const key of presses) {
 			await host.press(key)

@@ -13,7 +13,7 @@ export const CROSS = 'c'
 export const DIRS = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp']
 // Main menu rows (D230.rowsMainMenuBasic, game/230/D230.c), as the game spells them.
 // ONLINE : the CTR_ONLINE build's row (session 14) ; absent from the OFF build's menu
-export const MAIN_MENU = ['ADVENTURE', 'TIME TRIAL', 'ARCADE', 'VS.', 'BATTLE', 'ONLINE', 'HIGH SCORE', 'SCRAPBOOK']
+export const MAIN_MENU = ['ADVENTURE', 'TIME TRIAL', 'ARCADE', 'VS.', 'BATTLE', 'NETPLAY', 'HIGH SCORE', 'SCRAPBOOK']
 /** True on the main menu taking input (any row selected). */
 export const onMainMenu = (s) => s?.screen === 'menu' && s.menu != null && s.menu.input && MAIN_MENU.includes(s.menu.label)
 // enum LevelID (include/namespace_Level.h)
