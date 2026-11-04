@@ -16,6 +16,11 @@ export const DIRS = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp']
 export const MAIN_MENU = ['ADVENTURE', 'TIME TRIAL', 'ARCADE', 'VS.', 'BATTLE', 'ONLINE', 'HIGH SCORE', 'SCRAPBOOK']
 /** True on the main menu taking input (any row selected). */
 export const onMainMenu = (s) => s?.screen === 'menu' && s.menu != null && s.menu.input && MAIN_MENU.includes(s.menu.label)
+// enum LevelID (include/namespace_Level.h)
+const MAIN_MENU_LEVEL = 39
+const NAUGHTY_DOG_CRATE = 41
+/** True while the boot intro plays : the Naughty Dog crate, then the title until its menu takes input (« Skip intro » cuts both on a press). */
+export const inBootIntro = (s) => !!s && (s.levelID === NAUGHTY_DOG_CRATE || (s.levelID === MAIN_MENU_LEVEL && s.screen === 'menu' && s.menu != null && !s.menu.input))
 
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms))
 export const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a))

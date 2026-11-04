@@ -1,7 +1,7 @@
 // The bot's decisions (src/lib/autopilot.js), on a fake clock and a fake kart.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { MAIN_MENU, createPicker, drive, menuTo } from '../src/lib/autopilot.js'
+import { MAIN_MENU, createPicker, drive, inBootIntro, menuTo } from '../src/lib/autopilot.js'
 
 /** A clock that moves only when the code sleeps. */
 function clock() {
@@ -89,4 +89,13 @@ test('menuTo : walks the rows to the label, checking each step', async () => {
   const visited = await menuTo({ read, out, label: 'ONLINE', rows: MAIN_MENU, settle: async () => {}, ...c })
   assert.deepEqual(visited, MAIN_MENU.slice(0, 6))
   await assert.rejects(menuTo({ read, out: { press: async () => {} }, label: 'ADVENTURE', rows: MAIN_MENU, settle: async () => {}, ...c }), /never left row 5/)
+})
+
+test('boot intro : the Naughty Dog crate and the title before its menu takes input, nothing after', () => {
+  assert.equal(inBootIntro({ screen: 'cutscene', levelID: 41, menu: null }), true)
+  assert.equal(inBootIntro({ screen: 'loading', levelID: 41, menu: null }), true)
+  assert.equal(inBootIntro({ screen: 'menu', levelID: 39, menu: { label: 'ADVENTURE', input: false } }), true)
+  assert.equal(inBootIntro({ screen: 'menu', levelID: 39, menu: { label: 'ADVENTURE', input: true } }), false)
+  assert.equal(inBootIntro({ screen: 'race', levelID: 3, menu: null }), false)
+  assert.equal(inBootIntro(null), false)
 })

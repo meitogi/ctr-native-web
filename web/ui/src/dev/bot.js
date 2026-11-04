@@ -1,10 +1,10 @@
 // The « Bot » switch (debug builds, Settings › Joueurs) : this window plays itself with
 // lib/autopilot.js — the bots' character pick at the character select, the racing line and the
-// items in a race, Cross through the intro. What it reads depends on the page :
+// items in a race, Cross through the boot intro and the race's fly-in. What it reads depends on the page :
 //   Share's guest page   the host's view of our kart (__ctrShareGuest.bot(), ?bot : KART / TRACK)
 //   an Online guest      the host's menus in the lobby (__ctrOnline.bot()), its own game in the race
 //   any other page       its own game (window.__ctr) : P1 on the host, solo
-import { createPicker, drive } from '../lib/autopilot.js'
+import { createPicker, drive, inBootIntro } from '../lib/autopilot.js'
 import { out } from './keys.js'
 
 const PHASE_MENUS = 1 // web/online/page.js PHASE
@@ -23,6 +23,8 @@ function look(g) {
     return { slot: share.state().slot, menus: b, race: racing(b) && line?.levelID === b.levelID && line.path?.length >= 10 ? { read: () => withoutTrack(share.bot()), track: () => share.bot()?.track } : null }
   }
   const own = g.__ctr
+  // the boot intro first : an Online guest's room is already open while its game boots
+  if (inBootIntro(own)) return { slot: 0, menus: null, race: null, intro: true }
   const online = g.__ctrOnline?.state?.()
   if (online?.role === 'guest' && online.lobby?.active) {
     const slot = online.share?.slot ?? 0
