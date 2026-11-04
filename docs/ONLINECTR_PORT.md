@@ -1242,3 +1242,122 @@ lobby link (our framing, not the game's). The page passes `NATIVE_ONLINE_CTL_END
 its game, which ends the race where the kart stands, as a crossed finish line does (the
 finish flag, no item, the AI drives on) ; the game then sends an ordinary `CG_ENDRACE` and
 the server resets the room as usual.
+
+## Session 23 findings
+
+Online Arcade with AI karts (the user, 2026-10-23 ; the choices of 2026-11-03 and 2026-11-04 in
+D11). What the room, the server and the game already do, read before the design :
+
+| Fact | Where |
+|---|---|
+| The server stamps every kart state, weapon and end of race with the **sender's** `clientID` : the host's client cannot speak for another slot | `sv_core.c:532`, `:554`, `:574` |
+| A peer is any id below 260 with its own address key ; the duplicate check is on that key | `sv_core.h:9`, `sv_core.c:406-416` |
+| A locked room refuses every join until the reset after the race ; `SG_ROOMS` counts occupied slots, `clientCount` is a high-water mark | `sv_core.c:381`, `:160-168`, `:421` |
+| The server echoes kart states, weapons, names, characters and ends to their sender | `sv_core.c:118-131` |
+| A disconnect mid-race marks the slot loaded / raced and broadcasts an empty `SG_NAME` ; nothing removes the kart, it holds Square and drops out of ranks, results and `HasRaceEnded` | `sv_core.c:300-316`, `native_online.c:287-307`, `hooks.c:184` |
+| Only the web adapter turns a closed guest link into `SvCore_Disconnect` | `web_online_transport.c` `WebHost_Service` |
+| `OnlineInit_Drivers` births every named slot as a player kart and never calls `BOTS_Adv_AdjustDifficulty` (the nav data) ; the mod itself notes AIs need it | `hooks.c:36-45`, `:83` |
+| `BOTS_Driver_Convert` returns under `ONLINE_RACE` (upstream patched it to `jr ra`) ; `NativeOnlineGame_EndMyRace`'s « the AI drives on » is therefore false online | `BOTS.c:3924` |
+| `BOTS_Driver_Convert` points the AI at its path's **first** nav frame : right at a finish line, wrong mid-lap | `BOTS.c` (end of the function) |
+| Bots never break crates (robot cars return first) and never read pads ; `vehThread.c` wraps PLAYER-bucket karts only | `RB_Crate.c:152`, `OnlineCTR/vehThread.c` |
+| Arcade bots attack the human ranked just ahead of or behind them, for `drivers[0 .. numPlyrCurrGame)` : online, the host only | `PickupBots.c:72-260` |
+| A bot shot goes through `VehPickupItem_ShootNow` with `heldItemID` set, like a player's ; only `driverID == 0` fills `octr->Shoot[0]` | `PickupBots.c`, `VehPickupItem.c:619` |
+| `bestLapTime` is kept for `drivers[0]` only ; a driver's course time is `elapsedEventTime` at its finish | `PlayLevel.c:127`, `VehPhysProc.c:194` |
+| The race ends locally when `drivers[0]` finishes (`MainGameEnd_Initialize`) ; the level keeps running and bots keep driving | `PlayLevel.c:482` |
+| Retail Arcade asks the difficulty for a single race too ; MEDIUM / HARD lock only in a Cup | `MM_MenuFlow.c` `MM_MenuProc_1p2p`, `MM_ToggleRows_Difficulty` |
+| The players menu of Arcade is 1P / 2P, VS 2P–4P ; the race type's Cup is a plain row | `D230.c` `rowsPlayers1P2P`, `rowsRaceType` |
+| Character short names exist : `MetaDataCharacters[id].name_LNG_short` (language strings 60–75) | `zGlobal_DATA.c:5295` |
+| `OnlineLobby_RequestRace` forces `numBotsNextGame = 0` ; the room holds 4 humans (Share drives P2–P4) | `native_bridge.c:432`, `web/share/host.js:81` |
+
+## D11 — Bots in an Online room
+
+Settled with the user : always 8 karts (bots fill up after 1–4 humans) ; ONLINE › ARCADE with the
+game's Arcade menus, single race (the Cup row greyed), the menu's difficulty ; the host owns the
+bots and decides hits ; a bot is named after its character ; a leaver's kart is finished by a bot
+under **the player's name**, with a toast on every screen ; bots use weapons against **every
+human** ; no Battle. Nothing changes the wire : no new `CG_*` / `SG_*`, no field change, `VERSION`
+1021, golden bytes equal, `sv_core.c` unchanged. Bots exist in our rooms only : public servers
+(session 10) never see one.
+
+**D11.1 — A bot is a virtual client of the host's own server.** `platform/native_online_bots.c`
+wraps the host's `SvCoreHost` (inside `NativeOnlineLoopback_Wrap`) and owns peer ids 252–258,
+each with its own address key. It reads every `SG_NEWCLIENT` the server sends (a peer's
+`clientID`, for the bots and for the guests) and drops the rest of what goes to its own peers ;
+`kick` removes the bot, `setTimeout` is moot (no link, no keepalive). Its calls into the core are
+synchronous, as the loopback's :
+
+- in `StatePC_Lobby_HostTrackPick` (ONLINE › ARCADE only), before `CG_TRACK` locks the room :
+  `SvCore_Connect`, `CG_JOINROOM` 5 and `CG_NAME` for 8 − (named slots) bots ;
+- after `CG_TRACK` : each bot's `CG_CHARACTER`, locked (a character is never replayed to a later
+  joiner, so it must follow the guests' join) ; `SG_STARTLOADING` then needs only the humans ;
+- `CG_STARTRACE` with the host's ; every frame `CG_RACEDATA` from `drivers[slot]` ; `CG_WEAPON`
+  when the bot fires ; `CG_ENDRACE` (course time, best lap) the frame its finish flag turns on ;
+- at the room's reset (its `SG_NEWCLIENT` after the race) the bot disconnects on the next frame,
+  so the next lobby has its slots free.
+
+Guests change nothing : a bot's `SG_NAME` / `SG_CHARACTER` births a remote kart as a human's would,
+and `LOAD_DriverMPK` loads the 8 characters from `data.characterIDs`.
+
+**D11.2 — The host ignores its own bots' echoes.** A host-bot slot mask (`octrHostBots`, game
+side, written through `native_online_game.h`) makes the host's client drop `SG_RACEDATA` (pad,
+pose, 11b smoothing) and `SG_WEAPON` for those slots. `SG_NAME`, `SG_CHARACTER` and `SG_ENDRACE`
+are kept : they fill `nameBuffer`, `characterIDs` and `raceStats`, so the host's results list the
+bots exactly as the guests' do.
+
+**D11.3 — A bot's pad on the wire.** Remote karts drive themselves on the received pad between
+packets (`vehThread.c`). A bot sends Cross held, plus Left / Right from the change of its angle
+that frame. Measured on the guest with `__ctr.net` against the humans' bar (`jerk` p95 ≤
+max(2 × clean, 8)).
+
+**D11.4 — The host's game runs AI in bot slots only.** Runtime edits inside the existing
+`#ifdef USE_ONLINE`, marked `// ctr-native: one build, runtime` :
+
+- `OnlineInit_Drivers` : with any host bot, `BOTS_Adv_AdjustDifficulty()` first (the nav data,
+  and `arcadeDifficulty` : the race loads with `ARCADE_MODE`), each bot slot `BOTS_Driver_Init`
+  instead of a player kart, `bestLapTime` reset, the AI engine sounds as `MainInit_Drivers` ;
+- `BOTS_Driver_Convert` : the gate lets host-bot slots through (the takeover) ;
+- `PlayLevel.c` : `bestLapTime` for host-bot slots too ;
+- `PickupBots.c` : the targets are every human of the race (not a bot, not empty), not only
+  `drivers[0]` ;
+- `VehPickupItem_ShootNow` : a host bot's shot fills its slot's outbox (`octrBotShoot[slot]`,
+  the fields of `octr->Shoot[0]`), sent by the bots module as `CG_WEAPON` ; each guest replays it
+  and its own game decides whether it hits its player, as between humans.
+
+The camera, HUD, sound and pad gates on `driverID == 0` stay : a bot is not the local player.
+
+**D11.5 — Characters and names.** Bots take the base characters (0–7) the humans did not lock,
+in order, as `LOAD_Robots1P` fills solo Arcade. A bot's name is its character's short name
+(`GAME_LANGUAGE_STRINGS[name_LNG_short]`) cut to `NAME_LEN` (9). Seen on the NTSC-U disc (the six
+the humans left in the test races) : TINY, COCO, N. GIN, DINGO, POLAR, PURA — none is cut.
+
+**D11.6 — A bot takes over a leaver's kart.** In ONLINE › ARCADE, from the race level's
+`GAME_WAIT_FOR_RACE` on, a guest link that closes before its player finished is not passed to
+`SvCore_Disconnect` : the bots module keeps that peer as a virtual client for its slot, sends its
+`CG_STARTRACE` (harmless if it had), and the host's game converts the driver in place
+(`BOTS_Driver_Convert`, then the nav frame nearest the kart instead of the first) : lap,
+checkpoint and rank are kept. Guests never get the empty `SG_NAME` : the kart drives on under the
+player's name, its pose from the host's AI. The page says so on every screen (Share's `LOBBY`
+message carries it, our framing). After the reset the real `SvCore_Disconnect` frees the slot
+(11b's rejoin then takes it at the next lobby). The page's peer ids no longer reuse a freed id,
+so a new link never lands on a held peer. Limits : a silent guest is taken over at its 5 s
+timeout (its kart coasts on its last pad meanwhile) ; VS and BATTLE keep the retail leave.
+
+**D11.7 — The end of the race.** Results come from `raceStats`, bots included, on every screen.
+The host's own finish ends only its race (`PlayLevel.c:482`) : the level runs on, the bots finish
+and send their `CG_ENDRACE`, the server resets the room 6 s after the last one. The game's race
+clock stops at the host's finish (`elapsedEventTime` does not count under `END_OF_RACE`,
+`MainFrame.c`) : the bots' course times come from a clock that counts on
+(`NativeOnlineGame_RaceClock`) — found live, every bot finishing after the host had the host's
+time. 11b's end-of-race timeout starts at the first **human** finisher (a bot finishing first does
+not cut the players short) and also ends the host's bots still racing
+(`NATIVE_ONLINE_CTL_END_BOTS`, their `CG_ENDRACE` at the time on the clock). A result is kept once
+per slot and never past `raceStats[8]` : a guest that finishes and leaves in the same service of
+the host's server is not taken over twice.
+
+**D11.8 — The menus.** The ONLINE sub-menu gains ARCADE as a third row (the retail
+`LNG_ARCADE` string ; VS and BATTLE keep their indices). It sets `ARCADE_MODE` (and the one-lap
+cheat, as retail) and opens a race type of its own : SINGLE RACE, and CUP carrying
+`MENU_ROW_LOCKED` (drawn grey, Cross refused). SINGLE RACE opens a 1P–4P players menu (rows locked
+per plugged pad, as the 2P–4P one), then the retail difficulty menu (all three rows : a single
+race), the characters and the track. Solo Arcade keeps its own race type, 1P / 2P and Cup :
+`D230.c` is not touched.
