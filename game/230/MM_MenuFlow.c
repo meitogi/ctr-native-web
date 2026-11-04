@@ -133,6 +133,41 @@ static struct RectMenu onlineMenuPlayers =
 	.funcPtr = OnlineArcadePlayers_Proc,
 };
 
+// NETPLAY with no room (session 32) : the page hosts one at once with its saved relay and key,
+// and the ONLINE menu opens once it is on (MM_MenuProc_Main) ; without them this box says why
+// and offers the page's Netplay settings. Its strings take language slots the mod's own
+// menus use on native only (ONLINE_LNG_ROW's neighbours).
+#define ONLINE_LNG_NO_KEY 0x9b
+#define ONLINE_LNG_OPEN_SETTINGS 0x9c
+#define ONLINE_LNG_BACK 0x9d
+static int onlineAutoOpen;
+static struct MenuRow onlineRowsNoKey[3] =
+{
+	{ONLINE_LNG_OPEN_SETTINGS, 0, 1, 0, 0},
+	{ONLINE_LNG_BACK, 0, 1, 1, 1},
+	{RECTMENU_STRING_NONE},
+};
+static void OnlineNoKey_Proc(struct RectMenu *menu);
+static struct RectMenu onlineMenuNoKey =
+{
+	.stringIndexTitle = ONLINE_LNG_NO_KEY,
+	.state = CENTER_ON_X,
+	.rows = &onlineRowsNoKey[0],
+	.funcPtr = OnlineNoKey_Proc,
+};
+
+// Cross on OPEN : the page's panel ; BACK, Triangle or Circle : the main menu
+static void OnlineNoKey_Proc(struct RectMenu *menu)
+{
+	s16 row = menu->rowSelected;
+
+	if (row < -1 || row > 1)
+		return;
+	if ((row == 0) && ((sdata->gGamepads->gamepad[0].buttonsTapped & BTN_CIRCLE) == 0))
+		NativeWeb_OpenMultiplayer();
+	menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+}
+
 // as MM_ToggleRows_PlayerCount : a row needs its pads (the room's guests are P2-P4)
 static void OnlineArcade_TogglePlayerRows(void)
 {
@@ -260,6 +295,9 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 	if (!octrBootOnline) // ctr-native: one build, runtime
 	{
 		GAME_LANGUAGE_STRINGS[ONLINE_LNG_ROW] = "NETPLAY";
+		GAME_LANGUAGE_STRINGS[ONLINE_LNG_NO_KEY] = "NO RELAY KEY";
+		GAME_LANGUAGE_STRINGS[ONLINE_LNG_OPEN_SETTINGS] = "OPEN NETPLAY SETTINGS";
+		GAME_LANGUAGE_STRINGS[ONLINE_LNG_BACK] = "BACK";
 		MM_MENU_MAIN.rows = (MM_MENU_MAIN.rows == MM_ROWS_MAIN_WITH_SCRAPBOOK) ? onlineRowsMainWithScrapbook : onlineRowsMainBasic;
 		onlineMenu.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
 		onlineMenu.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
@@ -267,7 +305,16 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		onlineMenuRaceType.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
 		onlineMenuPlayers.posX_curr = MM_MENU_PLAYERS_1P2P.posX_curr;
 		onlineMenuPlayers.posY_curr = MM_MENU_PLAYERS_1P2P.posY_curr;
+		onlineMenuNoKey.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
+		onlineMenuNoKey.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
 		OnlineArcade_TogglePlayerRows();
+		// the room NETPLAY asked for is on : its menu, as the row would open it
+		if (onlineAutoOpen && ONLINE_ROOM && ((mainMenu->state & DRAW_NEXT_MENU_IN_HIERARCHY) == 0))
+		{
+			onlineAutoOpen = 0;
+			mainMenu->ptrNextBox_InHierarchy = &onlineMenu;
+			mainMenu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
+		}
 	}
 #endif
 
@@ -369,6 +416,10 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 	GAME_TRACKER->gameMode2 &= ~(CUP_ANY_KIND);
 
 	mainMenu->state |= ONLY_DRAW_TITLE;
+#ifdef USE_ONLINE
+	// the ONLINE menu opens by itself only right after NETPLAY (below)
+	onlineAutoOpen = 0;
+#endif
 
 	// Default to 3,
 	// this intentionally disables the 1-lap cheat
@@ -464,10 +515,16 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 	{
 		if (!ONLINE_ROOM)
 		{
-			// no room yet : the page's multiplayer panel hosts or joins one, and the
-			// main menu stays whole (its rows back, NETPLAY chosen again once a room is on)
-			mainMenu->state &= ~ONLY_DRAW_TITLE;
-			NativeWeb_OpenMultiplayer();
+			// no room yet : the page hosts one (its menu opens once it is on), and the
+			// main menu stays whole meanwhile ; no relay key saved : the box says why
+			if (NativeWeb_NetplayHost())
+			{
+				onlineAutoOpen = 1;
+				mainMenu->state &= ~ONLY_DRAW_TITLE;
+				return;
+			}
+			mainMenu->ptrNextBox_InHierarchy = &onlineMenuNoKey;
+			mainMenu->state |= DRAW_NEXT_MENU_IN_HIERARCHY;
 			return;
 		}
 		mainMenu->ptrNextBox_InHierarchy = &onlineMenu;

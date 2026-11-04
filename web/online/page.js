@@ -102,6 +102,9 @@ const STRINGS = {
     noPicture: 'No direct path to the host : your pad plays, the host\'s screen is not shown.',
     hostLeft: 'The host left the room.',
     hostLeftSolo: 'The host left — you finish this race alone, the other karts are now driven by the computer.',
+    roomOpen: 'Room open.',
+    linkCopied: 'The link is copied : send it to the other players.',
+    copyFromSettings: 'Copy the link from Settings › Netplay and send it to the other players.',
     roomClosed: 'The room is closed (the host left).',
     hostLost: 'Connection to the host lost.',
     backToSolo: 'Your game is back to solo.',
@@ -130,6 +133,7 @@ const STRINGS = {
       timeout: 'Direct connection failed ; trying the relay.',
       ice: 'Direct connection failed ; trying the relay.',
       relay: 'The relay closed the connection.',
+      'relay-key': 'The relay refused the key : check it in Settings › Netplay.',
       paste: 'This room has no copy-paste meeting point.',
     },
   },
@@ -190,6 +194,9 @@ const STRINGS = {
     noPicture: 'Pas de chemin direct vers l\'hôte : ta manette joue, l\'écran de l\'hôte n\'est pas affiché.',
     hostLeft: 'L\'hôte a quitté la partie.',
     hostLeftSolo: 'L\'hôte est parti — tu finis cette course seul, l\'ordinateur conduit les autres karts.',
+    roomOpen: 'Partie ouverte.',
+    linkCopied: 'Le lien est copié : envoie-le aux autres joueurs.',
+    copyFromSettings: 'Copie le lien depuis Réglages › Netplay et envoie-le aux autres joueurs.',
     roomClosed: 'La partie est fermée (l\'hôte est parti).',
     hostLost: 'Connexion à l\'hôte perdue.',
     backToSolo: 'Ton jeu repasse en solo.',
@@ -218,6 +225,7 @@ const STRINGS = {
       timeout: 'Connexion directe impossible ; essai via le relais.',
       ice: 'Connexion directe impossible ; essai via le relais.',
       relay: 'Le relais a fermé la connexion.',
+      'relay-key': 'Le relais a refusé la clé : vérifie-la dans Réglages › Netplay.',
       paste: 'Cette partie n\'a pas de copier-coller.',
     },
   },
@@ -301,8 +309,25 @@ export function attach(Module) {
   const ui = globalThis.ctrUI;
   const tab = ui ? ui.adopt('online', T.title, panel) : null;
   if (!tab) document.body.append(panel, toggle);
-  // the main menu's ONLINE row, picked with no room (game/230/MM_MenuFlow.c)
-  if (Module.ctrInput) Module.ctrInput.openMultiplayer = () => setOpen(true);
+  // the main menu's NETPLAY row, picked with no room (game/230/MM_MenuFlow.c) : a room at once
+  // with the saved relay and key (session 32), its link in a toast ; none saved : 0, the game
+  // says why and its OPEN brings this panel
+  if (Module.ctrInput) {
+    Module.ctrInput.openMultiplayer = () => setOpen(true);
+    let hosting = false; // a room on its way : a second NETPLAY press opens no other
+    Module.ctrInput.netplayHost = () => {
+      if (net.room || hosting) return 1;
+      if (!relay.value.trim() || !rk.value.trim()) return 0;
+      hosting = true;
+      const relayBox = meets.find((m) => m.id === 'relay').box;
+      relayBox.checked = true;
+      host().finally(() => { hosting = false; }).then(() => {
+        if (!net.room || !linkText) return ui?.toast(error || T.errors.relay);
+        navigator.clipboard?.writeText(linkText).then(() => ui?.toast(T.roomOpen, T.linkCopied), () => ui?.toast(T.roomOpen, T.copyFromSettings));
+      });
+      return 1;
+    };
+  }
   // keys typed in the panel are not the game's
   panel.addEventListener('keydown', (e) => e.stopPropagation());
   panel.addEventListener('keyup', (e) => e.stopPropagation());

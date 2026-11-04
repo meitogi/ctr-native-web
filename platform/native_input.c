@@ -340,6 +340,11 @@ EM_JS(void, NativeWeb_OpenMultiplayer, (void), {
 	const input = Module.ctrInput;
 	if (input && input.openMultiplayer) input.openMultiplayer();
 });
+
+EM_JS(int, NativeWeb_NetplayHost, (void), {
+	const input = Module.ctrInput;
+	return input && input.netplayHost ? input.netplayHost() : 0;
+});
 #endif
 
 EM_JS(int, NativeWeb_IntroSkip, (void), {
