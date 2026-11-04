@@ -5,7 +5,7 @@
 // dist/.
 // `vite` (serve, web/dev.sh dev) : the dev server with hot reload, rooted at web/ — the page's
 // SOURCES (index.html, share/, online/, net/, disc.js), never the build's copies — and the game
-// files only the build makes (ctr_native.js / .wasm, preload-flag.js) from CTR_GAME_DIR.
+// files only the build makes (ctr_native.js / .wasm, preload-flag.js, audio/spu.wasm) from CTR_GAME_DIR.
 // __CTR_DEV__ : the debug-only pieces (the home's second window, the Bot switch, Settings › Dev) ;
 // true under serve and in a Debug build (emscripten.cmake sets CTR_DEV=1), false in Release, where
 // the bundle carries none of them.
@@ -14,7 +14,7 @@ import { join, resolve } from 'node:path'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { defineConfig } from 'vite'
 
-const GAME_FILES = { 'ctr_native.js': 'text/javascript', 'ctr_native.wasm': 'application/wasm', 'ctr_native.data': 'application/octet-stream', 'preload-flag.js': 'text/javascript', 'ctr-u.bin': 'application/octet-stream' }
+const GAME_FILES = { 'ctr_native.js': 'text/javascript', 'ctr_native.wasm': 'application/wasm', 'ctr_native.data': 'application/octet-stream', 'preload-flag.js': 'text/javascript', 'ctr-u.bin': 'application/octet-stream', 'audio/spu.wasm': 'application/wasm' }
 // the bundle's names (what index.html and share/guest.html load) → the entries' sources
 const ENTRIES = { '/ui/ui.js': '/ui/src/main.js', '/ui/guest.js': '/ui/src/guest.js' }
 
