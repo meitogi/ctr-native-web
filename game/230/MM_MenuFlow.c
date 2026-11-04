@@ -455,7 +455,9 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 	{
 		if (!ONLINE_ROOM)
 		{
-			// no room yet : the page's multiplayer panel hosts or joins one
+			// no room yet : the page's multiplayer panel hosts or joins one, and the
+			// main menu stays whole (its rows back, NETPLAY chosen again once a room is on)
+			mainMenu->state &= ~ONLY_DRAW_TITLE;
 			NativeWeb_OpenMultiplayer();
 			return;
 		}

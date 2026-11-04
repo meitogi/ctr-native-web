@@ -690,8 +690,9 @@ export function attach(Module) {
     if (shareGuest?.state === 'connected' && inHostMenus()) sendPad();
     requestAnimationFrame(padLoop);
   })();
-  // the lobby's sound follows the page's volume
-  ui?.settings.subscribe((s) => { lobbyVideo.muted = !!s.muted; lobbyVideo.volume = Math.min(1, Math.max(0, s.volume ?? 1)); });
+  // the lobby's sound follows the page's volume, and its forced mute (?mute : Settings › Dev's
+  // second window, beside a host already playing the same sound)
+  ui?.settings.subscribe((s) => { lobbyVideo.muted = !!s.muted || !!window.ctrAudio?.forcedMute; lobbyVideo.volume = Math.min(1, Math.max(0, s.volume ?? 1)); });
 
   createButton.addEventListener('click', host);
   copyButton.addEventListener('click', () => navigator.clipboard?.writeText(linkText));
