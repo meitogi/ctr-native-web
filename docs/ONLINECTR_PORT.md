@@ -1196,3 +1196,49 @@ gates the relay.
 **Still open** (rows of their own) : remote-kart smoothing, rejoin at the next lobby and an
 end-of-race timeout (11b) ; ICE restart ; a second STUN server — an unreachable STUN server
 stalls ICE gathering past 12 s in Chrome, the 3 s cap of `webrtc.js` bounds it.
+
+## Session 11b findings
+
+Remote-kart smoothing, rejoin at the next lobby, an end-of-race timeout. Measured as in
+session 11 (two agent browsers, the impairment shim at 20 ms + 0–60 ms, 5 % loss, 10 %
+reorder, the debug build's `window.__ctr.net`). Nothing here changes the wire : no new
+`CG_*` / `SG_*`, `VERSION` 1021, golden bytes equal ; `sv_core.c` unchanged.
+
+| Item | Before | After |
+|---|---|---|
+| Remote kart under jitter, WebRTC (`jerk` p95 / max, world units, each side) | 100 / 155 · 102 / 182 | 6 / 10 · 7.3 / 13 |
+| Remote kart under jitter, relay | 91 / 254 · 101 / 202 | 7.6 / 25 · 5.4 / 18 |
+| Remote kart, clean link | ~2 | ~2 |
+| A guest cut off while the host stays | back to solo, « connection lost » | re-linked by itself in ~7.4 s (WebRTC or relay), waits on its title, joins the next lobby in its own slot |
+| A player who never finishes | holds the room on the race level | the host's choice : the race ends N s after the first finisher (60 by default) |
+
+**Smoothing (`platform/native_online.c`, `// 11b smoothing`).** Remote karts drive
+themselves between packets on the received pad (`vehThread.c`), and upstream writes each
+`SG_RACEDATA` pose straight into the kart : under a varying delay that is a jolt of ~100
+units every packet. The bridge now keeps, per remote kart, the difference between the
+received pose and the kart (angle wrapped on 12 bits), averages one frame's packets, and
+closes 1 / 12 of what is left each frame ; past 512 world units or a quarter turn it still
+snaps (a respawn, a mask grab). 1 / 4 left the jerk at ~25, 1 / 8 at ~10. The pose error
+itself does not grow with the slower blend (p95 ~80–110 either way) : only the kart's drift
+is blended, not its motion. Out of the race nothing is kept.
+
+**Rejoin (`web/online/page.js`, `web/online/rules.js`).** A guest's link to the host lost
+while the host is still on the meeting point is no longer the end : the page retries after
+1, 2, 4, 8, 15, 15 s, each try a fresh room — new relay id, new sealer (`crypto.js` pins an
+id's first IV prefix, so the old id would be refused) — on the same path setting (WebRTC,
+else the relay ; no ICE restart, row 11c). The game re-enters the room on its own : a racing
+room is locked (`SG_ROOMS` adds 8 to its count), so it sits on its title and retries every
+2 s ; the page says so (toast + status line, held from the first refusal until the server
+takes it) and sends no pad and no host picture meanwhile. At the next lobby the server gives
+it the first free slot (its old one in the measured two-player room ; with more players,
+whoever came back first takes the lowest) and Share's guest join brings the host's picture back.
+No mid-race join : OnlineCTR has none.
+
+**End-of-race timeout (`web/online/page.js`, `platform/native_online.c`,
+`game/OnlineCTR/native_bridge.c`).** The host picks never / 15 / 30 / 60 / 120 s after the
+first finisher (`octr.numDriversEnded`). The host's page warns every guest at the first
+finish, and at the deadline tells each to end its race, both as Share `LOBBY` messages on the
+lobby link (our framing, not the game's). The page passes `NATIVE_ONLINE_CTL_END_RACE` to
+its game, which ends the race where the kart stands, as a crossed finish line does (the
+finish flag, no item, the AI drives on) ; the game then sends an ordinary `CG_ENDRACE` and
+the server resets the room as usual.
