@@ -43,6 +43,12 @@ extern int octrOnlineMenuPath; // the main menu's ONLINE row was taken : the tra
 extern int octrLobbyPhase;    // enum OnlineLobbyPhase, read by the page
 extern int octrLobbyCharacters[8]; // the menus' character per slot at the track lock, read by the page
 extern int octrThreadAlive;   // the mod thread runs on this level
+extern int octrOnlineArcade;  // the ONLINE row's ARCADE was taken (D11.8)
+extern int octrLobbyArcade;   // the host's track lock came from ONLINE > ARCADE : bots fill the room
+extern int octrHostBots;      // host only : bit per slot driven by the host's AI (D11.2), read by the page
+// a host bot's shot, as octr->Shoot[0] for the host's own kart (D11.4)
+extern struct OnlineBotShoot { unsigned char boolNow, Weapon, boolJuiced, flags; } octrBotShoot[8];
+#define ONLINE_HOST_BOT(slot) (octrActive && ((octrHostBots >> (slot)) & 1))
 extern const unsigned char onlineItemSetRace2[0x34], onlineItemSetRace3[0x14], onlineItemSetRace4[0x14];
 #define ONLINE_LNG_ROW 0x9a // a language-table slot no code reads ; the mod's menus use 0x9a-0xa1 the same way
 

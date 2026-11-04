@@ -58,4 +58,15 @@ void NativeOnlineGame_EndMyRace(void);        // the room's end-of-race timeout 
 // per slot at the track lock, int[8].
 void NativeOnlineGame_LobbyPointers(int **active, int **phase, int **characters);
 
+// Session 23 : the host's bots (docs/ONLINECTR_PORT.md, D11)
+int NativeOnlineGame_LobbyBots(void);              // the track lock came from ONLINE > ARCADE
+int NativeOnlineGame_LobbyCharacter(int player);   // the menus' character of P1-P4 at the lock, -1 none
+void NativeOnlineGame_CharacterName(int characterID, char *out, int cap); // its short name, cut to cap - 1
+int *NativeOnlineGame_HostBots(void);              // the slots the host's AI drives (bit per slot)
+int NativeOnlineGame_KartFinished(int slot);       // its finish flag
+int NativeOnlineGame_RaceClock(void);              // gGT->elapsedEventTime
+int NativeOnlineGame_TakeBotShot(int slot, int *weapon, int *juiced, int *flags); // 1 once per shot
+int NativeOnlineGame_TakeOverKart(int slot);       // a leaver's kart to the AI ; 1 when converted
+void NativeOnlineGame_EndBotRace(int slot);        // the room's end-of-race timeout, for a bot
+
 #endif

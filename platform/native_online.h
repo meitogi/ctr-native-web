@@ -25,8 +25,20 @@ enum NativeOnlineControl
 	NATIVE_ONLINE_CTL_LEAVE,     // leave the room
 	NATIVE_ONLINE_CTL_CHARACTER, // arg = this guest's character, picked on the host
 	NATIVE_ONLINE_CTL_END_RACE,  // end this player's race now (the host's end-of-race timeout)
+	NATIVE_ONLINE_CTL_END_BOTS,  // the host : end its bots' races too (docs/ONLINECTR_PORT.md, D11.7)
 };
 void NativeOnline_SetControl(int (*poll)(int *arg));
+
+// The host's bots (docs/ONLINECTR_PORT.md, D11), registered by
+// platform/native_online_bots.c on the host's in-process server ; none elsewhere.
+typedef struct NativeOnlineBotHooks
+{
+	void (*join)(void);  // before CG_TRACK : the bots enter the room
+	void (*lock)(void);  // after CG_TRACK : their characters, locked
+	void (*frame)(void); // once per bridge frame : their race messages
+	void (*leave)(void); // the host's client leaves the room : so do they
+} NativeOnlineBotHooks;
+void NativeOnline_SetBotHooks(const NativeOnlineBotHooks *hooks);
 
 #if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
 // Debug web builds (window.__ctr.net, platform/web_debug_bridge.c) : called for

@@ -630,6 +630,15 @@ void VehPickupItem_ShootNow(struct Driver *d, s32 weaponID, s32 flags)
 
 		octr->Shoot[0].boolNow = 1;
 	}
+	// ctr-native: a host bot's shot, sent as its CG_WEAPON (D11.4)
+	else if (ONLINE_RACE && ROOM_IS_ITEMS(rn) && ONLINE_HOST_BOT(d->driverID))
+	{
+		struct OnlineBotShoot *shot = &octrBotShoot[d->driverID];
+		shot->boolJuiced = d->numWumpas >= 10;
+		shot->Weapon = d->heldItemID;
+		shot->flags = flags & 3;
+		shot->boolNow = 1;
+	}
 #endif
 	switch (weaponID)
 	{

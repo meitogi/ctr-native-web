@@ -190,6 +190,10 @@ int octrLobbyPhase;
 int octrLobbyCharacters[8];
 
 int octrThreadAlive;
+int octrOnlineArcade;
+int octrLobbyArcade;
+int octrHostBots;
+struct OnlineBotShoot octrBotShoot[8];
 static int octrStatsUpgraded;
 static int octrSavedMetaPhys[4][NUM_CLASSES];
 static int octrRewardsUnlocked;
@@ -216,6 +220,9 @@ void OnlineRuntime_Activate(void)
 	octrActive = 1;
 	octrJoinRetryFrames = 0;
 	octrOnlineMenuPath = 0;
+	octrOnlineArcade = 0;
+	octrLobbyArcade = 0;
+	octrHostBots = 0;
 	octrLobbyPhase = ONLINE_LOBBY_MENUS;
 	memset(octrLobbyCharacters, 0, sizeof(octrLobbyCharacters));
 
@@ -248,6 +255,9 @@ void OnlineRuntime_Deactivate(void)
 
 	octrActive = 0;
 	octrOnlineMenuPath = 0;
+	octrOnlineArcade = 0;
+	octrLobbyArcade = 0;
+	octrHostBots = 0;
 	octrLobbyPhase = ONLINE_LOBBY_NONE;
 	OnlineRuntime_SyncStats();
 
@@ -371,6 +381,7 @@ void OnlineExternal_State(void)
 			// the title, the room stays
 			octrLobbyPhase = ONLINE_LOBBY_MENUS;
 			octrOnlineMenuPath = 0;
+			octrLobbyArcade = 0;
 			if (((sdata->gGT->gameMode1 & MAIN_MENU) == 0) && (sdata->Loading.stage == LOAD_IDLE))
 			{
 				sdata->gGT->numPlyrNextGame = 1;
@@ -410,6 +421,8 @@ int OnlineLobby_RequestRace(void)
 		return 0;
 
 	octrOnlineMenuPath = 0;
+	octrLobbyArcade = octrOnlineArcade;
+	octrOnlineArcade = 0;
 
 	if (octr->CurrState != LOBBY_HOST_TRACK_PICK)
 	{
@@ -494,6 +507,129 @@ void NativeOnlineGame_SyncStats(void)
 void NativeOnlineGame_SetMyCharacter(int characterID)
 {
 	OnlineLobby_SetMyCharacter(characterID);
+}
+
+// === the host's bots (docs/ONLINECTR_PORT.md, D11) ===
+
+int NativeOnlineGame_LobbyBots(void)
+{
+	return octrLobbyArcade;
+}
+
+int NativeOnlineGame_LobbyCharacter(int player)
+{
+	return (player >= 0 && player < 8) ? octrLobbyCharacters[player] : -1;
+}
+
+void NativeOnlineGame_CharacterName(int characterID, char *out, int cap)
+{
+	const char *s = GAME_LANGUAGE_STRINGS[GAME_CHARACTER_METADATA[characterID].name_LNG_short];
+	int n = 0;
+
+	while (s && s[n] && n < cap - 1)
+	{
+		out[n] = s[n];
+		n++;
+	}
+	out[n] = 0;
+}
+
+int *NativeOnlineGame_HostBots(void)
+{
+	return &octrHostBots;
+}
+
+int NativeOnlineGame_KartFinished(int slot)
+{
+	struct Driver *d = sdata->gGT->drivers[slot];
+
+	return (d != NULL) && ((d->actionsFlagSet & ACTION_RACE_FINISHED) != 0);
+}
+
+// The race clock for the bots' finish times : elapsedEventTime stops at this
+// game's END_OF_RACE (the host's own finish, MainFrame.c), the bots race on.
+int NativeOnlineGame_RaceClock(void)
+{
+	static int clock;
+	static int lastFrame;
+	struct GameTracker *gGT = sdata->gGT;
+
+	if ((gGT->gameMode1 & END_OF_RACE) == 0)
+		clock = gGT->elapsedEventTime;
+	else if (gGT->timer != lastFrame)
+		clock += gGT->elapsedTimeMS;
+	lastFrame = gGT->timer;
+	return clock;
+}
+
+int NativeOnlineGame_TakeBotShot(int slot, int *weapon, int *juiced, int *flags)
+{
+	struct OnlineBotShoot *shot = &octrBotShoot[slot];
+
+	if (!shot->boolNow)
+		return 0;
+	shot->boolNow = 0;
+	*weapon = shot->Weapon;
+	*juiced = shot->boolJuiced;
+	*flags = shot->flags;
+	return 1;
+}
+
+// A leaver's kart driven on by the AI from where it is (D11.6) : the retail
+// conversion of a finish line, then the nav frame nearest the kart instead of
+// the path's first, and the AI's own position from the kart's.
+int NativeOnlineGame_TakeOverKart(int slot)
+{
+	struct Driver *d = sdata->gGT->drivers[slot];
+	struct NavFrame *frame, *last, *nearest;
+	int best = 0x7fffffff;
+
+	if (!ONLINE_RACE || (d == NULL) || ((d->actionsFlagSet & (ACTION_RACE_FINISHED | ACTION_BOT)) != 0))
+		return 0;
+
+	octrHostBots |= 1 << slot;
+	octrBotShoot[slot].boolNow = 0;
+	d->bestLapTime = HOURS(10);
+	BOTS_Driver_Convert(d);
+	if ((d->actionsFlagSet & ACTION_BOT) == 0)
+	{
+		octrHostBots &= ~(1 << slot);
+		return 0;
+	}
+
+	frame = sdata->NavPath_ptrNavFrameArray[d->botData.botPath];
+	last = sdata->NavPath_ptrHeader[d->botData.botPath]->last;
+	nearest = frame;
+	for (; frame < last; frame++)
+	{
+		int dx = (d->posCurr.x >> 8) - frame->pos.x;
+		int dy = (d->posCurr.y >> 8) - frame->pos.y;
+		int dz = (d->posCurr.z >> 8) - frame->pos.z;
+		int dist = dx * dx + dy * dy + dz * dz;
+
+		if (dist < best)
+		{
+			best = dist;
+			nearest = frame;
+		}
+	}
+	d->botData.botNavFrame = nearest;
+	d->botData.positionBackup.x = d->posCurr.x;
+	d->botData.positionBackup.y = d->posCurr.y;
+	d->botData.positionBackup.z = d->posCurr.z;
+	BOTS_SetRotation(d, 0);
+	return 1;
+}
+
+void NativeOnlineGame_EndBotRace(int slot)
+{
+	struct Driver *d = sdata->gGT->drivers[slot];
+
+	if (!ONLINE_RACE || !ONLINE_HOST_BOT(slot) || (d == NULL) || ((d->actionsFlagSet & ACTION_RACE_FINISHED) != 0))
+		return;
+
+	d->actionsFlagSet |= ACTION_RACE_FINISHED;
+	d->heldItemID = HELD_ITEM_NONE;
 }
 
 // The room's end-of-race timeout (session 11b, the page's choice) : this

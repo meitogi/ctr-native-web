@@ -19,6 +19,7 @@
 #include "native_online.h"
 #include "native_online_game.h"
 #include "native_online_loopback.h"
+#include "native_online_bots.h"
 #include "web_online_transport.h"
 
 #define WEB_ONLINE_MAX_PACKET 64
@@ -132,7 +133,9 @@ static void WebHost_Service(void)
 				break;
 
 			case ONLINE_EVENT_DISCONNECTED:
-				SvCore_Disconnect(info[0]);
+				// ONLINE > ARCADE : a bot drives the leaver's kart on (D11.6)
+				if (!NativeOnlineBots_TakeOver(info[0]))
+					SvCore_Disconnect(info[0]);
 				break;
 
 			default:
@@ -201,7 +204,7 @@ static int Web_Connect(const char *address)
 	{
 		if (!boolServerStarted)
 		{
-			SvCore_Init(NativeOnlineLoopback_Wrap(&webCoreHost));
+			SvCore_Init(NativeOnlineLoopback_Wrap(NativeOnlineBots_Wrap(&webCoreHost)));
 			boolServerStarted = 1;
 		}
 		active = &NativeOnline_LoopbackTransport;
@@ -281,12 +284,14 @@ __attribute__((constructor)) static void WebOnline_Install(void)
 		NAME_LEN + 1,
 		MAX_NUM_PLAYERS,
 		offsetof(struct OnlineCTR, serverLockIn1),
+		offsetof(struct OnlineCTR, raceStats),
 	};
 
 	// one build : the page reads these next to octr (active, lobby phase, the
-	// menus' characters per slot at the track lock)
-	int *lobby[3];
+	// menus' characters per slot at the track lock, the host's bots)
+	int *lobby[4];
 	NativeOnlineGame_LobbyPointers(&lobby[0], &lobby[1], &lobby[2]);
+	lobby[3] = NativeOnlineGame_HostBots();
 
 	NativeOnlineGame_SetMode(0, 1);
 	NativeOnline_SetControl(ctr_web_online_control);

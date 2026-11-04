@@ -89,6 +89,12 @@ void OnlineInit_Drivers(struct GameTracker* gGT)
 	int bitFlag;
 	struct Driver* dr;
 
+	// ctr-native: the host's bots (docs/ONLINECTR_PORT.md, D11.4) : the nav
+	// data and arcadeDifficulty first, as MainInit_Drivers ; before the spawn
+	// order below, which it would overwrite
+	if (octrHostBots != 0)
+		BOTS_Adv_AdjustDifficulty();
+
 	for(i = 0; i < 8; i++)
 	{
 		gGT->drivers[i] = 0;
@@ -162,6 +168,21 @@ void OnlineInit_Drivers(struct GameTracker* gGT)
 			continue;
 		}
 
+		// ctr-native: a host bot is an AI kart here, a remote kart elsewhere (D11.4)
+		if (ONLINE_HOST_BOT(i))
+		{
+			dr = BOTS_Driver_Init(i);
+			if (dr == NULL) { continue; } // no nav path on this track
+			memset(&dr->uncappedReserves, 0, sizeof(struct Driver) - offsetof(struct Driver, uncappedReserves));
+			dr->bestLapTime = HOURS(10);
+
+			// the start grid without holes, as the players' fakeID below
+			dr->driverID = (i-numDead)&bitFlag;
+			BOTS_GotoStartingLine(dr);
+			dr->driverID = i;
+			continue;
+		}
+
 		// init, save
 		dr = DECOMP_VehBirth_Player(i);
 		gGT->drivers[i] = dr;
@@ -174,6 +195,13 @@ void OnlineInit_Drivers(struct GameTracker* gGT)
 		dr->driverID = i;
 	}
 	
+
+	// ctr-native: the AI engine sounds, as MainInit_Drivers
+	if ((octrHostBots != 0) && (gGT->numBotsNextGame != 0))
+	{
+		EngineAudio_InitOnce(0x10, HOWL_SFX_CENTER_NO_DISTORTION);
+		EngineAudio_InitOnce(0x11, HOWL_SFX_CENTER_NO_DISTORTION);
+	}
 
 	if (gGT->levelID != 0x26 /*INTRO_RACE_TODAY*/) //was 0x26 (globe level)
 	{

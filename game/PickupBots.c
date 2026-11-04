@@ -82,6 +82,13 @@ static inline void PickupBots_UpdateArcade(struct GameTracker *initialGT)
 	{
 		struct Driver *player = GAME_TRACKER->drivers[i];
 
+#ifdef USE_ONLINE
+		// ctr-native: one build, runtime — the host's bots attack every human
+		// of the room's race, as solo Arcade's attack its players (D11.4)
+		if (ONLINE_RACE && (octrHostBots != 0) && ((player == NULL) || ((player->actionsFlagSet & ACTION_BOT) != 0)))
+			goto NextPlayer;
+#endif
+
 		if (player->driverRank != 0)
 		{
 			struct Driver *bot = GAME_TRACKER->driversInRaceOrder[player->driverRank - 1];
@@ -256,8 +263,15 @@ static inline void PickupBots_UpdateArcade(struct GameTracker *initialGT)
 			}
 #endif
 		}
+#ifdef USE_ONLINE
+	NextPlayer:
+#endif
 		i++;
+#ifdef USE_ONLINE
+	} while (i < ((ONLINE_RACE && (octrHostBots != 0)) ? 8 : GAME_TRACKER_RELOAD()->numPlyrCurrGame)); // ctr-native: one build, runtime
+#else
 	} while (i < GAME_TRACKER_RELOAD()->numPlyrCurrGame);
+#endif
 }
 
 static inline void PickupBots_SetBossCooldown(struct MetaDataBOSS *bossMeta)

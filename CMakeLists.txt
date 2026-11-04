@@ -148,7 +148,7 @@ if(CTR_ONLINE)
     # A browser cannot speak ENet (raw UDP): rooms by link through web/net/,
     # the host's page runs sv_core.c (docs/ONLINECTR_PORT.md, session 9).
     if(EMSCRIPTEN)
-        target_sources(ctr_native PRIVATE platform/web_online_transport.c)
+        target_sources(ctr_native PRIVATE platform/web_online_transport.c platform/native_online_bots.c)
         set(CTR_WEB_ONLINE_LIBRARY "${CMAKE_SOURCE_DIR}/web/online/library.js")
         target_link_options(ctr_native PRIVATE "--js-library=${CTR_WEB_ONLINE_LIBRARY}")
         set_property(TARGET ctr_native APPEND PROPERTY LINK_DEPENDS "${CTR_WEB_ONLINE_LIBRARY}")

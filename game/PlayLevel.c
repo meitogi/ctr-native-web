@@ -124,7 +124,7 @@ void PlayLevel_UpdateLapStats(void)
 			currDriver->distanceToFinish_checkpoint = distToFinish_curr;
 
 #ifdef USE_ONLINE
-			if (ONLINE_RACE && driverIndex == 0) // ctr-native: one build, runtime
+			if (ONLINE_RACE && (driverIndex == 0 || ONLINE_HOST_BOT(driverIndex))) // ctr-native: one build, runtime ; the host's bots (D11.4)
 			{
 				currDriver->currLapTime = gGT->elapsedEventTime - currDriver->lapTime;
 				if (currDriver->currLapTime < currDriver->bestLapTime)

@@ -43,6 +43,13 @@ static int lastLoggedState = -100;
 
 static int (*controlPoll)(int *arg);
 static int pendingEnter;
+static const NativeOnlineBotHooks *botHooks;
+
+// a slot the host's own AI drives (D11.2) : its echoed kart states and weapons are not applied
+static int HostBot(int slot)
+{
+	return (*NativeOnlineGame_HostBots() >> slot) & 1;
+}
 
 #if defined(__EMSCRIPTEN__) && !defined(NDEBUG)
 void (*NativeOnline_DebugRaceData)(int slot, int posX, int posY, int posZ);
@@ -372,6 +379,7 @@ static void ProcessReceiveEvent(void *packet, int len)
 			if (clientID == octr->DriverID) break;
 			if (clientID < octr->DriverID) slot = clientID + 1;
 			if (clientID > octr->DriverID) slot = clientID;
+			if (HostBot(slot)) break;
 
 			int curr = r->buttonHold;
 
@@ -453,6 +461,7 @@ static void ProcessReceiveEvent(void *packet, int len)
 			if (clientID == octr->DriverID) break;
 			if (clientID < octr->DriverID) slot = clientID + 1;
 			if (clientID > octr->DriverID) slot = clientID;
+			if (HostBot(slot)) break;
 
 			octr->Shoot[slot].boolNow = 1;
 			octr->Shoot[slot].Weapon = r->weapon;
@@ -473,6 +482,13 @@ static void ProcessReceiveEvent(void *packet, int len)
 			// make this player hold SQUARE
 			ClientSlotPad(slot, 0x20);
 
+			// ctr-native: one result per slot, and never past the table (a kart a
+			// host bot took over, session 23)
+			int seen = octr->numDriversEnded >= MAX_NUM_PLAYERS;
+			for (int k = 0; !seen && k < octr->numDriversEnded; k++)
+				seen = octr->raceStats[k].slot == slot;
+			if (seen) break;
+
 			octr->raceStats[octr->numDriversEnded].slot = slot;
 			memcpy(&octr->raceStats[octr->numDriversEnded].finalTime, &r->courseTime, sizeof(r->courseTime));
 			memcpy(&octr->raceStats[octr->numDriversEnded].bestLap, &r->lapTime, sizeof(r->lapTime));
@@ -487,6 +503,8 @@ static void ProcessReceiveEvent(void *packet, int len)
 
 static void Disconnect(void)
 {
+	if (botHooks)
+		botHooks->leave();
 	if (boolConnected || boolConnecting)
 		transport->disconnect();
 
@@ -733,7 +751,14 @@ void StatePC_Lobby_HostTrackPick()
 
 	NativeOnlineGame_SetNumLaps(numLaps);
 
+	// ONLINE > ARCADE : the host's bots enter while the room is open (D11.1)
+	if (botHooks)
+		botHooks->join();
+
 	sendToHostReliable(&mt, sizeof(struct CG_MessageTrack));
+
+	if (botHooks)
+		botHooks->lock();
 
 	octr->CurrState = LOBBY_CHARACTER_PICK;
 }
@@ -949,6 +974,11 @@ void NativeOnline_SetControl(int (*poll)(int *arg))
 	controlPoll = poll;
 }
 
+void NativeOnline_SetBotHooks(const NativeOnlineBotHooks *hooks)
+{
+	botHooks = hooks;
+}
+
 // The host layer's commands (web) ; ENTER waits until the game can join.
 static void ProcessControl(void)
 {
@@ -987,6 +1017,14 @@ static void ProcessControl(void)
 					NativeOnlineGame_Log("[OnlineCTR] Race ended by the room's timeout\n");
 					NativeOnlineGame_EndMyRace();
 				}
+				break;
+
+			// the same timeout on the host : its bots still racing end where they are
+			case NATIVE_ONLINE_CTL_END_BOTS:
+				NativeOnlineGame_Log("[OnlineCTR] The room's timeout ends the bots 0x%x\n", *NativeOnlineGame_HostBots());
+				for (int slot = 1; slot < MAX_NUM_PLAYERS; slot++)
+					if (HostBot(slot))
+						NativeOnlineGame_EndBotRace(slot);
 				break;
 
 			default:
@@ -1054,6 +1092,10 @@ void NativeOnline_Frame(void)
 	//send data
 	if (octr->CurrState >= 0 && octr->CurrState < NUM_STATES)
 		ClientState[octr->CurrState]();
+
+	// the host's bots, after its own kart (D11.1)
+	if (botHooks && boolConnected)
+		botHooks->frame();
 
 	// now check for new RECV message
 	ProcessNewMessages();

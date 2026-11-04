@@ -3923,7 +3923,8 @@ void BOTS_Driver_Convert(struct Driver *driver)
 	int damageType;
 #ifdef USE_ONLINE
 	// upstream octr_entryHook wrote "jr ra; nop" over this function
-	if (ONLINE_RACE) // ctr-native: one build, runtime
+	// ctr-native: the host's own bots may convert (a leaver's kart, D11.6)
+	if (ONLINE_RACE && !ONLINE_HOST_BOT(driver->driverID)) // ctr-native: one build, runtime
 		return;
 #endif
 	if ((original->actionsFlagSet & ACTION_BOT) != 0)

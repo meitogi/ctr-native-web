@@ -51,8 +51,8 @@ s32 MM_TransitionInOut(struct TransitionMeta *meta, s32 framesPassed, s32 numFra
 
 #ifdef USE_ONLINE
 #include <platform/native_web_ui.h>
-// ctr-native: one build — the main menu's ONLINE row and its VS / BATTLE
-// sub-menu. Without a room the row opens the page's multiplayer panel ; with
+// ctr-native: one build — the main menu's ONLINE row and its VS / BATTLE /
+// ARCADE sub-menu. Without a room the row opens the page's multiplayer panel ; with
 // one, VS and BATTLE take the retail paths (players, characters, track) with
 // the room's players as P2-P4, and the track lock starts the room's race
 // (QueueLoadTrack.c). The native build boots into the mod's own menus and
@@ -80,10 +80,11 @@ static struct MenuRow onlineRowsMainWithScrapbook[9] =
 	{0x234, 6, 7, 7, 7},
 	{RECTMENU_STRING_NONE},
 };
-static struct MenuRow onlineRowsModes[3] =
+static struct MenuRow onlineRowsModes[4] =
 {
 	{0x4F, 0, 1, 0, 0},
-	{0x50, 0, 1, 1, 1},
+	{0x50, 0, 2, 1, 1},
+	{LNG_ARCADE, 1, 2, 2, 2},
 	{RECTMENU_STRING_NONE},
 };
 static void OnlineMenu_Proc(struct RectMenu *menu);
@@ -95,6 +96,91 @@ static struct RectMenu onlineMenu =
 	.funcPtr = OnlineMenu_Proc,
 };
 
+// ONLINE > ARCADE (docs/ONLINECTR_PORT.md, D11.8) : the retail Arcade path with
+// the room's humans as P1-P4 and the host's bots filling up to 8 karts. Its own
+// race type (single race ; the Cup shown, locked) and players menu (1P-4P) :
+// solo Arcade keeps D230's 1P / 2P and its Cup.
+static struct MenuRow onlineRowsRaceType[3] =
+{
+	{0x15E, 0, 1, 0, 0},
+	{(s16)(0x15F | MENU_ROW_LOCKED), 0, 1, 1, 1},
+	{RECTMENU_STRING_NONE},
+};
+static struct MenuRow onlineRowsPlayers[5] =
+{
+	{0x54, 0, 1, 0, 0},
+	{0x55, 0, 2, 1, 1},
+	{0x56, 1, 3, 2, 2},
+	{0x57, 2, 3, 3, 3},
+	{RECTMENU_STRING_NONE},
+};
+static void OnlineArcadeRaceType_Proc(struct RectMenu *menu);
+static void OnlineArcadePlayers_Proc(struct RectMenu *menu);
+static struct RectMenu onlineMenuRaceType =
+{
+	.stringIndexTitle = LNG_RACE_TYPE,
+	.state = CENTER_ON_X,
+	.rows = &onlineRowsRaceType[0],
+	.funcPtr = OnlineArcadeRaceType_Proc,
+};
+static struct RectMenu onlineMenuPlayers =
+{
+	.stringIndexTitle = LNG_PLAYERS,
+	.state = CENTER_ON_X,
+	.rows = &onlineRowsPlayers[0],
+	.funcPtr = OnlineArcadePlayers_Proc,
+};
+
+// as MM_ToggleRows_PlayerCount : a row needs its pads (the room's guests are P2-P4)
+static void OnlineArcade_TogglePlayerRows(void)
+{
+	for (int i = 0; i < 4; i++)
+	{
+		onlineRowsPlayers[i].stringIndex &= MENU_ROW_LNG_MASK;
+		if ((s16)MainFrame_HaveAllPads(i + 1) == 0)
+			onlineRowsPlayers[i].stringIndex |= MENU_ROW_LOCKED;
+	}
+}
+
+// as MM_MenuProc_SingleCup's Arcade branch ; the Cup row is locked
+static void OnlineArcadeRaceType_Proc(struct RectMenu *menu)
+{
+	s16 row = menu->rowSelected;
+
+	if (row == -1)
+	{
+		menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+		return;
+	}
+	if (row != 0)
+		return;
+
+	GAME_TRACKER->gameMode2 &= ~(CUP_ANY_KIND);
+	menu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
+	menu->ptrNextBox_InHierarchy = &onlineMenuPlayers;
+	MM_CHARACTER_SELECT_TRANSITION_STATE = IN_MENU;
+}
+
+// as MM_MenuProc_1p2p, with 1P-4P : then the retail difficulty menu
+static void OnlineArcadePlayers_Proc(struct RectMenu *menu)
+{
+	s16 row = menu->rowSelected;
+
+	if (row == -1)
+	{
+		menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+		GAME_TRACKER->numPlyrNextGame = 1;
+		MM_CHARACTER_SELECT_TRANSITION_STATE = ENTERING_MENU;
+		return;
+	}
+	if (row < 0 || row > 3)
+		return;
+
+	GAME_TRACKER->numPlyrNextGame = row + 1;
+	menu->ptrNextBox_InHierarchy = &MM_MENU_DIFFICULTY;
+	menu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
+}
+
 static void OnlineMenu_Proc(struct RectMenu *menu)
 {
 	s16 row = menu->rowSelected;
@@ -104,13 +190,30 @@ static void OnlineMenu_Proc(struct RectMenu *menu)
 		menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
 		return;
 	}
-	if (row < -1 || row > 1 || !ONLINE_ROOM)
+	if (row < -1 || row > 2 || !ONLINE_ROOM)
 	{
 		return;
 	}
 
-	// as the main menu's VS / BATTLE rows, single race only
+	// as the main menu's VS / BATTLE rows, single race only ; an ARCADE taken
+	// then backed out of leaves nothing behind
 	GAME_TRACKER->gameMode2 &= ~(CUP_ANY_KIND);
+	GAME_TRACKER->gameMode1 &= ~ARCADE_MODE;
+	octrOnlineArcade = 0;
+	if (row == 2)
+	{
+		// as the main menu's ARCADE row, then the online race type
+		if ((GAME_TRACKER->gameMode2 & CHEAT_ONELAP) != 0)
+		{
+			GAME_TRACKER->numLaps = MM_ONE_LAP_CHEAT_COUNT;
+		}
+		GAME_TRACKER->gameMode1 |= ARCADE_MODE;
+		octrOnlineMenuPath = 1;
+		octrOnlineArcade = 1;
+		menu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
+		menu->ptrNextBox_InHierarchy = &onlineMenuRaceType;
+		return;
+	}
 	if (row == 0)
 	{
 		if ((GAME_TRACKER->gameMode2 & CHEAT_ONELAP) != 0)
@@ -151,6 +254,11 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		MM_MENU_MAIN.rows = (MM_MENU_MAIN.rows == MM_ROWS_MAIN_WITH_SCRAPBOOK) ? onlineRowsMainWithScrapbook : onlineRowsMainBasic;
 		onlineMenu.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
 		onlineMenu.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
+		onlineMenuRaceType.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
+		onlineMenuRaceType.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
+		onlineMenuPlayers.posX_curr = MM_MENU_PLAYERS_1P2P.posX_curr;
+		onlineMenuPlayers.posY_curr = MM_MENU_PLAYERS_1P2P.posY_curr;
+		OnlineArcade_TogglePlayerRows();
 	}
 #endif
 
@@ -178,6 +286,7 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 #ifdef USE_ONLINE
 			// ctr-native: one build — a room never starts the attract demo
 			octrOnlineMenuPath = 0;
+			octrOnlineArcade = 0;
 			if (ONLINE_ROOM)
 				GAME_TRACKER->demoCountdownTimer = TITLE_DEMO_IDLE_FRAMES;
 #endif
