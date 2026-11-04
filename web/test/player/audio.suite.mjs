@@ -1,7 +1,10 @@
 // Player suite : the audio output under load (session 21). Reads window.__ctr.audio
-// (platform/web_debug_bridge.c) : output path, sample rate, block, latencies, underruns
-// (blocks the output played without fresh data), the longest gap between two filled blocks,
-// the main thread's mixer time, the SPU traffic the game generates per second.
+// (platform/web_debug_bridge.c) : output path, sample rate, block, latencies, the longest gap
+// between two filled blocks (ScriptProcessor) or worklet ticks, late command batches (worklet),
+// the mixer's time, the SPU traffic the game generates per second ; and meters the output
+// signal itself (audio-meter.mjs) : dropouts, short stretches of exact silence amid the sound,
+// what a late ScriptProcessor block plays. On SDL's ScriptProcessor (before session 21) the
+// bridge also counts underruns from the node's playback times.
 //
 // The agent browser opens a 16 kHz context by default (no output device, 128 ms blocks) :
 // the suite makes 48 kHz the default before the page loads, as on the user's Mac — the host
@@ -13,7 +16,8 @@
 //   AUDIO-RACE    a Time Trial race, 30 s with Cross held : the same
 //   AUDIO-STALL   in the race, main-thread busy loops of 60 / 100 / 200 ms (__ctrStall, debug
 //                 only), 3 each, 2 s apart : the underruns each one caused
-// The worklet path (`path: 'worklet'`) must show none ; the ScriptProcessor path is reported.
+//   AUDIO-SAVESTATE  F5, 3 s of race, F8 : the worklet takes the restored SPU state, mixes on
+// The worklet path (`path: 'worklet'`) must meter no dropout ; the ScriptProcessor path is reported.
 //
 // RUN
 //   Build : web/build-web.sh debug (disc in OPFS, stored once per origin) or -DCTR_WEB_PRELOAD_DISC=ON
@@ -23,12 +27,21 @@
 
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { installMeter, readMeter, resetMeter } from './audio-meter.mjs'
 import { PLAYER, bootToMenu, brief, menuTo, say, state, until } from './ctr.mjs'
 import { runDirOf, shot } from './online.suite.mjs'
 
 export const meta = { url: 'http://localhost:8093/index.html', login: false, player: PLAYER }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
+// ctr.mjs's until() reads __ctr and tests it synchronously : this one awaits `fn`
+async function waitFor(label, fn, timeout) {
+	for (const end = Date.now() + timeout; Date.now() < end; await sleep(500)) {
+		const v = await fn()
+		if (v) return v
+	}
+	throw new Error(`timed out after ${timeout / 1000} s waiting for ${label}`)
+}
 const ACCEL = 'c'
 
 // Before any page script : contexts open at 48 kHz unless the page asks for a rate.
@@ -40,17 +53,29 @@ const RATE_48K = `(() => {
 	globalThis.AudioContext = C
 })()`
 
-const audio = ctx => ctx.js('const A = globalThis.__ctrAudio; if (!A) return null; const { node, reset, spuHistory, times, glitches, ...a } = A; return JSON.parse(JSON.stringify(a))')
-const reset = ctx => ctx.js('globalThis.__ctrAudio?.reset?.(); return true')
+const audio = ctx => ctx.js('const A = globalThis.__ctrAudio; if (!A) return null; const { node, reset, spuHistory, times, glitches, late, ...a } = A; return JSON.parse(JSON.stringify(a))')
+const reset = ctx => Promise.all([ctx.js('globalThis.__ctrAudio?.reset?.(); return true'), resetMeter(ctx)])
 const fmt = a =>
-	`${a.path} ${a.sampleRate} Hz, block ${a.block} · ${a.blocks} blocks, ${a.underruns} underruns (${a.missedMs} ms missed), longest gap ${a.longestGapMs} ms` +
+	`${a.path} ${a.sampleRate} Hz, block ${a.block} · ${a.blocks} blocks · meter ${a.meter?.dropouts} dropouts (${a.meter?.droppedMs} ms), ${a.meter?.repeats} repeats` +
+	(a.underruns != null ? `, node ${a.underruns} underruns (${a.missedMs} ms missed)` : '') +
+	`, longest gap ${a.longestGapMs} ms` +
 	(a.lateBatches != null ? `, ${a.lateBatches} late batches (worst ${a.worstLateMs} ms)` : '') +
-	` · main-thread mixer ${a.mixerMsPerSec ?? '?'} ms/s`
+	` · main-thread mixer ${a.mixerMsPerSec ?? '?'} ms/s` +
+	(a.workletMixerMsPerSec != null ? `, worklet mixer ${a.workletMixerMsPerSec} ms/s` : '')
+
+// A command's trip to the output, the device's own outputLatency aside : the ScriptProcessor
+// waits for the next block (half a block on average) then plays it one block later ; the worklet
+// applies it bufferMs after its stamp, inside a 128-frame quantum, behind baseLatency.
+const latencyMs = a =>
+	a.path === 'worklet'
+		? a.bufferMs + ((a.block / a.sampleRate) * 1000) / 2 + a.baseLatency * 1000
+		: ((a.block / a.sampleRate) * 1000) * 1.5 + a.baseLatency * 1000
 
 async function window(ctx, label, ms) {
 	await reset(ctx)
 	await sleep(ms)
 	const a = await audio(ctx)
+	if (a) a.meter = await readMeter(ctx)
 	if (!a?.path) throw new Error(`${label} : no __ctr.audio output path (${JSON.stringify(a)})`)
 	say(`${label} : ${fmt(a)} · SPU last second ${JSON.stringify(a.spu)}`)
 	return a
@@ -66,23 +91,36 @@ export default async ctx => {
 		await ctx.conn.send('Page.addScriptToEvaluateOnNewDocument', { source: RATE_48K }, ctx.sid)
 		await ctx.reload()
 		await bootToMenu(ctx)
-		await until(ctx, 'an audio output', () => audio(ctx).then(a => a?.path && a.blocks > 4), { timeout: 20_000, every: 500 })
+		await waitFor('an audio output', () => audio(ctx).then(a => a?.path && a.blocks > 4), 20_000)
 		out = await audio(ctx)
+		await waitFor('the output meter', () => installMeter(ctx), 10_000)
 		results.output = out
-		return `${out.path} · ${out.sampleRate} Hz · block ${out.block} frames (${((out.block / out.sampleRate) * 1000).toFixed(1)} ms) · base ${(out.baseLatency * 1000).toFixed(1)} ms · output ${(out.outputLatency * 1000).toFixed(1)} ms${out.bufferMs != null ? ` · command buffer ${out.bufferMs} ms` : ''}`
+		results.latencyMs = Math.round(latencyMs(out) * 10) / 10
+		return `${out.path} · ${out.sampleRate} Hz · block ${out.block} frames (${((out.block / out.sampleRate) * 1000).toFixed(1)} ms) · base ${(out.baseLatency * 1000).toFixed(1)} ms · output ${(out.outputLatency * 1000).toFixed(1)} ms${out.bufferMs != null ? ` · command buffer ${out.bufferMs} ms` : ''} · command → output ≈ ${results.latencyMs} ms + output`
 	})
 
 	await ctx.scenario('AUDIO-MENU', async () => {
 		if (!out) ctx.skip('no audio output')
 		const a = await window(ctx, 'menu', 10_000)
 		results.windows.menu = a
-		if (a.path === 'worklet' && a.underruns) throw new Error(`menu : ${fmt(a)}`)
+		if (a.path === 'worklet' && (a.meter.dropouts || a.meter.repeats)) throw new Error(`menu : ${fmt(a)} : ${a.meter.list.join(' ')} ms`)
 		return fmt(a)
 	})
 
 	await ctx.scenario('AUDIO-RACE', async () => {
 		if (!out) ctx.skip('no audio output')
-		await menuTo(ctx, 'TIME TRIAL', dir => ctx.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
+		const toTimeTrial = () => menuTo(ctx, 'TIME TRIAL', dir => ctx.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
+		await toTimeTrial().catch(async e => {
+			// bootToMenu's intro-skipping Cross can land as the menu wakes and open Adventure
+			// (mode ADVENTURE_MODE) : Triangle backs out (ctr.mjs, bootToMenu)
+			say(`${e.message} : ${brief(await state(ctx))} — Triangle, once more`)
+			await ctx.js("document.getElementById('canvas')?.focus(); return true")
+			for (let i = 0; i < 3 && (await state(ctx)).mode.includes('ADVENTURE_MODE'); i++) {
+				await ctx.press('z')
+				await sleep(1000)
+			}
+			await toTimeTrial()
+		})
 		for (let i = 0; i < 10; i++) {
 			const s = await state(ctx)
 			if (s.screen !== 'menu') break
@@ -95,7 +133,7 @@ export default async ctx => {
 		const a = await window(ctx, 'race', 30_000)
 		results.windows.race = a
 		results.shot = await shot(ctx, 'race')
-		if (a.path === 'worklet' && a.underruns) throw new Error(`race : ${fmt(a)}`)
+		if (a.path === 'worklet' && (a.meter.dropouts || a.meter.repeats)) throw new Error(`race : ${fmt(a)} : ${a.meter.list.join(' ')} ms`)
 		return `${fmt(a)} · ${brief(await state(ctx))}`
 	})
 
@@ -111,14 +149,38 @@ export default async ctx => {
 			}
 			await ctx.js('globalThis.__ctrStall = null; return true')
 			const a = await audio(ctx)
+			a.meter = await readMeter(ctx)
 			rows.push({ ms, ...a })
 			say(`stall ${ms} ms ×3 : ${fmt(a)}`)
 		}
 		await ctx.release(ACCEL)
 		results.stalls = rows
-		const bad = rows.filter(r => r.path === 'worklet' && r.underruns)
-		if (bad.length) throw new Error(bad.map(r => `${r.ms} ms : ${fmt(r)}`).join(' ; '))
-		return rows.map(r => `${r.ms} ms ×3 → ${r.underruns} underruns, ${r.missedMs} ms missed, gap ${r.longestGapMs} ms${r.lateBatches != null ? `, ${r.lateBatches} late batches (worst ${r.worstLateMs} ms)` : ''}`).join(' · ')
+		const bad = rows.filter(r => r.path === 'worklet' && (r.meter.dropouts || r.meter.repeats))
+		if (bad.length) throw new Error(bad.map(r => `${r.ms} ms : ${fmt(r)} : ${r.meter.list.join(' ')} ms`).join(' ; '))
+		return rows
+			.map(r => `${r.ms} ms ×3 → meter ${r.meter.dropouts} dropouts (${r.meter.droppedMs} ms), ${r.meter.repeats} repeats${r.underruns != null ? `, node ${r.underruns} underruns (${r.missedMs} ms)` : ''}, gap ${r.longestGapMs} ms${r.lateBatches != null ? `, ${r.lateBatches} late batches (worst ${r.worstLateMs} ms)` : ''}`)
+			.join(' · ')
+	})
+
+	await ctx.scenario('AUDIO-SAVESTATE', async () => {
+		if (!inRace) ctx.skip('no race')
+		// F5 saves, F8 loads (platform/native_platform.c, CTR_INTERNAL) : the worklet's copy must
+		// take the restored SPU state (NATIVE_AUDIO_OP_RESTORE) and go on mixing
+		const log = () => ctx.js("return document.getElementById('log')?.textContent ?? ''")
+		await ctx.press('F5')
+		await waitFor('the saved state', async () => /saved quick state/.test(await log()), 10_000)
+		await ctx.hold(ACCEL)
+		await sleep(3000)
+		await ctx.release(ACCEL)
+		await reset(ctx)
+		await ctx.press('F8')
+		await waitFor('the loaded state', async () => /loaded quick state/.test(await log()), 10_000)
+		await sleep(3000)
+		const a = await audio(ctx)
+		const restores = (await ctx.js('return globalThis.__ctrAudio?.spuTotal?.calls?.restore ?? 0')) + (a.spu?.calls?.restore ?? 0)
+		if (!restores) throw new Error('no RESTORE command reached the worklet')
+		if (!(a.blocks > 800)) throw new Error(`the worklet stopped after the load : ${fmt(a)}`)
+		return `F5 / F8 : RESTORE posted, ${a.blocks} quanta mixed in the 3 s after · ${brief(await state(ctx))}`
 	})
 
 	await ctx.scenario('AUDIO-REPORT', async () => {

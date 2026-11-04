@@ -262,7 +262,10 @@ export default async ctx => {
 			const want = [Math.round(host.canvas[0] / host.scale), Math.round(host.canvas[1] / host.scale)]
 			if (b.frameWidth !== want[0] || b.frameHeight !== want[1]) throw new Error(`guest video ${b.frameWidth} × ${b.frameHeight}, wanted ${want.join(' × ')} (PS1 display ${host.display})`)
 			if (fps < 25) throw new Error(`guest decodes ${fps} fps`)
-			if (!(b.audioEnergy > a.audioEnergy)) throw new Error(`no sound energy on the guest (${a.audioEnergy} → ${b.audioEnergy})`)
+			if (!(b.audioEnergy > a.audioEnergy)) {
+				const hostAudio = await ctx.js("const a = globalThis.ctrAudio; return { state: a?.context?.state, node: !!a?.node, ticks: a?.stats?.ticks, capture: window.__ctrShare.state().capture?.audio, err: document.querySelector('#share-panel, .share')?.textContent?.slice(0, 200) ?? null }")
+				throw new Error(`no sound energy on the guest (${a.audioEnergy} → ${b.audioEnergy}) · guest ${JSON.stringify({ bytes: b.audioBytes, level: b.audioLevel })} · host ${JSON.stringify(hostAudio)}`)
+			}
 			if (release) return await releaseTwoTab(ctx, g, gs, b, fps)
 
 			// P2's pad : the VS. menu offers 2 players only with pad 2 plugged in
