@@ -40,7 +40,7 @@
     <div class="label">{D.second}</div>
     <div class="row" id="ctr-second">
       {#each Object.keys(D.secondModes) as m}
-        <button type="button" class="btn" data-second={m} disabled={!!ui.second && !ui.second.error && ui.second.text !== D.secondSteps.racing} onclick={() => globalThis.ctrDev.second(m)}>{D.secondModes[m]}</button>
+        <button type="button" class="btn" data-second={m} disabled={!!ui.second && !ui.second.error && ui.second.text !== D.secondSteps.racing && ui.second.text !== D.secondSteps.ready} onclick={() => globalThis.ctrDev.second(m)}>{D.secondModes[m]}</button>
       {/each}
     </div>
     <p class="help">{D.secondHelp}</p>

@@ -3,7 +3,8 @@
 // browser, from the main menu :
 //   SECOND-VS    « Second window » → Online VS : a real second window opens (one
 //                browser, two windows : session 20's SHARE-ONE-MACHINE), joins the room by itself
-//                as « Bot » with its Bot switch on ; this window walks its own menus to the race
+//                as « Bot » with its Bot switch on ; the button stops there (« ready ») and the
+//                suite has this window walk its own menus to the race (ctrDev.walk)
 //                (ONLINE → VS → players → character → track) ; then this window's Bot switch too,
 //                and the whole race is driven by both, filmed side by side ; afterwards the
 //                player's own name and « Who plays » are untouched (the bot's settings live in memory)
@@ -25,6 +26,7 @@ import { capture } from '/opt/devcontainer/base/skills/visual-loop/scripts/cdp.m
 import { makePlayer, pageScript } from '/opt/devcontainer/base/skills/visual-loop/lib/player.mjs'
 import { HEARTBEAT_MS, PLAYER, bootToMenu, recordWithSound, say } from './ctr.mjs'
 import { runDirOf, shot } from './online.suite.mjs'
+import { D } from '../../ui/src/dev/strings.js'
 
 export const meta = {
 	url: 'http://localhost:8090/index.html',
@@ -141,7 +143,10 @@ async function oneClick(ctx, mode, { finish }) {
 	const win = await secondWindow(ctx, mode)
 	try {
 		say(`second window : ${(await win.js('return location.href')).replace(/#.*/, '#…')}`)
-		// this window's menus walked by the page itself, to the race
+		// Bot in the room, then this window's menus walked to the race (ctrDev.walk : the button
+		// leaves them to the player)
+		await waitFor('Bot in the room', async () => (await progress(ctx))?.text === D.secondSteps.ready, 180_000, () => failed(ctx))
+		await ctx.js(`void window.ctrDev.walk(${JSON.stringify(mode)}); return true`)
 		const race = await waitFor('the race (this window\'s menus walked by the page)', async () => {
 			const s = await kart(ctx.js)
 			return racing(s) ? s : null

@@ -5,9 +5,10 @@
 //   3. the second window goes to the room link with ?bot&mute&dev=<mode> : it boots by itself
 //      (main.js), keeps its own settings (« Bot », the keyboard : store.js) and its Bot switch is
 //      on (src/dev/index.js) ;
-//   4. once Bot is in the room, this window's own menus are walked to the race : ONLINE → VS or
-//      BATTLE (Share : VS.) → players → this player's character → the defaults to the start.
-// The race itself is the player's (or this window's Bot switch).
+//   4. once Bot is in the room, the player picks the race from this window's own menus ; Bot
+//      follows (its character locked, its race driven by its Bot switch).
+// walkToRace (globalThis.ctrDev.walk, for the player suites) walks this window's menus to the race
+// instead : ONLINE → VS, BATTLE or ARCADE (Share : VS.) → players → character → the defaults.
 import { MAIN_MENU, menuTo, onMainMenu } from '../lib/autopilot.js'
 import { SECOND, host, secondWindowUrl, waitFor, windowFeatures } from '../lib/second-window.js'
 import { frames, out } from './keys.js'
@@ -79,9 +80,7 @@ export function openSecond(mode, { ui }) {
     say('joining')
     const bot = await waitFor(() => guests(spec.room).find((g) => g.slot > 0 && (g.state === 'streaming' || g.state === 'nomedia')), { timeout: 180_000, every: 250 })
     if (!bot) throw new Error('Bot never joined the room (see the second window)')
-    say('menus')
-    await walkToRace(spec)
-    say('racing')
+    say('ready')
     return win
   })().catch((e) => { say(String(e?.message ?? e), true); return null })
 }
