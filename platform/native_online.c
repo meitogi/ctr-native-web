@@ -553,6 +553,10 @@ static int GoSolo(void)
 	SmoothReset();
 	soloRace = 1;
 	soloEndAt = 0;
+	// the host's SG_STARTRACE will never come : this race runs on its own from here
+	// (OnlineEndOfRace waits for GAME_START_RACE to show its results)
+	if (octr->CurrState < GAME_START_RACE)
+		octr->CurrState = GAME_START_RACE;
 	for (int slot = 1; slot < octr->NumDrivers && slot < MAX_NUM_PLAYERS; slot++)
 	{
 		if (octr->nameBuffer[slot][0] == 0 || SlotEnded(slot) || HostBot(slot))

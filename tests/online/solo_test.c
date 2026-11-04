@@ -119,6 +119,12 @@ int main(void)
 	EXPECT(stub.deactivated == 1, "no title after the results (deactivated %d)", stub.deactivated);
 	EXPECT(stub.octr.numDriversEnded == 4, "%d results, wanted 4", stub.octr.numDriversEnded);
 
+	// the host gone during the fly-in (its SG_STARTRACE never comes) : the race runs on its own
+	RaceAsGuest(2);
+	stub.octr.CurrState = GAME_WAIT_FOR_RACE;
+	Drop();
+	EXPECT(stub.octr.CurrState == GAME_START_RACE && stub.takenOver[1], "a drop in the fly-in : state %d", stub.octr.CurrState);
+
 	// the host itself, a race still loading, Battle : the retail leave
 	RaceAsGuest(0);
 	Drop();

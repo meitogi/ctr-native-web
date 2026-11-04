@@ -718,7 +718,8 @@ internal void NativeAudio_WebXaWallClock(double ms)
 
 	s_audio.xa.outputFrame += (u64)frames;
 	s_audioWeb.xaWallRest = frames - (double)(u64)frames;
-	if ((outputFrameCount == 0) || (s_audio.xa.outputFrame >= outputFrameCount))
+	// a track of unknown length never ends here, as NativeAudio_AdvanceXAOutputFrameNoLock's
+	if ((outputFrameCount > 0) && (s_audio.xa.outputFrame >= outputFrameCount))
 	{
 		s_audio.xa.outputFrame = outputFrameCount;
 		s_audio.xa.active = 0;
