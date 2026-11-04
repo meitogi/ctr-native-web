@@ -85,7 +85,7 @@ const pageLog = tab => tab.js(`return [location.href, document.visibilityState, 
 	document.getElementById('drop-error')?.textContent, 'game script ' + !!document.querySelector('script[src="ctr_native.js"]'),
 	'focus ' + (document.activeElement?.tagName + '#' + (document.activeElement?.id || '') + (document.activeElement?.closest?.('#ctr-settings') ? ' in settings' : '')) + ', settings ' + (document.getElementById('ctr-settings')?.checkVisibility?.() ? 'open' : 'closed') + ', focused ' + document.hasFocus(),
 	(document.getElementById('log')?.textContent ?? '').trim().split('\\n').slice(-4).join(' | '),
-	'online log ' + (document.getElementById('log')?.textContent ?? '').split('\\n').filter(l => l.includes('[OnlineCTR]')).slice(-8).join(' | '),
+	'online log ' + (document.getElementById('log')?.textContent ?? '').split('\\n').filter(l => l.includes('[OnlineCTR]') && !/\\] frame \\d+: state/.test(l)).slice(-12).join(' | '),
 	'last error at ' + (window.__ctrLastError?.at ?? '?') + ' ' + (window.__ctrLastError?.stack ?? 'none').split('\\n').slice(0, 14).join(' < ')].join(' ; ')`).catch(e => e.message)
 
 export async function until(tab, label, pred, timeout = 30_000, every = 250) {
@@ -200,7 +200,7 @@ export async function boot(tab, url) {
 }
 
 /** As until(), on the game's own state (window.__ctr). */
-async function untilGame(tab, label, pred, timeout = 30_000, every = 250) {
+export async function untilGame(tab, label, pred, timeout = 30_000, every = 250) {
 	const start = Date.now()
 	let beat = start + HEARTBEAT_MS
 	let s = null
@@ -226,14 +226,43 @@ const rates = r6 => {
 }
 
 /**
+ * From the host's character select to the room's race : the host locks P1, the guest's Cross
+ * reaches the host as P2's pad, the host's Cross on the first track locks it ; both in the race.
+ */
+export async function charactersToRace(host, guest) {
+	await sleep(1000)
+	// the host locks P1 ; the guest's Cross reaches the host as P2's pad (presses landing as the
+	// menu opens are lost : again until locked)
+	for (let i = 0; i < 6 && !((await game(host))?.charSelect?.locked & 1); i++) {
+		await host.press(CROSS)
+		await sleep(800)
+	}
+	for (let i = 0; i < 8 && !((await game(host))?.charSelect?.locked & 2); i++) {
+		await guest.press(CROSS)
+		await sleep(800)
+	}
+	await untilGame(host, 'both characters locked', s => !s.charSelect || (s.charSelect.locked & 3) === 3, 15_000)
+	say('both characters locked : the first track (the lock starts the room\'s race)')
+	for (let i = 0; i < 16 && (await online(host)).octr.CurrState === ST.HOST_TRACK_PICK; i++) {
+		if (!(await game(host))?.charSelect) await host.press(CROSS)
+		await sleep(700)
+	}
+	await until(host, 'the track sent (OnlineCTR character pick)', s => s.octr.CurrState >= ST.CHARACTER_PICK, 15_000)
+	await until(guest, 'the character from the host', s => s.octr.CurrState >= ST.CHARACTER_PICK && s.lobby.phase >= PHASE.starting, 15_000)
+	for (const tab of [host, guest]) await until(tab, 'the race (SG_STARTRACE)', s => s.octr.CurrState === ST.START_RACE, 180_000, 500)
+	for (const tab of [host, guest]) if ((await online(tab)).lobby.phase !== PHASE.race) throw new Error(`${tab.name} : lobby phase ${(await online(tab)).lobby.phase} in the race`)
+}
+
+/**
  * A room and its first race : `host` is the suite's own tab (ctx) ; the guest gets a tab of its
  * own (or the second browser), driven with the same player harness. `inject` : page scripts
  * both pages get before they load (web/net/test/impair.js). Resolves at SG_STARTRACE on both
  * sides with { host, guest, gp, gjs, gl, hl, leave, close } — `close()` lets the guest's browser go.
  * `arcade` : ONLINE → ARCADE → single race → 2P → the difficulty's default (session 23, the
- * host's bots fill the race up to 8 karts) instead of ONLINE → VS → 2P.
+ * host's bots fill the race up to 8 karts) instead of ONLINE → VS → single race → 2P.
+ * `cup` : the race type's CUP instead (session 32, D12), then the first cup of the cup select.
  */
-export async function roomToRace(ctx, mode, { inject = [], arcade = false } = {}) {
+export async function roomToRace(ctx, mode, { inject = [], arcade = false, cup = false } = {}) {
 	const relay = ctx.args.relay
 	const rk = ctx.args.rk ?? ''
 	if (!relay) ctx.skip('no relay : --set relay=ws://localhost:8787 --set rk=<key> (a local ctr-relay, see RUN)')
@@ -327,36 +356,17 @@ export async function roomToRace(ctx, mode, { inject = [], arcade = false } = {}
 		if ((await online(guest)).lobby.phase !== PHASE.menus) throw new Error(`guest : lobby phase ${(await online(guest)).lobby.phase}, wanted the host's menus`)
 		await shot(ctx, `${mode}-room`)
 
-		// The lobby is the host's own menus : ONLINE → VS → 2 players (open : the guest's pad is
-		// plugged as P2 by the Share host) → the character select
+		// The lobby is the host's own menus : ONLINE → VS → the race type → 2 players (open : the
+		// guest's pad is plugged as P2 by the Share host) → the character select
 		await menuTo(host, 'NETPLAY', dir => host.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
-		const presses = arcade ? [CROSS, 'ArrowDown', 'ArrowDown', CROSS, CROSS, 'ArrowDown', CROSS, CROSS] : [CROSS, CROSS, CROSS]
+		const raceType = cup ? ['ArrowDown', CROSS] : [CROSS]
+		const presses = arcade ? [CROSS, 'ArrowDown', 'ArrowDown', CROSS, ...raceType, 'ArrowDown', CROSS, CROSS] : [CROSS, CROSS, ...raceType, CROSS]
 		for (const key of presses) {
 			await host.press(key)
 			await host.frames(15)
 		}
 		await untilGame(host, 'the character select', s => s.charSelect != null, 15_000)
-		await sleep(1000)
-		// the host locks P1 ; the guest's Cross reaches the host as P2's pad (presses landing as the
-		// menu opens are lost : again until locked)
-		for (let i = 0; i < 6 && !((await game(host))?.charSelect?.locked & 1); i++) {
-			await host.press(CROSS)
-			await sleep(800)
-		}
-		for (let i = 0; i < 8 && !((await game(host))?.charSelect?.locked & 2); i++) {
-			await guest.press(CROSS)
-			await sleep(800)
-		}
-		await untilGame(host, 'both characters locked', s => !s.charSelect || (s.charSelect.locked & 3) === 3, 15_000)
-		say('both characters locked : the first track (the lock starts the room\'s race)')
-		for (let i = 0; i < 16 && (await online(host)).octr.CurrState === ST.HOST_TRACK_PICK; i++) {
-			if (!(await game(host))?.charSelect) await host.press(CROSS)
-			await sleep(700)
-		}
-		await until(host, 'the track sent (OnlineCTR character pick)', s => s.octr.CurrState >= ST.CHARACTER_PICK, 15_000)
-		await until(guest, 'the character from the host', s => s.octr.CurrState >= ST.CHARACTER_PICK && s.lobby.phase >= PHASE.starting, 15_000)
-		for (const tab of [host, guest]) await until(tab, 'the race (SG_STARTRACE)', s => s.octr.CurrState === ST.START_RACE, 180_000, 500)
-		for (const tab of [host, guest]) if ((await online(tab)).lobby.phase !== PHASE.race) throw new Error(`${tab.name} : lobby phase ${(await online(tab)).lobby.phase} in the race`)
+		await charactersToRace(host, guest)
 		// leave(): the guest's page goes away (navigates off the game : its links close as a closed tab's do)
 		const leave = () => guest.navigate(`${origin}/preload-flag.js`)
 		return { host, guest, gp, gjs, gl, hl, leave, close: () => guestBrowser.close() }
@@ -579,10 +589,73 @@ export async function itemRaceOn(ctx, { host, guest, gp, gjs }) {
 	return `${guest.own ? 'two browsers' : 'two tabs'} · guest session re-attached ${guest.gs.reattached}× · host ${h.finished ? `finished, rank ${h.rank}` : 'did not finish'} · guest ${g.finished ? `finished, rank ${g.rank}` : 'did not finish'} · weapon messages ${JSON.stringify(fired)} · items ${JSON.stringify(picked)} · ${both}`
 }
 
+const room = tab => online(tab).then(s => s?.roomInfo ?? null)
+
+/**
+ * A whole Netplay Cup (session 32, docs/ONLINECTR_PORT.md D12) : the 4 races of the first cup
+ * with no menu between them, both driving every race ; after each, the standings on both games
+ * (the guest's table is the host's, by clientID) ; after the last, the host's character select.
+ * The host's screen is filmed through the whole Cup. `arcade` : with the host's bots (8 karts).
+ */
+export async function cupOn(ctx, { arcade = false } = {}) {
+	const r = await roomToRace(ctx, 'auto', { arcade, cup: true })
+	const { host, guest, gp, gjs } = r
+	const rows = []
+	try {
+		await recordWithSound(ctx, arcade ? 'arcade-cup' : 'vs-cup', async () => {
+			for (let race = 1; race <= 4; race++) {
+				const h0 = await online(host)
+				const track = (await game(host))?.levelID
+				if (race > 1 && h0.octr.CurrState < ST.START_RACE) throw new Error(`race ${race} : the host is not racing (state ${h0.octr.CurrState})`)
+				const deadline = Date.now() + 300_000
+				await Promise.all([drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, deadline), drive(gp, gjs, deadline)])
+				// the standings : counted on the host, copied to the guest
+				let hr = null, gr = null
+				for (let i = 0; i < 240; i++) {
+					hr = await room(host)
+					gr = await room(guest)
+					if (hr?.races === race && gr?.races === race) break
+					await sleep(1000)
+				}
+				if (hr?.races !== race || gr?.races !== race) throw new Error(`race ${race} : standings host ${JSON.stringify(hr)}, guest ${JSON.stringify(gr)}`)
+				if (JSON.stringify(hr.points) !== JSON.stringify(gr.points)) throw new Error(`race ${race} : the guest's table ${JSON.stringify(gr.points)} is not the host's ${JSON.stringify(hr.points)}`)
+				rows.push({ race, track, points: hr.points })
+				say(`cup race ${race} (track ${track}) : points by clientID ${JSON.stringify(hr.points)}`)
+				await sleep(2000)
+				await guestShot(ctx, guest, `cup-standings-${race}`)
+				if (race < 4) {
+					// the next track by itself : no menu between the races, the same room
+					for (const tab of [host, guest]) await until(tab, `cup race ${race + 1}`, s => s.octr.CurrState === ST.START_RACE && s.lobby.active, 240_000, 500)
+					if ((await game(host))?.screen === 'menu') throw new Error(`race ${race + 1} : the host went through the menus`)
+				}
+			}
+			await untilGame(host, 'the character select after the Cup', s => s.charSelect != null, 90_000)
+			await shot(ctx, 'cup-after-characters')
+		})
+		const tracks = rows.map(x => x.track)
+		if (new Set(tracks).size !== 4) throw new Error(`the Cup's tracks ${JSON.stringify(tracks)}`)
+		const last = rows[3].points
+		if (!(last[0] > 0 || last[1] > 0)) throw new Error(`no points for the humans : ${JSON.stringify(last)}`)
+		return `4 races on tracks ${tracks.join(', ')} · final points by clientID ${JSON.stringify(last)} · the guest's table equal after every race · then the character select`
+	} finally {
+		await r.close()
+	}
+}
+
+/** The guest's screen from the compositor's surface, next to the host's shots. */
+export async function guestShot(ctx, guest, label) {
+	const proof = await shot(ctx, `${label}-host`)
+	const dir = proof?.file ? runDirOf(ctx.args.proofs, proof.file) : null
+	const r = await guest.gconn.send('Page.captureScreenshot', { format: 'png', fromSurface: true }).catch(() => null)
+	if (dir && r?.data) writeFileSync(join(dir, proof.file.replace(/-host\.png$/, '-guest.png')), Buffer.from(r.data, 'base64'))
+}
+
 export default async ctx => {
 	await ctx.scenario('ONLINE-2TAB-P2P', () => twoTabs(ctx, 'auto'))
 	// the guest on the relay plays the lobby blind (its pad, no picture) and races as the others
 	await ctx.scenario('ONLINE-2TAB-WS', () => twoTabs(ctx, 'ws'))
 	// A whole race, both driving and firing, both screens filmed ; over WebRTC when it pairs.
 	await ctx.scenario('ONLINE-ITEM-RACE', () => twoTabs(ctx, 'auto', { itemRace: true }))
+	// Session 32 : a whole VS Cup, humans only (D12)
+	await ctx.scenario('ONLINE-VS-CUP', () => cupOn(ctx))
 }

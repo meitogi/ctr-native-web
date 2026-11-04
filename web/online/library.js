@@ -38,13 +38,25 @@ addToLibrary({
     // (0 none, 1 menus, 2 starting, 3 race) and, at the track lock, the menus'
     // character per slot (-1 = empty) ; on the host, the slots its AI drives (bit per slot,
     // docs/ONLINECTR_PORT.md D11).
-    const [activePtr, phasePtr, charsPtr, botsPtr] = Array.from(HEAP32.subarray(lobby >> 2, (lobby >> 2) + 4));
+    const [activePtr, phasePtr, charsPtr, botsPtr, roomPtr, roomLenPtr] = Array.from(HEAP32.subarray(lobby >> 2, (lobby >> 2) + 6));
     Module.ctrOnlineLobby = () => ({
       active: HEAP32[activePtr >> 2] !== 0,
       phase: HEAP32[phasePtr >> 2],
       characters: Array.from(HEAP32.subarray(charsPtr >> 2, (charsPtr >> 2) + 8)),
       hostBots: HEAP32[botsPtr >> 2],
     });
+    // What the host tells its guests beside the wire (docs/ONLINECTR_PORT.md D12, game/OnlineCTR/
+    // native_compat.h OnlineRoomInfo) : the Cup (on, cup, races counted, points by clientID) and
+    // the clientIDs its AI drives. The host's game writes it ; a guest's page copies the host's in.
+    const roomLen = HEAP32[roomLenPtr >> 2];
+    Module.ctrOnlineRoom = () => {
+      const r = HEAP32.subarray(roomPtr >> 2, (roomPtr >> 2) + roomLen);
+      return { cup: r[0], cupID: r[1], races: r[2], points: Array.from(r.subarray(3, 11)), bots: r[11] };
+    };
+    Module.ctrOnlineRoomSet = (room) => {
+      const r = HEAP32.subarray(roomPtr >> 2, (roomPtr >> 2) + roomLen);
+      r.set([room.cup | 0, room.cupID | 0, room.races | 0, ...Array.from({ length: 8 }, (_, i) => room.points?.[i] | 0), room.bots | 0]);
+    };
     Module.ctrOnlineControlQueue = [];
     // cmd : 1 enter the page's room, 2 leave, 3 this guest's character (arg)
     Module.ctrOnlineControl = (cmd, arg = 0) => { Module.ctrOnlineControlQueue.push({ cmd, arg }); };

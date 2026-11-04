@@ -71,5 +71,6 @@ void NativeOnlineGame_EndBotRace(int slot);        // the room's end-of-race tim
 
 // Session 32 : a guest whose host left mid-race finishes it alone
 int NativeOnlineGame_PrepareAI(void);              // the AI's difficulty for this race ; 0 : no AI here (Battle)
+int *NativeOnlineGame_RoomInfo(int **len);         // what the host tells its guests beside the wire (D12), *len its ints
 
 #endif

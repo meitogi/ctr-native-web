@@ -7,18 +7,21 @@
 //                      karts moving on the guest's screen by session 11's counter (window.__ctr.net,
 //                      against the host's own kart there), the whole race driven and filmed on both
 //                      screens, the results with all 8 on both.
+//                      Session 32 : then the host back on its character select (the guest behind
+//                      its picture), both pick again, a second race with 8 karts (the bots join again).
 // ONLINE-ARCADE-LEAVE  the guest leaves mid-race : the host's AI drives its kart on (the same slot,
 //                      the player's name, never an empty SG_NAME), the host is told, the kart finishes.
+//                      Session 32 : then the host alone on the character select ; its way back,
+//                      Triangle out of it, then Triangle up to the main menu, still in the room.
+// ONLINE-ARCADE-CUP    session 32 : a whole Arcade Cup, the 4 races chained, the standings on both.
 //
 // RUN : as online.suite.mjs (debug ON build served on 8091–8093, a keyed relay on 8788) :
 //   bash plans/ctr-native-web/tools/play.sh online-arcade <session> 8092 -- --set relay=ws://localhost:8788 --set rk=<key>
 //   (play.sh passes --set guestCdp=<agent browser b> : the guest in a browser of its own)
 // Not a node --test file.
 
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { say } from './ctr.mjs'
-import { drive, itemRaceOn, online, roomToRace, runDirOf, shot, until } from './online.suite.mjs'
+import { ST, charactersToRace, cupOn, drive, game, guestShot, itemRaceOn, online, roomToRace, shot, until, untilGame } from './online.suite.mjs'
 import { JERK_FLOOR } from './online-net.suite.mjs'
 
 export const meta = {
@@ -49,14 +52,6 @@ const karts = s => s?.karts?.slots?.filter(k => k.exists).length ?? 0
 const NAMED = /^[A-Z][A-Za-z. ]{1,8}$/
 const TAKEOVER = /left : a bot finishes|est parti : un bot finit/i
 
-/** The guest's screen from the compositor's surface, next to the host's shots. */
-async function guestShot(ctx, guest, label) {
-	const proof = await shot(ctx, `${label}-host`)
-	const dir = proof?.file ? runDirOf(ctx.args.proofs, proof.file) : null
-	const r = await guest.gconn.send('Page.captureScreenshot', { format: 'png', fromSurface: true }).catch(() => null)
-	if (dir && r?.data) writeFileSync(join(dir, proof.file.replace(/-host\.png$/, '-guest.png')), Buffer.from(r.data, 'base64'))
-}
-
 /** No more than 8 at the start : the room, the names, the host's bot mask. */
 async function eightKarts(host, guest) {
 	const hs = await until(host, '8 karts on the host', s => karts(s) === 8, 30_000)
@@ -70,6 +65,42 @@ async function eightKarts(host, guest) {
 	return names
 }
 
+/** After the room's reset : the host on its character select, the guest in the lobby behind it. */
+async function afterRace(host, guest) {
+	const t0 = Date.now()
+	const h = await untilGame(host, 'the host on its character select after the race', s => s.charSelect != null, 60_000)
+	await until(host, 'the host in the next lobby', s => s.octr.CurrState === ST.HOST_TRACK_PICK, 15_000)
+	const g = await until(guest, 'the guest in the next lobby', s => s.octr.CurrState === ST.GUEST_TRACK_WAIT && s.share?.state === 'connected', 30_000)
+	return `after the race : the host's character select in ${((Date.now() - t0) / 1000).toFixed(1)} s (mode ${h.mode.join('|')}), the guest in the lobby (${g.octr.names.slice(0, 2).join(', ')})`
+}
+
+/** The host alone at the character select : one player, then Triangle back out of it twice. */
+async function backFromCharacters(ctx, host) {
+	await untilGame(host, 'the host on its character select after the race', s => s.charSelect != null, 60_000)
+	await shot(ctx, 'leave-after-race-characters')
+	await sleep(1000)
+	const steps = []
+	for (let i = 0; i < 6 && (await game(host))?.charSelect; i++) {
+		await host.press('z') // keyboard Z = Triangle
+		await sleep(1200)
+	}
+	const g1 = await untilGame(host, 'a menu after Triangle', s => !s.charSelect && s.menu != null && s.menu.input, 10_000)
+	steps.push(`${g1.menu.title || '(main)'} > ${g1.sub?.title ?? '-'} / ${g1.sub?.label ?? g1.menu.label}`)
+	await shot(ctx, 'leave-back-1')
+	let g = g1
+	for (let i = 0; i < 4 && g.sub != null; i++) {
+		await host.press('z')
+		await sleep(1000)
+		g = await game(host)
+		steps.push(`${g.menu?.title || '(main)'} > ${g.sub?.title ?? '-'} / ${g.sub?.label ?? g.menu?.label}`)
+	}
+	await shot(ctx, 'leave-back-main')
+	const o = await online(host)
+	if (g.sub != null || g.menu?.label !== 'NETPLAY') throw new Error(`Triangle did not lead back to the main menu : ${steps.join(' → ')}`)
+	if (!o.lobby.active) throw new Error('the room closed on the way back')
+	return `character select → Triangle : ${steps.join(' → ')} (still in the room)`
+}
+
 /** The guest's view of every remote kart over a whole race : bots and the host, by __ctr.net. */
 async function arcade(ctx) {
 	const r = await roomToRace(ctx, 'auto', { inject: [TOASTS, RESULTS], arcade: true })
@@ -77,6 +108,9 @@ async function arcade(ctx) {
 	try {
 		const names = await eightKarts(host, guest)
 		say(`8 karts : the bots ${names.join(', ')}`)
+		// session 32 : the guest knows the bots (the host's word, our LOBBY message) : their names in silver
+		const told = await until(guest, 'the bots told to the guest', s => s.roomInfo?.bots === 0xfc, 15_000)
+		say(`the guest's bots by clientID : ${told.roomInfo.bots.toString(2)}`)
 		await guestShot(ctx, guest, 'arcade-start')
 		// the bots get 120 s after the first finisher (the host's end-of-race timeout, 11b)
 		await ctx.js("const e = document.getElementById('online-end-after'); e.value = '120'; e.dispatchEvent(new Event('change')); return true")
@@ -108,7 +142,15 @@ async function arcade(ctx) {
 		await guestShot(ctx, guest, 'arcade-results')
 		const order = s => s.octr.raceStats.map(x => `${s.octr.names[x.slot] || '?'} ${(x.finalTime / 960).toFixed(1)}s`)
 		for (const s of [hs, gs]) if (new Set(s.octr.raceStats.map(x => x.slot)).size !== 8) throw new Error(`results : ${JSON.stringify(s.octr.raceStats)}`)
-		return `${race} · host results ${order(hs).join(' / ')} · guest results ${order(gs).join(' / ')} · bots on the guest ${bots.map(b => `${b.slot}:${b.packetsPerSec}/s jerk ${b.jerk.p95}`).join(' ')} (host's kart jerk ${hostView.jerk.p95})`
+		// session 32 : after the room's reset, the character select again, then a second race
+		const back = await afterRace(host, guest)
+		await shot(ctx, 'arcade-after-race-host')
+		await guestShot(ctx, guest, 'arcade-after-race-guest')
+		await charactersToRace(host, guest)
+		const names2 = await eightKarts(host, guest)
+		say(`second race : 8 karts, the bots ${names2.join(', ')}`)
+		await shot(ctx, 'arcade-second-race')
+		return `${back} · second race with 8 karts (${names2.join(', ')}) · ${race} · host results ${order(hs).join(' / ')} · guest results ${order(gs).join(' / ')} · bots on the guest ${bots.map(b => `${b.slot}:${b.packetsPerSec}/s jerk ${b.jerk.p95}`).join(' ')} (host's kart jerk ${hostView.jerk.p95})`
 	} finally {
 		await r.close()
 	}
@@ -142,7 +184,9 @@ async function leave(ctx) {
 		const end = await until(host, 'the taken-over kart finishes', s => s.octr.raceStats.some(x => x.slot === 1), 180_000, 1000)
 		await shot(ctx, 'leave-results')
 		const stat = end.octr.raceStats.find(x => x.slot === 1)
-		return `left after 25 s · taken over in ${ms} ms, still « ${taken.octr.names[1]} » · moved ${moved.toFixed(0)} units in 8 s · host ${h.finished ? `finished, rank ${h.rank}` : 'did not finish'} · the kart finished ${(stat.finalTime / 960).toFixed(1)} s, ${end.octr.raceStats.length} finishers · host toasts ${JSON.stringify(toasts)}`
+		// session 32 : the host alone at the character select, then its way back
+		const back = await backFromCharacters(ctx, host)
+		return `${back} · left after 25 s · taken over in ${ms} ms, still « ${taken.octr.names[1]} » · moved ${moved.toFixed(0)} units in 8 s · host ${h.finished ? `finished, rank ${h.rank}` : 'did not finish'} · the kart finished ${(stat.finalTime / 960).toFixed(1)} s, ${end.octr.raceStats.length} finishers · host toasts ${JSON.stringify(toasts)}`
 	} finally {
 		await r.close()
 	}
@@ -151,4 +195,6 @@ async function leave(ctx) {
 export default async ctx => {
 	await ctx.scenario('ONLINE-ARCADE', () => arcade(ctx))
 	await ctx.scenario('ONLINE-ARCADE-LEAVE', () => leave(ctx))
+	// Session 32 : a whole Arcade Cup with the host's bots (D12)
+	await ctx.scenario('ONLINE-ARCADE-CUP', () => cupOn(ctx, { arcade: true }))
 }

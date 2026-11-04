@@ -45,10 +45,28 @@ extern int octrLobbyCharacters[8]; // the menus' character per slot at the track
 extern int octrThreadAlive;   // the mod thread runs on this level
 extern int octrOnlineArcade;  // the ONLINE row's ARCADE was taken (D11.8)
 extern int octrLobbyArcade;   // the host's track lock came from ONLINE > ARCADE : bots fill the room
+extern int octrLobbyPlayers;  // the menus' players at the host's last track lock : the character select after the race
 extern int octrHostBots;      // host only : bit per slot driven by the host's AI (D11.2), read by the page
 // a host bot's shot, as octr->Shoot[0] for the host's own kart (D11.4)
 extern struct OnlineBotShoot { unsigned char boolNow, Weapon, boolJuiced, flags; } octrBotShoot[8];
 #define ONLINE_HOST_BOT(slot) (octrActive && ((octrHostBots >> (slot)) & 1))
+
+// Session 32 : what the host tells its guests beside the wire (docs/ONLINECTR_PORT.md, D12), in our
+// LOBBY message ; the host writes it, each guest's page copies it in. By clientID.
+enum OnlineRoomInfo
+{
+	ONLINE_ROOM_CUP,       // a Cup is on
+	ONLINE_ROOM_CUP_ID,    // its cup (data.ArcadeCups)
+	ONLINE_ROOM_CUP_RACES, // races counted so far (1-4)
+	ONLINE_ROOM_POINTS,    // 8 totals, by clientID
+	ONLINE_ROOM_BOTS = ONLINE_ROOM_POINTS + 8, // the clientIDs the host's AI drives (bit per clientID)
+	ONLINE_ROOM_INFO_LEN,
+};
+extern int octrRoomInfo[ONLINE_ROOM_INFO_LEN];
+extern int octrCupInterlude; // between two races of a Cup : the race level stays, its standings drawn
+int OnlineSlot_IsBot(int slot);   // a bot's kart, or one the AI took over : its name in the bots' colour
+void OnlineRoom_EndOfRace(void);  // every frame of the end of race : the humans left ; a Cup counted (host), its standings
+int OnlineCup_Showing(void);      // the standings replace the results
 extern const unsigned char onlineItemSetRace2[0x34], onlineItemSetRace3[0x14], onlineItemSetRace4[0x14];
 #define ONLINE_LNG_ROW 0x9a // a language-table slot no code reads ; the mod's menus use 0x9a-0xa1 the same way
 
@@ -64,7 +82,8 @@ enum OnlineLobbyPhase
 // The room's race : from the first load stage of its level (LOAD_TenStages
 // clears MAIN_MENU there) to the load away from it. The menu level that waits
 // for SG_STARTLOADING, and keeps rendering under the flag, stays retail.
-#define ONLINE_RACE (octrActive && (octr->CurrState >= LOBBY_START_LOADING) && ((sdata->gGT->gameMode1 & MAIN_MENU) == 0))
+// Between two races of a Cup the room's lobby states run on the race level (D12.1) : still its race.
+#define ONLINE_RACE (octrActive && ((octr->CurrState >= LOBBY_START_LOADING) || octrCupInterlude) && ((sdata->gGT->gameMode1 & MAIN_MENU) == 0))
 
 void OnlineRuntime_Activate(void);
 void OnlineRuntime_Deactivate(void);

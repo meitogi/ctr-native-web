@@ -80,6 +80,8 @@ static struct MenuRow onlineRowsMainWithScrapbook[9] =
 	{0x234, 6, 7, 7, 7},
 	{RECTMENU_STRING_NONE},
 };
+// NETPLAY's row in both main menus above
+#define ONLINE_MAIN_ROW 5
 static struct MenuRow onlineRowsModes[4] =
 {
 	{0x4F, 0, 1, 0, 0},
@@ -98,12 +100,12 @@ static struct RectMenu onlineMenu =
 
 // ONLINE > ARCADE (docs/ONLINECTR_PORT.md, D11.8) : the retail Arcade path with
 // the room's humans as P1-P4 and the host's bots filling up to 8 karts. Its own
-// race type (single race ; the Cup shown, locked) and players menu (1P-4P) :
-// solo Arcade keeps D230's 1P / 2P and its Cup.
+// race type (single race, the Cup : D12) and players menu (1P-4P) : solo Arcade
+// keeps D230's 1P / 2P and its Cup.
 static struct MenuRow onlineRowsRaceType[3] =
 {
 	{0x15E, 0, 1, 0, 0},
-	{(s16)(0x15F | MENU_ROW_LOCKED), 0, 1, 1, 1},
+	{0x15F, 0, 1, 1, 1},
 	{RECTMENU_STRING_NONE},
 };
 static struct MenuRow onlineRowsPlayers[5] =
@@ -142,7 +144,7 @@ static void OnlineArcade_TogglePlayerRows(void)
 	}
 }
 
-// as MM_MenuProc_SingleCup's Arcade branch ; the Cup row is locked
+// as MM_MenuProc_SingleCup's Arcade branch
 static void OnlineArcadeRaceType_Proc(struct RectMenu *menu)
 {
 	s16 row = menu->rowSelected;
@@ -152,7 +154,7 @@ static void OnlineArcadeRaceType_Proc(struct RectMenu *menu)
 		menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
 		return;
 	}
-	if (row != 0)
+	if (row < 0 || row > 1)
 		return;
 
 	GAME_TRACKER->gameMode2 &= ~(CUP_ANY_KIND);
@@ -191,12 +193,14 @@ static void OnlineMenu_Proc(struct RectMenu *menu)
 		return;
 	}
 	if (row < -1 || row > 2 || !ONLINE_ROOM)
+	if (row == 1)
+		GAME_TRACKER->gameMode2 |= CUP_ANY_KIND;
 	{
 		return;
 	}
 
-	// as the main menu's VS / BATTLE rows, single race only ; an ARCADE taken
-	// then backed out of leaves nothing behind
+	// as the main menu's VS / BATTLE rows ; an ARCADE taken then backed out of
+	// leaves nothing behind
 	GAME_TRACKER->gameMode2 &= ~(CUP_ANY_KIND);
 	GAME_TRACKER->gameMode1 &= ~ARCADE_MODE;
 	octrOnlineArcade = 0;
@@ -255,6 +259,11 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		onlineMenu.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
 		onlineMenu.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
 		onlineMenuRaceType.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
+		// VS : the retail race type, single race or Cup (D12.6), then 2P-4P
+		octrOnlineMenuPath = 1;
+		menu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
+		menu->ptrNextBox_InHierarchy = &MM_MENU_RACE_TYPE;
+		return;
 		onlineMenuRaceType.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
 		onlineMenuPlayers.posX_curr = MM_MENU_PLAYERS_1P2P.posX_curr;
 		onlineMenuPlayers.posY_curr = MM_MENU_PLAYERS_1P2P.posY_curr;
@@ -963,6 +972,18 @@ void MM_JumpTo_TrackSelect(void)
 
 	menu->state &= ~(ONLY_DRAW_TITLE);
 
+
+#ifdef USE_ONLINE
+	// ctr-native: in a Netplay room (session 32) the character select's way back
+	// is the ONLINE menu, still in the room ; its Triangle then the main menu
+	if (ONLINE_ROOM && octrOnlineMenuPath)
+	{
+		MM_MENU_MAIN.rowSelected = ONLINE_MAIN_ROW;
+		MM_MENU_MAIN.ptrNextBox_InHierarchy = &onlineMenu;
+		MM_MENU_MAIN.state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
+		onlineMenu.state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+	}
+#endif
 	MM_TrackSelect_Init();
 }
 

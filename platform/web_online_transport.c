@@ -288,10 +288,12 @@ __attribute__((constructor)) static void WebOnline_Install(void)
 	};
 
 	// one build : the page reads these next to octr (active, lobby phase, the
-	// menus' characters per slot at the track lock, the host's bots)
-	int *lobby[4];
+	// menus' characters per slot at the track lock, the host's bots, and what the
+	// host tells its guests beside the wire : the Cup, its bots, D12)
+	int *lobby[6];
 	NativeOnlineGame_LobbyPointers(&lobby[0], &lobby[1], &lobby[2]);
 	lobby[3] = NativeOnlineGame_HostBots();
+	lobby[4] = NativeOnlineGame_RoomInfo(&lobby[5]);
 
 	NativeOnlineGame_SetMode(0, 1);
 	NativeOnline_SetControl(ctr_web_online_control);

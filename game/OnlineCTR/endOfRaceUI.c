@@ -78,7 +78,8 @@ void EndOfRace_Icons()
         struct Icon * icon = sdata->gGT->ptrIcons[data.MetaDataCharacters[data.characterIDs[index]].iconID];
         char racePos = i + '1';
         DECOMP_DecalFont_DrawLineStrlen(&racePos, 1, pos.x + 27, pos.y, FONT_SMALL, RED);
-        DECOMP_DecalFont_DrawLineStrlen(octr->nameBuffer[index], NAME_LEN, pos.x + 38, pos.y + 1, FONT_SMALL, index == 0 ? BLUE : ORANGE);
+        // ctr-native: a bot's name in the bots' colour (session 32)
+        DECOMP_DecalFont_DrawLineStrlen(octr->nameBuffer[index], NAME_LEN, pos.x + 38, pos.y + 1, FONT_SMALL, index == 0 ? BLUE : OnlineSlot_IsBot(index) ? SILVER : ORANGE);
         ElapsedTimeToTotalTime(&tt, octr->raceStats[i].finalTime);
         if (tt.hours > 0)
         {

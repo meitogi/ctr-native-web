@@ -613,6 +613,8 @@ export function attach(Module) {
   };
   // guest : the game asked the room and was refused because it is racing
   const refused = () => {
+      // the host's word beside the wire (D12) : the Cup's table, its AI's karts — into our game
+      if (body && body !== seen && body.room && lobby().active) Module.ctrOnlineRoomSet?.(body.room);
     const o = Module.ctrOnlineOctr?.();
     return net.role === 'guest' && lobby().active && o?.CurrState === ST.pickRoom && o.clientCount[ROOM] >= 8;
   };
@@ -646,6 +648,7 @@ export function attach(Module) {
         const secs = Math.round(step.notice / 1000);
         if ((Module.ctrOnlineOctr?.().CurrState ?? 0) < ST.endRace) ui?.toast(T.endIn(secs), T.endInDetail);
         toGuests({ phase: PHASE.race, endIn: step.notice });
+  let sentRoom = null; // host : the room info last sent to the guests (D12)
       }
       if (step?.end) {
         toGuests({ phase: PHASE.race, endRace: true });
@@ -691,6 +694,14 @@ export function attach(Module) {
       // the title reloaded after a race) ; the pad goes to the host only while its menus run
       setLobbyGuest(l.active && l.phase !== PHASE.race);
       if (l.active && inHostMenus() && shareGuest?.state === 'connected') sendPad();
+      // the host's word beside the wire (D12) : the Cup's table and its AI's karts, to every
+      // guest when it changes, and again at each track lock (a guest that joined since)
+      const room = Module.ctrOnlineRoom?.();
+      const roomKey = room && JSON.stringify(room);
+      if (room && l.active && (roomKey !== sentRoom || (l.phase === PHASE.starting && !startSent))) {
+        sentRoom = roomKey;
+        toGuests({ phase: l.phase, room });
+      }
       if (refused() && !toldWaiting) {
         ui?.toast(T.roomRacing, T.nextLobby);
         toldWaiting = true;
@@ -833,4 +844,5 @@ export function attach(Module) {
   setOpen(asGuest);
   if (asGuest) guest();
   render();
+        roomInfo: Module.ctrOnlineRoom?.() ?? null,
 }

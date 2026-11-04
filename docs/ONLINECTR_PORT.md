@@ -1361,3 +1361,54 @@ cheat, as retail) and opens a race type of its own : SINGLE RACE, and CUP carryi
 per plugged pad, as the 2P–4P one), then the retail difficulty menu (all three rows : a single
 race), the characters and the track. Solo Arcade keeps its own race type, 1P / 2P and Cup :
 `D230.c` is not touched.
+
+## D12 — The Netplay Cup (session 32)
+
+Settled with the user (2026-11-04, session 32's design proposal, confirmed before the code) :
+a Cup in ONLINE › ARCADE (the host's bots, as D11) **and** in ONLINE › VS (humans only), the
+retail four cups, four tracks chained with no menu between them, the standings on every game,
+then the character select of session 32 (the same room, players and mode). Nothing changes the
+wire : no new `CG_*` / `SG_*`, `VERSION` 1021, golden bytes equal, `sv_core.c` unchanged.
+
+**D12.1 — The room still resets after each race.** The server resets the room 6 s after the last
+finisher (`sv_core.c`, `ROOM_RESET_MS`) and every client lands in `LOBBY_ASSIGN_ROLE`, as after a
+single race. In a Cup in progress neither game loads the menus there : both stay on the race
+level, drawing the standings (D12.4), and the host locks the next track itself — `octr->levelID`
+the cup's next `data.ArcadeCups[cupID].CupTrack[trackIndex].trackID`, the laps and the players'
+characters of the first lock (`octrLobbyCharacters`), as `OnlineLobby_RequestRace` does from the
+menus. Its bots rejoin at that lock (D11.1) : the same humans leave the same characters free, so
+the same bots, in the same order. `SG_STARTLOADING` then loads the next track on every game, as
+for any race. The guests' characters come back from the page's `starting` LOBBY message as in the
+lobby.
+
+**D12.2 — The host counts.** `gGT->cup` holds the Cup on the host, as retail : `cupID`,
+`trackIndex`, `points[8]` (by slot : on the host a slot is a clientID). When the results are
+complete (`HasRaceEnded`) the host adds once, in finishing order (`raceStats`) : with bots the
+retail table `data.cupPointsPerPosition` (9, 6, 3, 1, then 0), humans only (VS) retail's VS rule
+(N − 1 for the first of N, … 0 for the last). `CUP_ANY_KIND` stays set during the host's race :
+its bots get the retail Cup difficulty per track (`BOTS.c`), the guests' games run no AI.
+
+**D12.3 — The guests get the table.** The page reads the host's Cup (`octrCup` : active, cupID,
+trackIndex, points by clientID, final) and sends it in our LOBBY message (Share's framing, the
+`cup` field) at each race's end ; each guest's page writes it into its game's copy, a clientID
+mapped to the guest's slot (`slot = clientID + 1` below its own, its own 0) as the bridge does.
+
+**D12.4 — The standings, on every game.** Drawn by the mod with `DecalFont` as its results list
+(`endOfRaceUI.c`), not retail's `UI_CupStandings` (one local player and no local bots online :
+its icons and counts would be wrong) : « CUP STANDINGS » and the race (n / 4), each named slot's
+total, this race's points, best first ; after race 4 « FINAL STANDINGS ». They replace the results
+once all have finished, until the next track loads ; after the last race they hold 6 s, then the
+character select (session 32's after-race path), the Cup cleared.
+
+**D12.5 — Leavers.** A guest leaving mid-Cup : its kart finishes that race on the host's AI
+(D11.6, Arcade) ; at the next lock a bot fills its slot (VS : the slot stays empty). The table is
+by slot : the slot's points stay with it, the row shows the slot's current name. A player who
+joins between two races (the room is open during the reset) takes a free slot and its points.
+The host leaving mid-Cup : every guest finishes that race alone (session 32), then the title, the
+room closed — the Cup ends with it.
+
+**D12.6 — The menus.** ONLINE › ARCADE's race type opens its CUP row (it was `MENU_ROW_LOCKED`,
+D11.8) : `CUP_ANY_KIND`, then 1P–4P, the difficulty, the characters and the retail cup select.
+ONLINE › VS gains a race type of its own, SINGLE RACE / CUP, before 2P–4P. The cup select's Cross
+leads to the track lock (`QueueLoadTrack`) as the track select's does ; its Triangle goes back to
+the characters (retail).

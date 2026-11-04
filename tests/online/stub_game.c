@@ -210,6 +210,12 @@ int NativeOnlineGame_TakeOverKart(int slot)
 	return 1;
 }
 int NativeOnlineGame_PrepareAI(void) { return !stub.noAI; }
+int *NativeOnlineGame_RoomInfo(int **len)
+{
+	static int info[12], count = 12;
+	*len = &count;
+	return info;
+}
 void NativeOnlineGame_EndBotRace(int slot)
 {
 	if (((stub.hostBots >> slot) & 1) && stub.kartExists[slot])

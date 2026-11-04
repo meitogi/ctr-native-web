@@ -214,12 +214,13 @@ void DrawOverheadNames()
 
 		#endif
 
+		// ctr-native: a bot's name (or a kart the AI took over) in the bots' colour (session 32)
 		DECOMP_DecalFont_DrawLineStrlen(
 			octr->nameBuffer[i],
 			len,
 			ptrDest->Screen_posX,
 			ptrDest->Screen_posY-0x4,
-			FONT_SMALL, color);
+			FONT_SMALL, (i != 0 && OnlineSlot_IsBot(i)) ? (JUSTIFY_CENTER | SILVER) : color);
 
 		// all players except P1
 		color = (JUSTIFY_CENTER | ORANGE);

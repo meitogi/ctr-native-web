@@ -226,6 +226,14 @@ RECT windowText = {0x118, 0x40, 0xD8, 0};
 void OnlineEndOfRace()
 {
 	struct Driver * driver = sdata->gGT->drivers[0];
+
+	// ctr-native: the humans left for the next character select ; a Netplay Cup (D12.4) :
+	// counted with the full results, then its standings replace them, through the room's
+	// reset until the next track loads
+	if ((driver->actionsFlagSet & 0x2000000) != 0)
+		OnlineRoom_EndOfRace();
+	if (OnlineCup_Showing()) { EndOfRace_Camera(); return; }
+
 	if (((driver->actionsFlagSet & 0x2000000) == 0) ||
 		(octr->CurrState < GAME_START_RACE)) { return; }
 

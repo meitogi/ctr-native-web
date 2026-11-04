@@ -192,7 +192,21 @@ int octrLobbyCharacters[8];
 int octrThreadAlive;
 int octrOnlineArcade;
 int octrLobbyArcade;
+int octrLobbyPlayers;
 int octrHostBots;
+int octrRoomInfo[ONLINE_ROOM_INFO_LEN];
+int octrCupInterlude;
+// the Cup (D12) : its room has bots ; the host's frames before the next track's lock ; races
+// counted when this race loaded (its standings show once one more is in) ; the totals then ; the
+// names and bots of the last results, by clientID (the room's reset clears nameBuffer)
+static int octrCupArcade;
+static int octrCupHold;
+static int octrCupRacesAtStart;
+static int octrCupBefore[8];
+static char octrCupNames[8][NAME_LEN + 1];
+static int octrCupBots;
+// the humans still in the room at this race's end (a leaver's name emptied, or its kart the AI's)
+static int octrRaceHumans;
 struct OnlineBotShoot octrBotShoot[8];
 static int octrStatsUpgraded;
 static int octrSavedMetaPhys[4][NUM_CLASSES];
@@ -222,7 +236,11 @@ void OnlineRuntime_Activate(void)
 	octrOnlineMenuPath = 0;
 	octrOnlineArcade = 0;
 	octrLobbyArcade = 0;
+	octrLobbyPlayers = 0;
 	octrHostBots = 0;
+	memset(octrRoomInfo, 0, sizeof(octrRoomInfo));
+	octrCupInterlude = 0;
+	octrRaceHumans = 0;
 	octrLobbyPhase = ONLINE_LOBBY_MENUS;
 	memset(octrLobbyCharacters, 0, sizeof(octrLobbyCharacters));
 
@@ -257,7 +275,11 @@ void OnlineRuntime_Deactivate(void)
 	octrOnlineMenuPath = 0;
 	octrOnlineArcade = 0;
 	octrLobbyArcade = 0;
+	octrLobbyPlayers = 0;
 	octrHostBots = 0;
+	memset(octrRoomInfo, 0, sizeof(octrRoomInfo));
+	octrCupInterlude = 0;
+	octrRaceHumans = 0;
 	octrLobbyPhase = ONLINE_LOBBY_NONE;
 	OnlineRuntime_SyncStats();
 
@@ -321,6 +343,11 @@ static void OnlineExternal_StartLoading(void)
 	octr->CountPressX++;
 	if (octr->CountPressX < FPS_DOUBLE(15)) return;
 
+	// a Cup's next race (D12.1) : the standings stop, this race's points count from here
+	octrCupInterlude = 0;
+	octrCupRacesAtStart = octrRoomInfo[ONLINE_ROOM_CUP_RACES];
+	memcpy(octrCupBefore, &octrRoomInfo[ONLINE_ROOM_POINTS], sizeof(octrCupBefore));
+
 	Music_Stop();
 	howl_StopAudio(1, 1, 0);
 	sdata->audioState = 0;
@@ -340,6 +367,152 @@ static void OnlineExternal_StartLoading(void)
 
 	octrLobbyPhase = ONLINE_LOBBY_RACE;
 	MainRaceTrack_RequestLoad(octr->levelID);
+}
+
+// ---- The Netplay Cup (docs/ONLINECTR_PORT.md, D12) ----
+
+static int ClientOfSlot(int slot)
+{
+	int me = octr->DriverID;
+
+	if (slot == 0)
+		return me;
+	return (slot <= me) ? slot - 1 : slot;
+}
+
+// A bot's kart : the host's AI (its own bots, a takeover, or every other kart of a race
+// finished alone), else the host's word for the guests (D12.3)
+int OnlineSlot_IsBot(int slot)
+{
+	if (!octrActive || (slot < 0) || (slot >= 8))
+		return 0;
+	if ((octrHostBots >> slot) & 1)
+		return 1;
+	return (octr->DriverID != 0) && ((octrRoomInfo[ONLINE_ROOM_BOTS] >> ClientOfSlot(slot)) & 1);
+}
+
+// The host, at the room's reset between two races : the cup's next track, locked as the
+// menus' track lock would (OnlineLobby_RequestRace), the same laps and characters
+static void OnlineCup_LockNextTrack(void)
+{
+	struct GameTracker *gGT = sdata->gGT;
+	int race = octrRoomInfo[ONLINE_ROOM_CUP_RACES];
+
+	gGT->cup.trackIndex = race;
+	gGT->currLEV = data.ArcadeCups[octrRoomInfo[ONLINE_ROOM_CUP_ID]].CupTrack[race].trackID;
+	octr->levelID = (unsigned char)gGT->currLEV;
+	octr->lapID = (gGT->numLaps >= 1 && gGT->numLaps <= 7) ? (unsigned char)((gGT->numLaps - 1) / 2) : 1;
+	octr->boolLockedInLevel = 1;
+	octr->boolLockedInLap = 1;
+	octr->boolLockedInCharacters[0] = 1;
+	octrLobbyArcade = octrCupArcade;
+	octrLobbyPhase = ONLINE_LOBBY_STARTING;
+	NativeOnlineGame_Log("[OnlineCTR] Cup race %d of 4 : track %d\n", race + 1, octr->levelID);
+}
+
+int OnlineCup_Showing(void)
+{
+	return octrActive && octrRoomInfo[ONLINE_ROOM_CUP] && (octrRoomInfo[ONLINE_ROOM_CUP_RACES] > octrCupRacesAtStart);
+}
+
+static void OnlineCup_Count(void)
+{
+	int named = 0;
+
+	for (int i = 0; i < octr->NumDrivers; i++)
+		if (octr->nameBuffer[i][0] != 0)
+			named++;
+	for (int k = 0; k < octr->numDriversEnded; k++)
+	{
+		int slot = octr->raceStats[k].slot;
+		int points = octrCupArcade ? data.cupPointsPerPosition[k] : (named - (k + 1));
+
+		if ((slot < 0) || (slot >= 8) || (points <= 0))
+			continue;
+		octrRoomInfo[ONLINE_ROOM_POINTS + slot] += points;
+		sdata->gGT->cup.points[slot] += points;
+	}
+	octrRoomInfo[ONLINE_ROOM_CUP_RACES]++;
+	NativeOnlineGame_Log("[OnlineCTR] Cup : race %d counted\n", octrRoomInfo[ONLINE_ROOM_CUP_RACES]);
+}
+
+static void OnlineCup_Draw(void)
+{
+	char line[48];
+	int order[8], n = 0;
+	int races = octrRoomInfo[ONLINE_ROOM_CUP_RACES];
+
+	for (int c = 0; c < 8; c++)
+		if (octrCupNames[c][0] != 0)
+			order[n++] = c;
+	// best first (a stable insertion sort over at most 8)
+	for (int i = 1; i < n; i++)
+		for (int j = i; (j > 0) && (octrRoomInfo[ONLINE_ROOM_POINTS + order[j]] > octrRoomInfo[ONLINE_ROOM_POINTS + order[j - 1]]); j--)
+		{
+			int t = order[j];
+			order[j] = order[j - 1];
+			order[j - 1] = t;
+		}
+
+	if (races >= 4)
+		snprintf(line, sizeof(line), "FINAL STANDINGS");
+	else
+		snprintf(line, sizeof(line), "CUP STANDINGS - RACE %d / 4", races);
+	DecalFont_DrawLine(line, 256, 40, FONT_BIG, JUSTIFY_CENTER | ORANGE);
+	for (int i = 0; i < n; i++)
+	{
+		int c = order[i];
+		int total = octrRoomInfo[ONLINE_ROOM_POINTS + c];
+		int color = (c == octr->DriverID) ? BLUE : ((octrCupBots >> c) & 1) ? SILVER : ORANGE;
+
+		snprintf(line, sizeof(line), "%d", i + 1);
+		DecalFont_DrawLine(line, 150, 70 + i * 14, FONT_SMALL, RED);
+		DecalFont_DrawLineStrlen(octrCupNames[c], NAME_LEN, 170, 70 + i * 14, FONT_SMALL, color);
+		snprintf(line, sizeof(line), "%d", total);
+		DecalFont_DrawLine(line, 320, 70 + i * 14, FONT_SMALL, JUSTIFY_RIGHT | WHITE);
+		if (total > octrCupBefore[c])
+		{
+			snprintf(line, sizeof(line), "+%d", total - octrCupBefore[c]);
+			DecalFont_DrawLine(line, 330, 70 + i * 14, FONT_SMALL, TINY_GREEN);
+		}
+	}
+}
+
+bool HasRaceEnded();
+
+// Every frame of this game's end of race (OnlineEndOfRace) : the humans still here (the next
+// character select's players) ; in a Cup, with the full results, the names and bots kept by
+// clientID and, on the host, this race counted once ; then the standings
+void OnlineRoom_EndOfRace(void)
+{
+	if (!octrCupInterlude)
+	{
+		octrRaceHumans = 0;
+		for (int slot = 0; slot < octr->NumDrivers && slot < 8; slot++)
+			if ((octr->nameBuffer[slot][0] != 0) && !((octrHostBots >> slot) & 1))
+				octrRaceHumans++;
+	}
+	if (!octrRoomInfo[ONLINE_ROOM_CUP])
+		return;
+	if (!octrCupInterlude && HasRaceEnded())
+	{
+		octrCupBots = 0;
+		memset(octrCupNames, 0, sizeof(octrCupNames));
+		for (int slot = 0; slot < octr->NumDrivers && slot < 8; slot++)
+		{
+			int c = ClientOfSlot(slot);
+
+			if ((c < 0) || (c >= 8) || (octr->nameBuffer[slot][0] == 0))
+				continue;
+			memcpy(octrCupNames[c], octr->nameBuffer[slot], NAME_LEN + 1);
+			if (OnlineSlot_IsBot(slot))
+				octrCupBots |= 1 << c;
+		}
+		if ((octr->DriverID == 0) && (octrRoomInfo[ONLINE_ROOM_CUP_RACES] == octrCupRacesAtStart))
+			OnlineCup_Count();
+	}
+	if (OnlineCup_Showing())
+		OnlineCup_Draw();
 }
 
 // The lobby states when the lobby lives outside the mod (web) : no menu, no
@@ -377,17 +550,47 @@ void OnlineExternal_State(void)
 			break;
 
 		case LOBBY_ASSIGN_ROLE:
-			// a room reset after a race lands here on the race level : back to
-			// the title, the room stays
+			// a room reset after a race lands here on the race level : the
+			// room stays ; the host back to the character select with the same
+			// players and mode (session 32, as retail's CHANGE CHARACTER : the
+			// guests pick theirs on its screen as in the lobby), a guest to
+			// its title behind the host's picture
 			octrLobbyPhase = ONLINE_LOBBY_MENUS;
 			octrOnlineMenuPath = 0;
-			octrLobbyArcade = 0;
-			if (((sdata->gGT->gameMode1 & MAIN_MENU) == 0) && (sdata->Loading.stage == LOAD_IDLE))
+			if (octrRoomInfo[ONLINE_ROOM_CUP] && (octrRoomInfo[ONLINE_ROOM_CUP_RACES] >= 4))
+				octrRoomInfo[ONLINE_ROOM_CUP] = 0; // the Cup is over : its final standings have shown
+			if (octrRoomInfo[ONLINE_ROOM_CUP] && ((sdata->gGT->gameMode1 & MAIN_MENU) == 0) && (sdata->Loading.stage == LOAD_IDLE))
 			{
-				sdata->gGT->numPlyrNextGame = 1;
-				GAME_MAIN_MENU_STATE = MAIN_MENU_TITLE;
+				// a Cup goes on (D12.1) : this level and its standings stay, the host
+				// locks the next track after a few seconds of them
+				octrCupInterlude = 1;
+				octrLobbyPhase = ONLINE_LOBBY_RACE;
+				octrCupHold = FPS_DOUBLE(90);
+			}
+			else if (((sdata->gGT->gameMode1 & MAIN_MENU) == 0) && (sdata->Loading.stage == LOAD_IDLE))
+			{
+				struct GameTracker *gGT = sdata->gGT;
+
+				if ((octr->DriverID == 0) && (octrLobbyPlayers > 0))
+				{
+					// a guest gone since the lock : one player less (OnlineRoom_EndOfRace)
+					gGT->numPlyrNextGame = (octrRaceHumans > 0) && (octrRaceHumans < octrLobbyPlayers) ? octrRaceHumans : octrLobbyPlayers;
+					octrOnlineMenuPath = 1;
+					octrOnlineArcade = octrLobbyArcade;
+					// the race ran in ARCADE_MODE (OnlineExternal_StartLoading) : VS is not
+					if (!octrLobbyArcade && ((gGT->gameMode1 & BATTLE_MODE) == 0))
+						gGT->gameMode1 &= ~ARCADE_MODE;
+					GAME_MAIN_MENU_STATE = MAIN_MENU_CHARACTERS;
+					sdata->Loading.OnBegin.AddBitsConfig0 |= MAIN_MENU;
+				}
+				else
+				{
+					gGT->numPlyrNextGame = 1;
+					GAME_MAIN_MENU_STATE = MAIN_MENU_TITLE;
+				}
 				MainRaceTrack_RequestLoad(MAIN_MENU_LEVEL);
 			}
+			octrLobbyArcade = 0;
 			if (octr->DriverID == 0)
 				octr->CurrState = LOBBY_HOST_TRACK_PICK;
 			else if (octr->DriverID > 0)
@@ -395,6 +598,10 @@ void OnlineExternal_State(void)
 			break;
 
 		case LOBBY_HOST_TRACK_PICK:
+			if (octrCupInterlude && !octr->boolLockedInLevel && (octrCupHold-- <= 0))
+				OnlineCup_LockNextTrack();
+			break;
+
 		case LOBBY_GUEST_TRACK_WAIT:
 		case LOBBY_CHARACTER_PICK:
 		case LOBBY_WAIT_FOR_LOADING:
@@ -432,6 +639,17 @@ int OnlineLobby_RequestRace(void)
 
 	for (int i = 0; i < 8; i++)
 		octrLobbyCharacters[i] = (i < gGT->numPlyrNextGame) ? data.characterIDs[i] : -1;
+	octrLobbyPlayers = gGT->numPlyrNextGame;
+
+	// a Cup from the menus starts here (D12.2) : the cup select set gGT->cup
+	memset(octrRoomInfo, 0, ONLINE_ROOM_BOTS * sizeof(octrRoomInfo[0]));
+	if ((gGT->gameMode2 & CUP_ANY_KIND) != 0)
+	{
+		octrRoomInfo[ONLINE_ROOM_CUP] = 1;
+		octrRoomInfo[ONLINE_ROOM_CUP_ID] = gGT->cup.cupID;
+		octrCupArcade = octrLobbyArcade;
+		NativeOnlineGame_Log("[OnlineCTR] Cup %d started (%s)\n", gGT->cup.cupID, octrCupArcade ? "Arcade" : "VS");
+	}
 
 	octr->levelID = (unsigned char)gGT->currLEV;
 	octr->lapID = (gGT->numLaps >= 1 && gGT->numLaps <= 7) ? (unsigned char)((gGT->numLaps - 1) / 2) : 1;
@@ -619,6 +837,14 @@ int NativeOnlineGame_TakeOverKart(int slot)
 	d->botData.positionBackup.z = d->posCurr.z;
 	BOTS_SetRotation(d, 0);
 	return 1;
+}
+
+int *NativeOnlineGame_RoomInfo(int **len)
+{
+	static int count = ONLINE_ROOM_INFO_LEN;
+
+	*len = &count;
+	return octrRoomInfo;
 }
 
 // A guest whose host left mid-race (session 32) : its own AI drives the other

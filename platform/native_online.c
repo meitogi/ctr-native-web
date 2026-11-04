@@ -814,8 +814,17 @@ void StatePC_Lobby_AssignRole()
 	countFrame = 0;
 }
 
+static int prev_characterID = -1;
+static int prev_boolLockedIn = -1;
+
 void StatePC_Lobby_HostTrackPick()
 {
+	// ctr-native: the host's next race sends its character again, as a guest's
+	// does (GuestTrackWait) : the same pick as last race was never re-sent, and
+	// the room never loaded (session 32, a second race in the same room)
+	prev_characterID = -1;
+	prev_boolLockedIn = -1;
+
 	// boolLockedInLap gets set after
 	// boolLockedInLevel already sets
 	if (!octr->boolLockedInLap) return;
@@ -849,9 +858,6 @@ void StatePC_Lobby_HostTrackPick()
 
 	octr->CurrState = LOBBY_CHARACTER_PICK;
 }
-
-static int prev_characterID = -1;
-static int prev_boolLockedIn = -1;
 
 void StatePC_Lobby_GuestTrackWait()
 {
