@@ -11,6 +11,11 @@
 // agent browser then runs a real 48 kHz output (8 ms device ticks), so an underrun here is one
 // a desktop Chrome would play. Sound stays muted (gain 0) : the counters need no speakers.
 //
+//   AUDIO-NO-GESTURE  first, before any key : a pad-only player (a Gamepad press is no user
+//                 gesture, the AudioContext stays suspended) must still get past the boot
+//                 (session 32 : the SCEA voice's end came from the worklet only). The browser may
+//                 start the context anyway (Chrome's media engagement) : then a shim keeps it
+//                 suspended and the boot is run again
 //   AUDIO-OUTPUT  what the page opened
 //   AUDIO-MENU    10 s of the main menu (music) : underruns, mixer ms/s, SPU traffic
 //   AUDIO-RACE    a Time Trial race, 30 s with Cross held : the same
@@ -53,6 +58,19 @@ const RATE_48K = `(() => {
 	globalThis.AudioContext = C
 })()`
 
+// Before any page script : every context stays suspended, as with no gesture, whatever the
+// browser's autoplay policy (removed after AUDIO-NO-GESTURE)
+const NO_GESTURE = `(() => {
+	const AC = globalThis.AudioContext
+	if (!AC || AC.__ctrNoGesture) return
+	const C = class extends AC {
+		constructor(o) { super(o); super.suspend() }
+		resume() { return Promise.reject(new DOMException('no gesture (test shim)', 'NotAllowedError')) }
+	}
+	C.__ctrNoGesture = true
+	globalThis.AudioContext = C
+})()`
+
 const audio = ctx => ctx.js('const A = globalThis.__ctrAudio; if (!A) return null; const { node, reset, spuHistory, times, glitches, late, ...a } = A; return JSON.parse(JSON.stringify(a))')
 const reset = ctx => Promise.all([ctx.js('globalThis.__ctrAudio?.reset?.(); return true'), resetMeter(ctx)])
 const fmt = a =>
@@ -86,8 +104,39 @@ export default async ctx => {
 	let out = null
 	const results = { windows: {} }
 
-	await ctx.scenario('AUDIO-OUTPUT', async () => {
+	await ctx.scenario('AUDIO-NO-GESTURE', async () => {
 		await ctx.conn.send('Page.enable', {}, ctx.sid)
+		const contextState = () => ctx.js('return globalThis.ctrAudio?.context?.state ?? null')
+		// a reload is a new document : no sticky activation from the runs before
+		const boot = async label => {
+			await ctx.reload()
+			const start = Date.now()
+			await ctx.pad(0).connect()
+			const s = await waitFor(`${label} : the game past its boot with no key nor click (window.__ctr)`, async () => {
+				// a stored disc : the boot screen waits, the pad's Start starts the game
+				if (await ctx.js("return !!document.getElementById('press-start')").catch(() => false)) await ctx.pad(0).press('start')
+				return state(ctx)
+			}, 60_000).catch(async e => {
+				const log = await ctx.js("return document.getElementById('log')?.textContent ?? ''")
+				throw new Error(`${e.message} · context ${await contextState()} · log ${log.trim().split('\n').slice(-2).join(' | ')}`)
+			})
+			return { s, ms: Date.now() - start, context: await contextState() }
+		}
+		let run = await boot('as the browser opens it')
+		let how = `the browser's own context (${run.context})`
+		if (run.context === 'running') {
+			const { identifier } = await ctx.conn.send('Page.addScriptToEvaluateOnNewDocument', { source: NO_GESTURE }, ctx.sid)
+			run = await boot('the context held suspended')
+			await ctx.conn.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }, ctx.sid)
+			how = `the browser started the context by itself : held suspended by the shim (${run.context})`
+		}
+		await ctx.pad(0).disconnect()
+		await shot(ctx, 'no-gesture-past-boot')
+		if (run.context !== 'suspended') throw new Error(`the context is ${run.context}, not suspended : nothing measured`)
+		return `${how} · __ctr after ${(run.ms / 1000).toFixed(1)} s · ${brief(run.s)}`
+	})
+
+	await ctx.scenario('AUDIO-OUTPUT', async () => {
 		await ctx.conn.send('Page.addScriptToEvaluateOnNewDocument', { source: RATE_48K }, ctx.sid)
 		await ctx.reload()
 		await bootToMenu(ctx)

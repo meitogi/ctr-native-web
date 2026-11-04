@@ -444,6 +444,9 @@ global_variable struct
 	double prevLate;
 	double windowMinLate;
 	int windowVBlanks;
+	// the previous VBlank's time, and the part of a frame the XA wall clock carries over
+	double prevNowMs;
+	double xaWallRest;
 #endif
 } s_audioWeb;
 #endif
@@ -514,9 +517,13 @@ EM_JS(void, NativeAudio_WebPostJS, (double stamp, const u8 *data, int size), {
 	globalThis.ctrAudio.post(stamp, HEAPU8.slice(data, data + size).buffer);
 });
 
-// out = { serial, active, outputFrame low, high } as the worklet last sent them ; 0 = none yet
+// out = { serial, active, outputFrame low, high } as the worklet last sent them ; 0 = none yet ;
+// -1 = no audio clock : the worklet renders only in a running context (a page with no gesture yet
+// keeps it suspended), and its position stands still meanwhile
 EM_JS(int, NativeAudio_WebFeedbackJS, (s32 *out), {
-	const f = globalThis.ctrAudio && globalThis.ctrAudio.feedback;
+	const audio = globalThis.ctrAudio;
+	if (!audio || !audio.node || audio.context.state !== 'running') return -1;
+	const f = audio.feedback;
 	if (!f) return 0;
 	HEAP32[out >> 2] = f.serial;
 	HEAP32[(out >> 2) + 1] = f.active;
@@ -637,6 +644,8 @@ void NativeAudio_WebFlush(void)
 }
 
 internal void NativeAudio_UpdateXAPositionFromOutputFrameNoLock(void);
+internal void NativeAudio_WebXaWallClock(double ms);
+internal u64 NativeAudio_GetXAOutputFrameCount(int frameCount, int sampleRate);
 
 // Once per VBlank : the XA position the worklet sent back, then this VBlank's commands, stamped
 // with its due time.
@@ -645,6 +654,7 @@ internal void NativeAudio_WebVBlank(void)
 	const double now = emscripten_get_now();
 	const double periodMs = 1000.0 * 897619.0 / 53693175.0; // the VBlank of native_platform.c
 	s32 feedback[4];
+	int clock;
 	double late;
 
 	s_audioWeb.gridMs += periodMs;
@@ -666,12 +676,18 @@ internal void NativeAudio_WebVBlank(void)
 		s_audioWeb.windowVBlanks = 0;
 	}
 
-	if (NativeAudio_WebFeedbackJS(feedback) && ((u32)feedback[0] == s_audioWeb.xaSerial))
+	clock = NativeAudio_WebFeedbackJS(feedback);
+	if ((clock > 0) && ((u32)feedback[0] == s_audioWeb.xaSerial))
 	{
 		s_audio.xa.active = feedback[1] != 0;
 		s_audio.xa.outputFrame = (u64)(u32)feedback[2] | ((u64)(u32)feedback[3] << 32);
 		NativeAudio_UpdateXAPositionFromOutputFrameNoLock();
 	}
+	else if ((clock < 0) && s_audio.xa.active && s_audioWeb.prevNowMs > 0.0)
+	{
+		NativeAudio_WebXaWallClock(now - s_audioWeb.prevNowMs);
+	}
+	s_audioWeb.prevNowMs = now;
 
 #ifndef NDEBUG
 	NativeAudio_WebStatsVBlank(late);
@@ -690,6 +706,26 @@ internal void NativeAudio_WebVBlank(void)
 		const s32 serial = (s32)++s_audioWeb.xaSerial;                                                                                             \
 		NativeAudio_WebRecord(NATIVE_AUDIO_OP_XA_STOP, &serial, sizeof(serial), NULL, 0);                                                          \
 	} while (0)
+
+// No audio clock (a suspended context) : the game's copy counts the XA track on wall time, so
+// the game's waits on its end (the boot's SCEA voice, the load queue) still finish ; at the end
+// the worklet's copy is told to stop it, or it would play it late once the context runs. The
+// worklet's position wins again from its first tick on.
+internal void NativeAudio_WebXaWallClock(double ms)
+{
+	const u64 outputFrameCount = NativeAudio_GetXAOutputFrameCount(s_audio.xa.frameCount, s_audio.xa.sampleRate);
+	double frames = s_audioWeb.xaWallRest + (ms < 250.0 ? ms : 250.0) * NATIVE_AUDIO_SAMPLE_RATE / 1000.0;
+
+	s_audio.xa.outputFrame += (u64)frames;
+	s_audioWeb.xaWallRest = frames - (double)(u64)frames;
+	if ((outputFrameCount == 0) || (s_audio.xa.outputFrame >= outputFrameCount))
+	{
+		s_audio.xa.outputFrame = outputFrameCount;
+		s_audio.xa.active = 0;
+		NATIVE_AUDIO_WEB_RECORD_XA_STOP();
+	}
+	NativeAudio_UpdateXAPositionFromOutputFrameNoLock();
+}
 #else
 #define NATIVE_AUDIO_WEB_RECORD(op, payload, size) ((void)0)
 #define NATIVE_AUDIO_WEB_RECORD_XA_START(prepared, categoryID, xaID, hasTrackIdentity, volumeLeft, volumeRight) ((void)0)
