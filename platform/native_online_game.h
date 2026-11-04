@@ -69,4 +69,7 @@ int NativeOnlineGame_TakeBotShot(int slot, int *weapon, int *juiced, int *flags)
 int NativeOnlineGame_TakeOverKart(int slot);       // a leaver's kart to the AI ; 1 when converted
 void NativeOnlineGame_EndBotRace(int slot);        // the room's end-of-race timeout, for a bot
 
+// Session 32 : a guest whose host left mid-race finishes it alone
+int NativeOnlineGame_PrepareAI(void);              // the AI's difficulty for this race ; 0 : no AI here (Battle)
+
 #endif

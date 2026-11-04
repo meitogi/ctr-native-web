@@ -86,6 +86,11 @@ add_executable(online_smooth_test smooth_test.c stub_game.c ${ROOT}/platform/nat
 target_compile_options(online_smooth_test PRIVATE -Wall -Wextra)
 add_test(NAME online_smooth COMMAND online_smooth_test)
 
+# a guest whose host left mid-race finishes it alone (session 32)
+add_executable(online_solo_test solo_test.c stub_game.c ${ROOT}/platform/native_online.c)
+target_compile_options(online_solo_test PRIVATE -Wall -Wextra)
+add_test(NAME online_solo COMMAND online_solo_test)
+
 set(TRACES ${CMAKE_BINARY_DIR}/traces)
 add_test(NAME online_a2_a3_upstream_server
     COMMAND online_test --server $<TARGET_FILE:ctr_srv_upstream> --trace-dir ${TRACES}/upstream)

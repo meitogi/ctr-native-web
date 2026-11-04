@@ -101,6 +101,8 @@ const STRINGS = {
     inRoom: (list) => `In the room : ${list}`,
     noPicture: 'No direct path to the host : your pad plays, the host\'s screen is not shown.',
     hostLeft: 'The host left the room.',
+    hostLeftSolo: 'The host left — you finish this race alone, the other karts are now driven by the computer.',
+    roomClosed: 'The room is closed (the host left).',
     hostLost: 'Connection to the host lost.',
     backToSolo: 'Your game is back to solo.',
     reconnecting: 'Reconnecting…',
@@ -187,6 +189,8 @@ const STRINGS = {
     inRoom: (list) => `Dans la partie : ${list}`,
     noPicture: 'Pas de chemin direct vers l\'hôte : ta manette joue, l\'écran de l\'hôte n\'est pas affiché.',
     hostLeft: 'L\'hôte a quitté la partie.',
+    hostLeftSolo: 'L\'hôte est parti — tu finis cette course seul, l\'ordinateur conduit les autres karts.',
+    roomClosed: 'La partie est fermée (l\'hôte est parti).',
     hostLost: 'Connexion à l\'hôte perdue.',
     backToSolo: 'Ton jeu repasse en solo.',
     reconnecting: 'Reconnexion…',
@@ -454,6 +458,7 @@ export function attach(Module) {
     rejoinToken++;
     rejoinTry = 0;
     toldWaiting = false;
+    solo = false;
     Module.ctrOnlineControl?.(CTL.leave);
     globalThis.ctrShareApi?.stopOn({ keepRoom: true });
     shareHost = null;
@@ -502,17 +507,22 @@ export function attach(Module) {
 
   // The link to the host closed or went silent past its timeout (web/online/net.js) : the game
   // already left the room (its bridge's DISCONNECTED, game/OnlineCTR/thread.c : back to the
-  // title, solo). A host no longer on the meeting point left : say so and close the page's room.
+  // title, solo), unless it was racing (below). A host no longer on the meeting point left : say
+  // so and close the page's room.
   // A host still there means we lost it (session 11b) : rejoin on a fresh link — guest() opens
   // the room again, so a new relay id and sealer (web/net/crypto.js pins an id's first IV prefix),
   // WebRTC else the relay as the path setting says, the same name ; the game waits on its title
   // for the room's race to end (a locked room refuses the join, OnlineExternal_State retries).
   let rejoinToken = 0;
   let rejoinTry = 0; // the attempt in flight, for the status line (0 : none)
-  const hostLeft = (why) => {
-    ui?.toast(why, T.backToSolo);
+  // Mid-race the game does not leave : it finishes the race alone (session 32, the bridge's
+  // GoSolo), its room still active until the results have shown, then lobbyTick closes the page's
+  // room. A host still there (we lost it) : the game leaves the race now and rejoins, as before.
+  let solo = false;
+  const hostLeft = (why, detail = T.backToSolo) => {
+    ui?.toast(why, detail);
     leave();
-    error = `${why} ${T.backToSolo}`;
+    error = detail ? `${why} ${detail}` : why;
     render();
   };
   net.onHostLost = () => {
@@ -520,7 +530,14 @@ export function attach(Module) {
     setTimeout(() => {
       if (net.role !== 'guest' || net.room !== room) return;
       const hostThere = room.signaling?.peers?.some((p) => p.kind === 'host');
+      if (!hostThere && lobby().active) {
+        solo = true;
+        ui?.toast(T.hostLeftSolo);
+        error = T.hostLeftSolo;
+        return render();
+      }
       if (!hostThere) return hostLeft(T.hostLeft);
+      Module.ctrOnlineControl?.(CTL.leave); // a race this game was finishing alone
       ui?.toast(T.hostLost, T.reconnecting);
       rejoin();
     }, 1000); // the meeting point's peer list catches up with a host that just left
@@ -660,7 +677,16 @@ export function attach(Module) {
       }
       if (l.phase !== PHASE.starting) startSent = false;
     }
-    if (net.role === 'guest') {
+    if (net.role === 'guest' && solo) {
+      // the race finished alone : its 11b timeout counts from this player's own finish, then the title
+      const finished = (Module.ctrOnlineOctr?.().raceStats ?? []).filter((x) => x.slot === 0).length;
+      const step = endTimer.tick({ race: l.active && l.phase === PHASE.race, finished, endAfterMs: Number(endAfter.value) * 1000, now: Date.now() });
+      if (step?.end) Module.ctrOnlineControl?.(CTL.endBots);
+      if (!l.active) {
+        solo = false;
+        hostLeft(T.roomClosed, '');
+      }
+    } else if (net.role === 'guest') {
       // our game ignores the local devices from the room's join to its race load (and again on
       // the title reloaded after a race) ; the pad goes to the host only while its menus run
       setLobbyGuest(l.active && l.phase !== PHASE.race);

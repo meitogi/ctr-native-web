@@ -45,6 +45,14 @@ static int (*controlPoll)(int *arg);
 static int pendingEnter;
 static const NativeOnlineBotHooks *botHooks;
 
+// Session 32 : the host left mid-race, this guest finishes the race alone — its
+// own AI drives every other kart, the results end as the room's would, then the
+// title. soloEndAt : the race clock when the full results have shown long
+// enough (the server's ROOM_RESET_MS), 0 until they are complete.
+#define SOLO_RESULTS_MS 6000
+static int soloRace;
+static int soloEndAt;
+
 // a slot the host's own AI drives (D11.2) : its echoed kart states and weapons are not applied
 static int HostBot(int slot)
 {
@@ -512,6 +520,79 @@ static void Disconnect(void)
 	boolConnecting = 0;
 }
 
+static int SlotEnded(int slot)
+{
+	for (int k = 0; k < octr->numDriversEnded; k++)
+		if (octr->raceStats[k].slot == slot)
+			return 1;
+	return 0;
+}
+
+static void SoloEnd(int slot, int clock)
+{
+	struct NativeOnlineKart kart = {0};
+
+	if (octr->numDriversEnded >= MAX_NUM_PLAYERS || SlotEnded(slot))
+		return;
+	NativeOnlineGame_GetKart(slot, &kart);
+	octr->raceStats[octr->numDriversEnded].slot = slot;
+	octr->raceStats[octr->numDriversEnded].finalTime = clock;
+	octr->raceStats[octr->numDriversEnded].bestLap = kart.bestLapTime;
+	octr->numDriversEnded++;
+}
+
+// The host's link closed (web/online/net.js) during this guest's race : the
+// unfinished karts go to this game's AI as the host's takeover does (D11.6).
+// 0 : not in a race this game can finish (the host itself, a load, Battle).
+static int GoSolo(void)
+{
+	if (octr->DriverID == 0 || octr->CurrState < GAME_WAIT_FOR_RACE || octr->CurrState > GAME_END_RACE ||
+		NativeOnlineGame_LoadingStage() != -1 || !NativeOnlineGame_PrepareAI())
+		return 0;
+
+	SmoothReset();
+	soloRace = 1;
+	soloEndAt = 0;
+	for (int slot = 1; slot < octr->NumDrivers && slot < MAX_NUM_PLAYERS; slot++)
+	{
+		if (octr->nameBuffer[slot][0] == 0 || SlotEnded(slot) || HostBot(slot))
+			continue;
+		// a kart that cannot drive on (none, or its finish flag already on) ends now
+		if (!NativeOnlineGame_TakeOverKart(slot))
+			SoloEnd(slot, NativeOnlineGame_RaceClock());
+	}
+	NativeOnlineGame_Log("[OnlineCTR] The host left : this game finishes the race alone (AI 0x%x)\n", *NativeOnlineGame_HostBots());
+	return 1;
+}
+
+static void SoloFrame(void)
+{
+	// read every frame : past this player's finish the clock only counts on while it is read
+	const int clock = NativeOnlineGame_RaceClock();
+	int named = 0;
+
+	for (int slot = 0; slot < octr->NumDrivers && slot < MAX_NUM_PLAYERS; slot++)
+	{
+		if (octr->nameBuffer[slot][0] == 0)
+			continue;
+		named++;
+		if (slot != 0 && NativeOnlineGame_KartFinished(slot))
+			SoloEnd(slot, clock);
+	}
+
+	// HasRaceEnded (hooks.c) : the results are complete, shown as long as the room shows them
+	if (octr->CurrState != GAME_END_RACE || octr->numDriversEnded < named)
+		return;
+	if (soloEndAt == 0)
+		soloEndAt = clock + SOLO_RESULTS_MS;
+	else if (clock >= soloEndAt)
+	{
+		NativeOnlineGame_Log("[OnlineCTR] The race finished alone : back to the title\n");
+		soloRace = 0;
+		NativeOnlineGame_Deactivate();
+	}
+}
+
 static void ProcessNewMessages(void)
 {
 	unsigned char packet[NATIVE_ONLINE_MAX_PACKET];
@@ -532,6 +613,8 @@ static void ProcessNewMessages(void)
 			case ONLINE_EVENT_DISCONNECTED:
 				NativeOnlineGame_Log("[OnlineCTR] Connection dropped (server full or offline)\n");
 				boolConnected = 0;
+				if (GoSolo())
+					return;
 
 				// to go the lobby browser
 				octr->CurrState = -1;
@@ -997,6 +1080,7 @@ static void ProcessControl(void)
 
 			case NATIVE_ONLINE_CTL_LEAVE:
 				pendingEnter = 0;
+				soloRace = 0;
 				if (NativeOnlineGame_Active())
 				{
 					NativeOnlineGame_Log("[OnlineCTR] Left the room\n");
@@ -1035,6 +1119,7 @@ static void ProcessControl(void)
 	if (pendingEnter && !NativeOnlineGame_Active() && NativeOnlineGame_Activate())
 	{
 		pendingEnter = 0;
+		soloRace = 0;
 		connectRetry = 0;
 		lastLoggedState = -100;
 		// « Private Room », as the server menu's Cross would
@@ -1096,6 +1181,9 @@ void NativeOnline_Frame(void)
 	// the host's bots, after its own kart (D11.1)
 	if (botHooks && boolConnected)
 		botHooks->frame();
+
+	if (soloRace)
+		SoloFrame();
 
 	// now check for new RECV message
 	ProcessNewMessages();

@@ -179,7 +179,7 @@ void StubGame_Frame(void)
 // one build : the stub is the native flow, on from the start
 int NativeOnlineGame_Active(void) { return 1; }
 int NativeOnlineGame_Activate(void) { return 1; }
-void NativeOnlineGame_Deactivate(void) {}
+void NativeOnlineGame_Deactivate(void) { stub.deactivated++; }
 void NativeOnlineGame_SyncStats(void) {}
 int NativeOnlineGame_ExternalLobby(void) { return 0; }
 void NativeOnlineGame_SetMode(int bootOnline, int externalLobby) { (void)bootOnline; (void)externalLobby; }
@@ -209,6 +209,7 @@ int NativeOnlineGame_TakeOverKart(int slot)
 	stub.hostBots |= 1 << slot;
 	return 1;
 }
+int NativeOnlineGame_PrepareAI(void) { return !stub.noAI; }
 void NativeOnlineGame_EndBotRace(int slot)
 {
 	if (((stub.hostBots >> slot) & 1) && stub.kartExists[slot])

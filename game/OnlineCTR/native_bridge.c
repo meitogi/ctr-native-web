@@ -621,6 +621,18 @@ int NativeOnlineGame_TakeOverKart(int slot)
 	return 1;
 }
 
+// A guest whose host left mid-race (session 32) : its own AI drives the other
+// karts, with the difficulty MainInit_Drivers would have set (the race was
+// born without bots : OnlineInit_Drivers skipped it). Battle has no AI.
+int NativeOnlineGame_PrepareAI(void)
+{
+	if (!ONLINE_RACE || ((sdata->gGT->gameMode1 & BATTLE_MODE) != 0))
+		return 0;
+
+	BOTS_Adv_AdjustDifficulty();
+	return 1;
+}
+
 void NativeOnlineGame_EndBotRace(int slot)
 {
 	struct Driver *d = sdata->gGT->drivers[slot];

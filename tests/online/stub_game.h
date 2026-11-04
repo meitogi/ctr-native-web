@@ -38,6 +38,10 @@ struct StubGame
 	int botShot[8];
 	int takenOver[8];
 
+	// a guest finishing alone (session 32) : no AI in Battle, the title reloads
+	int noAI;
+	int deactivated;
+
 	// script inputs for the local player
 	int localHeld;
 	int loadFrames;

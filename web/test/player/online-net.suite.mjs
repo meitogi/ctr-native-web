@@ -12,11 +12,17 @@
 // Session 11b : NET-P2P / NET-WS also check the remote-kart smoothing (jitter `jerk` p95 against
 // the clean window's) ; NET-REJOIN-P2P / -WS (a guest cut off re-links by itself and joins the
 // next lobby) ; NET-END-TIMEOUT (the host's end-of-race timeout ends a guest that stands still).
+// Session 32 : NET-HOST-LEAVES-P2P / -WS — the host closes its tab mid-race : the guest is told,
+// finishes the race alone (its own AI drives the host's kart), gets the full results, then the
+// title with the room closed ; the guest's screen is filmed. The guest is agent browser b when
+// play.sh has it (--set guestCdp=<host:port>), else a second tab.
 // Not a node --test file.
 
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { say } from './ctr.mjs'
+import { capture } from '/opt/devcontainer/base/skills/visual-loop/scripts/cdp.mjs'
+import { makePlayer } from '/opt/devcontainer/base/skills/visual-loop/lib/player.mjs'
+import { PLAYER, say } from './ctr.mjs'
 import { ST, drive, online, roomToRace, shot, until } from './online.suite.mjs'
 
 export const meta = {
@@ -75,6 +81,8 @@ const guestGone = s => s.links.length === 0 || s.octr?.names?.[1] === ''
 
 const echoesOf = async tab => (await online(tab))?.stats?.received?.[7] ?? 0 // SG_RACEDATA, the guest's own echo included
 const HOST_LEFT = /host left|hôte a quitté/i
+const FINISH_ALONE = /finish this race alone|finis cette course seul/i
+const ROOM_CLOSED = /room is closed|partie est fermée/i
 const HOST_LOST = /connection to the host lost|connexion à l'hôte perdue/i
 
 /**
@@ -223,30 +231,50 @@ async function endTimeout(ctx, mode) {
 
 /** The host leaves in the race : the guest is told and back to solo within 10 s. */
 async function hostLeaves(ctx, mode) {
-	const r = { ctx, ...(await roomToRace(ctx, mode, { inject: [IMPAIR] })) }
-	const res = { mode, path: `${r.gl.backend}/${r.gl.path}`, samples: [] }
-	try {
+	const r = { ctx, ...(await roomToRace(ctx, mode, { inject: [IMPAIR, TOASTS] })) }
+	const res = { mode, path: `${r.gl.backend}/${r.gl.path}` }
+	const dir = runDir(ctx)
+	const cur = { id: `NET-HOST-LEAVES-${mode}`, proofs: [] }
+	const gRec = dir ? makePlayer({ conn: r.guest.gconn, sid: null, js: r.gjs, capture, dir, current: () => cur, pressFrames: PLAYER.pressFrames }) : null
+	const body = async () => {
 		await sleep(3000)
 		await ctx.js(`location.href = '/preload-flag.js'; return true`).catch(() => {})
 		const t0 = Date.now()
-		while (Date.now() - t0 < 12_000) {
-			const s = await online(r.guest).catch(e => ({ error: e.message }))
-			const g = await r.gjs('return window.__ctr ? { screen: window.__ctr.screen, level: window.__ctr.levelID, speed: window.__ctr.kart?.speed } : null').catch(() => null)
-			res.samples.push({ t: Date.now() - t0, links: s?.links?.length, state: s?.octr?.CurrState, names: s?.octr?.names?.slice(0, 2), lobby: s?.lobby, error: s?.error, lastError: s?.lastError?.code, game: g })
-			await sleep(1000)
-		}
-		res.toldAt = res.samples.find(x => HOST_LEFT.test(x.error ?? '') && !x.lobby?.active)?.t ?? null
-		res.guestToasts = await r.gjs("return [...document.querySelectorAll('[class*=toast], #online-error')].map(e => e.textContent.trim()).filter(Boolean)")
+		// told, still racing : the guest's game kept the race, the host's kart (slot 1) is its AI's
+		const told = await until(r.guest, 'the guest told it finishes alone', s => FINISH_ALONE.test(s.error ?? ''), 15_000)
+		res.toldAt = Date.now() - t0
+		res.atTold = { active: told.lobby.active, state: told.octr.CurrState, ai: told.lobby.hostBots }
+		say(`told after ${res.toldAt} ms : ${JSON.stringify(res.atTold)}`)
+		res.drive = await drive(r.gp, r.gjs, Date.now() + 300_000)
+		const end = await until(r.guest, 'the full results (both karts)', s => s.octr.CurrState === ST.END_RACE && s.octr.raceStats.length === 2, 240_000)
+		res.results = end.octr.raceStats
+		say(`results : ${JSON.stringify(res.results)}`)
+		await sleep(2000)
 		const shotR = await r.guest.gconn.send('Page.captureScreenshot', { format: 'png', fromSurface: true })
-		const dir = runDir(ctx)
+		if (dir && shotR?.data) writeFileSync(join(dir, `net-host-leaves-${mode}-guest-results.png`), Buffer.from(shotR.data, 'base64'))
+		const closed = await until(r.guest, 'the title, the room closed', s => !s.lobby.active && ROOM_CLOSED.test(s.error ?? ''), 30_000)
+		res.closedAt = Date.now() - t0
+		res.closed = { state: closed.octr.CurrState, error: closed.error }
+		await sleep(3000)
+	}
+	try {
+		if (gRec) cur.video = await gRec.record(`host-leaves-${mode}-guest`, body)
+		else await body()
+		res.guestToasts = await toastsOf(r.guest)
+		res.guestGame = await r.gjs('return window.__ctr ? { screen: window.__ctr.screen, level: window.__ctr.levelID, menu: window.__ctr.menu?.title ?? null } : null')
+		const shotR = await r.guest.gconn.send('Page.captureScreenshot', { format: 'png', fromSurface: true })
 		if (dir && shotR?.data) writeFileSync(join(dir, `net-host-leaves-${mode}-guest.png`), Buffer.from(shotR.data, 'base64'))
 	} finally {
 		await r.close()
 	}
-	file(ctx, `net-host-leaves-${mode}.json`, res)
-	say(JSON.stringify(res.samples.at(-1)))
-	if (res.toldAt == null || res.toldAt > 10_000) throw new Error(`the guest was not told the host left : ${JSON.stringify(res.samples.at(-1))}`)
-	return JSON.stringify({ toldAt: res.toldAt, last: res.samples.at(-1), toasts: res.guestToasts })
+	file(ctx, `net-host-leaves-${mode}.json`, { ...res, video: cur.video ?? null })
+	if (!res.atTold.active || !(res.atTold.ai >> 1 & 1)) throw new Error(`the guest did not keep the race with the host's kart to its AI : ${JSON.stringify(res.atTold)}`)
+	if (!res.results.some(x => x.slot === 1)) throw new Error(`the host's kart is not in the results : ${JSON.stringify(res.results)}`)
+	// a whole race on the clock that counts on past this player's finish (no 0 nor a frame's time)
+	if (res.results.some(x => !(x.finalTime > 20_000))) throw new Error(`a course time under 20 s : ${JSON.stringify(res.results)}`)
+	if (!res.guestToasts.some(t => FINISH_ALONE.test(t)) || !res.guestToasts.some(t => ROOM_CLOSED.test(t))) throw new Error(`the guest's toasts : ${JSON.stringify(res.guestToasts)}`)
+	if (res.guestGame?.screen !== 'menu') throw new Error(`the guest is not back on the title : ${JSON.stringify(res.guestGame)}`)
+	return JSON.stringify({ toldAt: res.toldAt, closedAt: res.closedAt, results: res.results, toasts: res.guestToasts, game: res.guestGame })
 }
 
 /** The run's proof folder : the newest one under --set proofs=<root>. */
