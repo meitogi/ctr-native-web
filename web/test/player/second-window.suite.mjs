@@ -10,6 +10,7 @@
 //   SECOND-SHARE the same with Share : the second window is Share's guest page, P2 on this game's
 //                own VS. → 2 players ; the race finished by both karts of this game
 //   SECOND-BATTLE Online Battle : to the arena's start (the countdown), both games in it
+//   SECOND-ARCADE Netplay Arcade : to the countdown, both games in it (the host's bots on the grid)
 //
 // RUN (the DoD)
 //   Serve : web/dev.sh dev                                  (8090, the page's sources)
@@ -203,4 +204,5 @@ export default async ctx => {
 	await ctx.scenario('SECOND-VS', () => oneClick(ctx, 'vs', { finish: true }))
 	await ctx.scenario('SECOND-SHARE', () => oneClick(ctx, 'share', { finish: true }))
 	await ctx.scenario('SECOND-BATTLE', () => oneClick(ctx, 'battle', { finish: false }))
+	await ctx.scenario('SECOND-ARCADE', () => oneClick(ctx, 'arcade', { finish: false }))
 }
