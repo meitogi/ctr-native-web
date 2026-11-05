@@ -451,10 +451,24 @@ async function openGuest(ctx, url) {
 	const release = lockBrowser(host, port)
 	const ip = isIP(host) ? host : (await lookup(host, { family: 4 })).address
 	const conn = await connect(await fetchBrowserWsUrl({ ip, port: Number(port), httpBase: `http://${ip}:${port}` }))
-	const { targetInfos } = await conn.send('Target.getTargets')
-	const page = targetInfos.find(t => t.type === 'page')
-	if (!page) throw new Error(`guest browser ${ctx.args.guestCdp} : no page (agent-browser -i b up <url> first)`)
-	const { sessionId } = await conn.send('Target.attachToTarget', { targetId: page.targetId, flatten: true })
+	// The agent browser's proxy attaches only a page whose URL is on an allowed origin, as it
+	// last listed them (every second) : a page of the test's origin first, and a refusal retried
+	// while a navigation settles (ONLINE-VS-CUP / ITEM-RACE « not a target on an allowed origin »)
+	const origin = new URL(url).origin
+	let pages = []
+	let sessionId = null
+	let page = null
+	for (let i = 0; i < 10 && !sessionId; i++) {
+		if (i) await sleep(500)
+		pages = (await conn.send('Target.getTargets')).targetInfos.filter(t => t.type === 'page')
+		page = pages.find(t => t.url.startsWith(origin)) ?? pages.find(t => /^https?:/.test(t.url)) ?? pages[0]
+		if (!page) throw new Error(`guest browser ${ctx.args.guestCdp} : no page (agent-browser -i b up <url> first)`)
+		try {
+			sessionId = (await conn.send('Target.attachToTarget', { targetId: page.targetId, flatten: true })).sessionId
+		} catch (e) {
+			if (!/not a target on an allowed origin/.test(e.message) || i === 9) throw new Error(`${e.message} (guest browser pages : ${pages.map(t => t.url).join(' , ')})`)
+		}
+	}
 	await conn.send('Page.navigate', { url }, sessionId)
 	await conn.send('Target.detachFromTarget', { sessionId })
 	return { conn, targetId: page.targetId, close: () => { conn.close(); release() } }
