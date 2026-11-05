@@ -87,16 +87,25 @@ export async function bootToMenu(ctx) {
 	// Skip the intro : Cross while the menu takes no input yet, re-read before
 	// every press. A press landing as the menu wakes opens Adventure : Triangle
 	// backs out of it.
+	// Such a press sets ADVENTURE_MODE while the main menu still reads as the main menu for a
+	// moment (the title on its way out, every input ignored) : not idle until it is gone, and
+	// still so 1 s after the last press (session 32b, MENU-KEYBOARD / MENU-PAD stuck on row 0).
+	const idle = s => onMainMenu(s) && !s.mode?.includes('ADVENTURE_MODE')
 	const deadline = Date.now() + 180_000
 	let s = await state(ctx)
-	if (!onMainMenu(s)) say(`game running (${s.screen}) : skipping the intro to the main menu`)
-	while (!onMainMenu(s) && Date.now() < deadline) {
-		if (s.menu?.input) await ctx.press('z') // keyboard Z = Triangle
-		else await ctx.press('c')
-		await sleep(250)
+	if (!idle(s)) say(`game running (${s.screen}) : skipping the intro to the main menu`)
+	for (;;) {
+		while (!idle(s) && Date.now() < deadline) {
+			if (s.menu?.input) await ctx.press('z') // keyboard Z = Triangle
+			else await ctx.press('c')
+			await sleep(250)
+			s = await state(ctx)
+		}
+		await sleep(1000)
 		s = await state(ctx)
+		if (idle(s) || Date.now() >= deadline) break
 	}
-	s = await until(ctx, 'the main menu', onMainMenu, { timeout: 5000, every: 250 })
+	s = await until(ctx, 'the main menu', idle, { timeout: 5000, every: 250 })
 	// Keys go to the focused element ; session 2's suite focused the canvas too.
 	await ctx.js("document.getElementById('canvas')?.focus(); return true")
 	return s

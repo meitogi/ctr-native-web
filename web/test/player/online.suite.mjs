@@ -125,15 +125,23 @@ export async function toMainMenu(tab) {
 	} return true`)
 	const deadline = Date.now() + 180_000
 	let beat = Date.now() + HEARTBEAT_MS
+	// a Cross landing as the menu wakes picks ADVENTURE : the title leaves, still reading as the
+	// main menu for a moment, every input ignored (ctr.mjs bootToMenu, session 32b)
+	const idle = s => s && onMainMenu(s) && !s.mode?.includes('ADVENTURE_MODE')
 	let s = await game(tab)
-	while (!(s && onMainMenu(s)) && Date.now() < deadline) {
-		if (s?.menu?.input) await tab.press('z') // keyboard Z = Triangle : out of a menu a press opened
-		else await tab.press(CROSS)
-		await sleep(250)
+	for (;;) {
+		while (!idle(s) && Date.now() < deadline) {
+			if (s?.menu?.input) await tab.press('z') // keyboard Z = Triangle : out of a menu a press opened
+			else await tab.press(CROSS)
+			await sleep(250)
+			s = await game(tab)
+			if (Date.now() >= beat) { say(`${tab.name} : still skipping the intro (${s?.screen ?? 'no __ctr yet'})`); beat += HEARTBEAT_MS }
+		}
+		await sleep(1000)
 		s = await game(tab)
-		if (Date.now() >= beat) { say(`${tab.name} : still skipping the intro (${s?.screen ?? 'no __ctr yet'})`); beat += HEARTBEAT_MS }
+		if (idle(s) || Date.now() >= deadline) break
 	}
-	if (!(s && onMainMenu(s))) throw new Error(`${tab.name} : never reached the main menu (${s?.screen}, ${JSON.stringify(s?.menu)})`)
+	if (!idle(s)) throw new Error(`${tab.name} : never reached the main menu (${s?.screen}, ${JSON.stringify(s?.menu)})`)
 	await tab.js("document.getElementById('canvas')?.focus(); return true")
 	return s
 }
