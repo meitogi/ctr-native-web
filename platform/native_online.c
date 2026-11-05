@@ -536,7 +536,7 @@ static void SoloEnd(int slot, int clock)
 		return;
 	NativeOnlineGame_GetKart(slot, &kart);
 	octr->raceStats[octr->numDriversEnded].slot = slot;
-	octr->raceStats[octr->numDriversEnded].finalTime = clock;
+	octr->raceStats[octr->numDriversEnded].finalTime = NativeOnlineGame_BotEndTime(slot) ? NativeOnlineGame_BotEndTime(slot) : clock;
 	octr->raceStats[octr->numDriversEnded].bestLap = kart.bestLapTime;
 	octr->numDriversEnded++;
 }
@@ -569,12 +569,30 @@ static int GoSolo(void)
 	return 1;
 }
 
+// The host, every frame of a race : every human of the room finished (its own kart, its
+// guests' ; a leaver's kart is a bot) and a bot still racing : the bots end now, each at the
+// time its pace gives (session 32c), rather than the room waiting for them
+static void EndBotsWhenHumansDone(void)
+{
+	if (octr->DriverID != 0 || soloRace || *NativeOnlineGame_HostBots() == 0 ||
+		octr->CurrState < GAME_START_RACE || octr->CurrState > GAME_END_RACE)
+		return;
+	for (int slot = 0; slot < octr->NumDrivers && slot < MAX_NUM_PLAYERS; slot++)
+		if (octr->nameBuffer[slot][0] != 0 && !HostBot(slot) && !SlotEnded(slot))
+			return;
+	if (NativeOnlineGame_EndBots())
+		NativeOnlineGame_Log("[OnlineCTR] Every human finished : the bots end where they stand\n");
+}
+
 static void SoloFrame(void)
 {
 	// read every frame : past this player's finish the clock only counts on while it is read
 	const int clock = NativeOnlineGame_RaceClock();
 	int named = 0;
 
+	// this player finished : the AI's karts end now, where they stand (session 32c)
+	if (SlotEnded(0))
+		NativeOnlineGame_EndBots();
 	for (int slot = 0; slot < octr->NumDrivers && slot < MAX_NUM_PLAYERS; slot++)
 	{
 		if (octr->nameBuffer[slot][0] == 0)
@@ -1116,9 +1134,7 @@ static void ProcessControl(void)
 			// the same timeout on the host : its bots still racing end where they are
 			case NATIVE_ONLINE_CTL_END_BOTS:
 				NativeOnlineGame_Log("[OnlineCTR] The room's timeout ends the bots 0x%x\n", *NativeOnlineGame_HostBots());
-				for (int slot = 1; slot < MAX_NUM_PLAYERS; slot++)
-					if (HostBot(slot))
-						NativeOnlineGame_EndBotRace(slot);
+				NativeOnlineGame_EndBots();
 				break;
 
 			default:
@@ -1188,7 +1204,8 @@ void NativeOnline_Frame(void)
 	if (octr->CurrState >= 0 && octr->CurrState < NUM_STATES)
 		ClientState[octr->CurrState]();
 
-	// the host's bots, after its own kart (D11.1)
+	// the host's bots, after its own kart (D11.1) ; ended at once when the humans are (32c)
+	EndBotsWhenHumansDone();
 	if (botHooks && boolConnected)
 		botHooks->frame();
 

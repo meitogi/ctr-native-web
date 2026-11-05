@@ -252,6 +252,7 @@ void UI_DrawRankedDrivers(void)
 				    1, iconScale, damageColor);
 
 #ifdef USE_ONLINE
+				// ctr-native: a bot's name in the bots' colour, as above its kart (session 32c)
 				if (!ONLINE_RACE) // ctr-native: one build, runtime
 				{
 				}
@@ -261,12 +262,12 @@ void UI_DrawRankedDrivers(void)
 					                         checkpointTracker[driverIndex].drawFlags);
 					checkpointTracker[driverIndex].timer -= sdata->gGT->elapsedTimeMS;
 					DecalFont_DrawLineStrlen(octr->nameBuffer[driverIndex], 3, pos.x + 45, pos.y + 1, FONT_SMALL,
-					                         driverIndex == 0 ? JUSTIFY_CENTER | BLUE : JUSTIFY_CENTER | ORANGE);
+					                         JUSTIFY_CENTER | (driverIndex == 0 ? BLUE : OnlineSlot_IsBot(driverIndex) ? SILVER : ORANGE));
 				}
 				else
 				{
 					DecalFont_DrawLineStrlen(octr->nameBuffer[driverIndex], 3, pos.x + 45, pos.y + 7, FONT_SMALL,
-					                         driverIndex == 0 ? JUSTIFY_CENTER | BLUE : JUSTIFY_CENTER | ORANGE);
+					                         JUSTIFY_CENTER | (driverIndex == 0 ? BLUE : OnlineSlot_IsBot(driverIndex) ? SILVER : ORANGE));
 				}
 #endif
 

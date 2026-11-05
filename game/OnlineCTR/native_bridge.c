@@ -333,12 +333,20 @@ void OnlineRuntime_LeaveRace(void)
 
 // StatePS1_Lobby_StartLoading() without its text : the level load with the
 // mod's game mode, keeping the menu's battle limits.
+static int octrBotEndTime[8];
+
 static void OnlineExternal_StartLoading(void)
 {
 	struct GameTracker *gGT = sdata->gGT;
 
 	initRace = true;
 	endRace = true;
+	memset(octrBotEndTime, 0, sizeof(octrBotEndTime));
+	// a shot fired after a kart's finish (the AI drives on, its shot never sent) must not go
+	// out at the next race's lights (session 32c : a warp orb before a Cup's start)
+	memset(octrBotShoot, 0, sizeof(octrBotShoot));
+	for (int i = 0; i < 8; i++)
+		octr->Shoot[i].boolNow = 0;
 
 	octr->CountPressX++;
 	if (octr->CountPressX < FPS_DOUBLE(15)) return;
@@ -868,6 +876,59 @@ void NativeOnlineGame_EndBotRace(int slot)
 
 	d->actionsFlagSet |= ACTION_RACE_FINISHED;
 	d->heldItemID = HELD_ITEM_NONE;
+}
+
+// Session 32c : once every human has finished, the AI's karts end at once where they stand, as
+// retail's PlayLevel ends its AIs, each at the time it would reach the line at its average pace so
+// far (BOTS.c's lap-and-distance progress), in race order, each later than the one ahead : the
+// results come at once, in the order the race had. octrBotEndTime by slot, 0 : none (a real finish).
+int NativeOnlineGame_EndBots(void)
+{
+	struct GameTracker *gGT = sdata->gGT;
+	const int clock = NativeOnlineGame_RaceClock();
+	int trackLength = 0;
+	int last = clock;
+	int ended = 0;
+
+	if (!ONLINE_RACE || ((gGT->gameMode1 & BATTLE_MODE) != 0))
+		return 0;
+	if ((gGT->level1 != NULL) && (gGT->level1->ptr_restart_points != NULL))
+		trackLength = (s32)gGT->level1->ptr_restart_points[0].distToFinish << 3; // VehLap.c VEH_LAP_TRACK_DISTANCE_SCALE_SHIFT
+
+	// rank by rank : driverRank 0 is the race's leader
+	for (int rank = 0; rank < 8; rank++)
+	{
+		for (int slot = 0; slot < 8; slot++)
+		{
+			struct Driver *d = gGT->drivers[slot];
+			int estimate = last + 1000;
+
+			if (!ONLINE_HOST_BOT(slot) || (d == NULL) || (d->driverRank != rank) || ((d->actionsFlagSet & ACTION_RACE_FINISHED) != 0))
+				continue;
+			if (trackLength > 0)
+			{
+				int lap = d->lapIndex - (((d->actionsFlagSet & ACTION_BEHIND_START_LINE) != 0) ? 1 : 0);
+				long long progress = (long long)lap * trackLength + (trackLength - (int)d->distanceToFinish_curr);
+				long long total = (long long)gGT->numLaps * trackLength;
+
+				if ((progress > 0) && (progress < total))
+					estimate = (int)((long long)clock * total / progress);
+			}
+			if (estimate <= last)
+				estimate = last + 1;
+			last = estimate;
+			octrBotEndTime[slot] = estimate;
+			d->actionsFlagSet |= ACTION_RACE_FINISHED;
+			d->heldItemID = HELD_ITEM_NONE;
+			ended++;
+		}
+	}
+	return ended;
+}
+
+int NativeOnlineGame_BotEndTime(int slot)
+{
+	return ((slot >= 0) && (slot < 8)) ? octrBotEndTime[slot] : 0;
 }
 
 // The room's end-of-race timeout (session 11b, the page's choice) : this

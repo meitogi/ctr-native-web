@@ -221,6 +221,19 @@ void NativeOnlineGame_EndBotRace(int slot)
 	if (((stub.hostBots >> slot) & 1) && stub.kartExists[slot])
 		stub.kartFinished[slot] = 1;
 }
+// the estimates come from the test (stub.botEndTime) ; the flags as the game's
+int NativeOnlineGame_EndBots(void)
+{
+	int ended = 0;
+	for (int slot = 0; slot < 8; slot++)
+		if (((stub.hostBots >> slot) & 1) && stub.kartExists[slot] && !stub.kartFinished[slot])
+		{
+			stub.kartFinished[slot] = 1;
+			ended++;
+		}
+	return ended;
+}
+int NativeOnlineGame_BotEndTime(int slot) { return stub.botEndTime[slot]; }
 void NativeOnlineGame_LobbyPointers(int **active, int **phase, int **characters)
 {
 	static int active_ = 1, phase_, characters_[8];

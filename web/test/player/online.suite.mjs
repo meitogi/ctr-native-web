@@ -716,9 +716,18 @@ async function netplayRow(ctx) {
 	}
 	const main = await untilGame(host, 'the main menu', s => !s.sub && s.menu?.label === 'NETPLAY', 10_000)
 	const kept = (await online(host)).role === 'host'
-	await ctx.js('window.__ctrOnline.leave(); return true')
 	steps.push(`alone : VS stays grey, ARCADE → ${rt.sub.title}, Triangle ×2 → ${main.menu.label}, room ${kept ? 'kept' : 'lost'}`)
 	if (!kept) throw new Error(steps.join(' · '))
+	// The game leaves its room by itself, as the pause menu's QUIT does mid-race (the page's
+	// room still open) : NETPLAY again opens a new room, its menu by itself (session 32c)
+	const before = (await online(host)).room
+	await ctx.js('Module.ctrOnlineControl(2); return true') // CTL.leave, the game only
+	await until(host, 'the game out of its room', s => !s.lobby.active, 10_000)
+	await ctx.press(CROSS)
+	const again = await until(host, 'a new room from NETPLAY', s => s.role === 'host' && s.lobby.active && s.room !== before, 30_000)
+	await untilGame(host, 'the ONLINE menu by itself again', s => s.sub?.title === 'NETPLAY', 20_000)
+	await ctx.js('window.__ctrOnline.leave(); return true')
+	steps.push(`the game out of its room : NETPLAY opened room ${again.room} (was ${before}) and its menu`)
 	if (/did not close/.test(steps[1])) throw new Error(steps.join(' · '))
 	return steps.join(' · ')
 }

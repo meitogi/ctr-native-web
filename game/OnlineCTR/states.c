@@ -475,11 +475,12 @@ void StatePS1_Game_StartRace()
 	}
 }
 
+extern int currCam; // endOfRaceUI.c : the driver the spectator camera follows, its name drawn
+
 static void OnRaceEnd()
 {
-	struct Driver* before = sdata->gGT->cameraDC[0].driverToFollow;
 	struct Driver** drivers = sdata->gGT->drivers;
-	bool foundRacer = false;
+	int best = -1;
 	for (int driverID = 1; driverID < MAX_NUM_PLAYERS; driverID++)
 	{
 		// ctr-native: empty slots have no driver (PS1 wrote low RAM here)
@@ -488,14 +489,19 @@ static void OnRaceEnd()
 		/* Undo wheel ghostify */
 		drivers[driverID]->wheelSprites = ICONGROUP_GETICONS(sdata->gGT->iconGroup[0]);
 
-		if (!foundRacer && octr->nameBuffer[driverID][0] && !checkpointTracker[driverID].raceFinished)
+		// ctr-native: the camera goes straight to the best-placed human still racing, never a
+		// bot (session 32c) ; none : this player's own kart, as before
+		if (octr->nameBuffer[driverID][0] && !checkpointTracker[driverID].raceFinished && !OnlineSlot_IsBot(driverID) &&
+			((best < 0) || (drivers[driverID]->driverRank < drivers[best]->driverRank)))
 		{
-			sdata->gGT->cameraDC[0].driverToFollow = drivers[driverID];
-			foundRacer = true;
+			best = driverID;
 		}
 	}
-	//tbh I don't think this fixes the spectator name bug.
-	sdata->gGT->cameraDC[0].driverToFollow = before;
+	if (best >= 0)
+	{
+		sdata->gGT->cameraDC[0].driverToFollow = drivers[best];
+		currCam = best;
+	}
 }
 
 void StatePS1_Game_EndRace()

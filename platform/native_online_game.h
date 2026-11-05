@@ -68,6 +68,8 @@ int NativeOnlineGame_RaceClock(void);              // gGT->elapsedEventTime
 int NativeOnlineGame_TakeBotShot(int slot, int *weapon, int *juiced, int *flags); // 1 once per shot
 int NativeOnlineGame_TakeOverKart(int slot);       // a leaver's kart to the AI ; 1 when converted
 void NativeOnlineGame_EndBotRace(int slot);        // the room's end-of-race timeout, for a bot
+int NativeOnlineGame_EndBots(void);                // session 32c : every AI kart ends now, an estimated time each ; how many
+int NativeOnlineGame_BotEndTime(int slot);         // that estimate, 0 : none (a real finish)
 
 // Session 32 : a guest whose host left mid-race finishes it alone
 int NativeOnlineGame_PrepareAI(void);              // the AI's difficulty for this race ; 0 : no AI here (Battle)

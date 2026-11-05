@@ -29,6 +29,7 @@ static struct Received
 	int lastHold[8];
 	int weapons[8];
 	int ends[8];
+	int endOrder[8], endTime[8], numEnds; // SG_ENDRACE in arrival order : clientID, courseTime
 	int newClient, startLoading, startRace;
 	int roomCount5;       // SG_ROOMS : room 5's count (+8 when locked)
 } rx[SV_CORE_MAX_PEERS];
@@ -75,7 +76,17 @@ static void Record(int peerId, const void *buf, int len, int reliable)
 			break;
 		}
 		case SG_WEAPON: r->weapons[((const struct SG_MessageWeapon *)buf)->clientID]++; break;
-		case SG_ENDRACE: r->ends[((const struct SG_MessageEndRace *)buf)->clientID]++; break;
+		case SG_ENDRACE:
+		{
+			const struct SG_MessageEndRace *m = buf;
+			r->ends[m->clientID]++;
+			if (r->numEnds < 8)
+			{
+				r->endOrder[r->numEnds] = m->clientID;
+				r->endTime[r->numEnds++] = m->courseTime;
+			}
+			break;
+		}
 		default: break;
 	}
 }
@@ -217,14 +228,21 @@ int main(void)
 	if (rx[GUEST_C].raceData[1] != 1)
 		Fail("the leaver's kart goes on sending kart states, from the host's AI");
 
-	// the end : every kart finishes, each bot's CG_ENDRACE once
+	// the end : every kart finishes, each bot's CG_ENDRACE once. The bots of slots 3-7 were
+	// ended where they stood (session 32c) with estimates out of slot order : their ends go
+	// out in estimate order, with those times ; the leaver's kart (slot 1) crossed the line
 	for (int s = 1; s < 8; s++)
 		stub.kartFinished[s] = 1;
 	stub.raceClock = 123456;
+	{
+		const int estimate[8] = {0, 0, 0, 150000, 140000, 170000, 130000, 160000};
+		for (int s = 3; s < 8; s++)
+			stub.botEndTime[s] = estimate[s];
+	}
 	if (NativeOnlineBots_TakeOver(GUEST_C))
 		Fail("a guest who finished is not taken over when it leaves");
-	hooks->frame();
-	hooks->frame();
+	for (int f = 0; f < 6; f++) // one estimated end a frame at most, the earliest first
+		hooks->frame();
 	{
 		struct CG_MessageEndRace e = {0};
 		e.type = CG_ENDRACE;
@@ -237,6 +255,25 @@ int main(void)
 			printf("  clientID %d : %d ends\n", id, rx[GUEST_C].ends[id]);
 			Fail("one SG_ENDRACE per bot and for the taken-over kart");
 		}
+	{
+		int last = 0, estimated = 0;
+		for (int k = 0; k < rx[GUEST_C].numEnds; k++)
+		{
+			int id = rx[GUEST_C].endOrder[k], t = rx[GUEST_C].endTime[k];
+			if (id < 3) // the leaver's real finish (clientID 1 = slot 1), the host, guest C
+				continue;
+			estimated++;
+			if (t != stub.botEndTime[id] || t <= last)
+			{
+				printf("  end %d : clientID %d at %d (estimate %d, previous %d)\n", k, id, t, stub.botEndTime[id], last);
+				Fail("the bots ended where they stood arrive in their estimates' order, with those times");
+			}
+			last = t;
+		}
+		if (estimated != 5)
+			Fail("five estimated bot ends");
+	}
+	memset(stub.botEndTime, 0, sizeof(stub.botEndTime));
 
 	// the room's reset 6 s after : the bots and the kept peer leave on the next frame
 	SvCore_Tick(now += 16); // the core notes the end time

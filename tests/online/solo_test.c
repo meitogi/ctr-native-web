@@ -98,23 +98,22 @@ int main(void)
 	EXPECT(Ended(1) == 90000, "slot 1 ended at %d, wanted 90000", Ended(1));
 	EXPECT(stub.octr.raceStats[1].bestLap == 30001, "slot 1 best lap %d", stub.octr.raceStats[1].bestLap);
 
-	// this player finishes (OnlineEndOfRace : GAME_END_RACE), then the last AI
+	// this player finishes (OnlineEndOfRace : GAME_END_RACE) : the last AI kart ends at once
+	// where it stands, at its estimated time (session 32c), no waiting for it
 	stub.octr.CurrState = GAME_END_RACE;
 	stub.raceClock = 92000;
+	stub.botEndTime[2] = 97500;
 	NativeOnline_Frame();
 	EXPECT(Ended(0) >= 0, "this player's result missing");
-	stub.raceClock = 95000;
-	stub.kartFinished[2] = 1;
-	NativeOnline_Frame();
-	EXPECT(stub.octr.numDriversEnded == 4 && Ended(2) == 95000, "%d results, slot 2 at %d", stub.octr.numDriversEnded, Ended(2));
+	EXPECT(stub.octr.numDriversEnded == 4 && Ended(2) == 97500, "%d results, slot 2 at %d, wanted its estimate 97500 at once", stub.octr.numDriversEnded, Ended(2));
 	NativeOnline_Frame();
 	EXPECT(stub.deactivated == 0, "the title came with the results");
 
 	// the results shown 6 s, then the title ; one result per slot throughout
-	stub.raceClock = 100999;
+	stub.raceClock = 97999;
 	NativeOnline_Frame();
 	EXPECT(stub.deactivated == 0, "the title came before 6 s of results");
-	stub.raceClock = 101000;
+	stub.raceClock = 98000;
 	NativeOnline_Frame();
 	EXPECT(stub.deactivated == 1, "no title after the results (deactivated %d)", stub.deactivated);
 	EXPECT(stub.octr.numDriversEnded == 4, "%d results, wanted 4", stub.octr.numDriversEnded);

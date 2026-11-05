@@ -245,6 +245,23 @@ static void SendRaceData(struct VirtualPeer *v, const struct NativeOnlineKart *k
 	Send(v, &cg, sizeof(cg));
 }
 
+// another ended bot whose estimated time comes before `courseTime` and is not sent yet
+static int EarlierBotPending(const struct VirtualPeer *self, int courseTime)
+{
+	for (int i = 0; i < MAX_NUM_PLAYERS; i++)
+	{
+		const struct VirtualPeer *v = &vp[i];
+		int t;
+
+		if (v == self || !v->used || v->ended || v->slot < 0 || !NativeOnlineGame_KartFinished(v->slot))
+			continue;
+		t = NativeOnlineGame_BotEndTime(v->slot);
+		if (t > 0 && t < courseTime)
+			return 1;
+	}
+	return 0;
+}
+
 // Once per bridge frame, after the host's own messages.
 static void Bots_Frame(void)
 {
@@ -301,11 +318,16 @@ static void Bots_Frame(void)
 			Send(v, &w, sizeof(w));
 		}
 
-		// a finished player sends no more kart states (StatePC_Game_EndRace)
+		// a finished player sends no more kart states (StatePC_Game_EndRace) ; a bot ended
+		// where it stood (session 32c) has its estimated time, sent after any ahead of it so the
+		// results keep the race's order
 		if (NativeOnlineGame_KartFinished(v->slot))
 		{
 			struct CG_MessageEndRace cg = {0};
-			int courseTime = clock;
+			int courseTime = NativeOnlineGame_BotEndTime(v->slot) ? NativeOnlineGame_BotEndTime(v->slot) : clock;
+
+			if (EarlierBotPending(v, courseTime))
+				continue;
 			int bestLapTime = kart.bestLapTime;
 
 			cg.type = CG_ENDRACE;

@@ -318,6 +318,8 @@ export function attach(Module) {
     Module.ctrInput.openMultiplayer = () => setOpen(true);
     let hosting = false; // a room on its way : a second NETPLAY press opens no other
     Module.ctrInput.netplayHost = () => {
+      // a room the game left on its own (the pause menu's QUIT mid-race) : closed, a new one
+      if (net.room && !hosting && !lobby().active) leave();
       if (net.room || hosting) return 1;
       if (!relay.value.trim() || !rk.value.trim()) return 0;
       hosting = true;
