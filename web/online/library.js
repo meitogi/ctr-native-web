@@ -47,15 +47,15 @@ addToLibrary({
     });
     // What the host tells its guests beside the wire (docs/ONLINECTR_PORT.md D12, game/OnlineCTR/
     // native_compat.h OnlineRoomInfo) : the Cup (on, cup, races counted, points by clientID) and
-    // the clientIDs its AI drives. The host's game writes it ; a guest's page copies the host's in.
+    // the clientIDs its AI drives, its pause for everyone (D12.9). The host's game writes it ; a guest's page copies the host's in.
     const roomLen = HEAP32[roomLenPtr >> 2];
     Module.ctrOnlineRoom = () => {
       const r = HEAP32.subarray(roomPtr >> 2, (roomPtr >> 2) + roomLen);
-      return { cup: r[0], cupID: r[1], races: r[2], points: Array.from(r.subarray(3, 11)), bots: r[11] };
+      return { cup: r[0], cupID: r[1], races: r[2], points: Array.from(r.subarray(3, 11)), bots: r[11], paused: r[12] };
     };
     Module.ctrOnlineRoomSet = (room) => {
       const r = HEAP32.subarray(roomPtr >> 2, (roomPtr >> 2) + roomLen);
-      r.set([room.cup | 0, room.cupID | 0, room.races | 0, ...Array.from({ length: 8 }, (_, i) => room.points?.[i] | 0), room.bots | 0]);
+      r.set([room.cup | 0, room.cupID | 0, room.races | 0, ...Array.from({ length: 8 }, (_, i) => room.points?.[i] | 0), room.bots | 0, room.paused | 0]);
     };
     Module.ctrOnlineControlQueue = [];
     // cmd : 1 enter the page's room, 2 leave, 3 this guest's character (arg)

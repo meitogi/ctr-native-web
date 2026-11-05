@@ -212,7 +212,7 @@ int NativeOnlineGame_TakeOverKart(int slot)
 int NativeOnlineGame_PrepareAI(void) { return !stub.noAI; }
 int *NativeOnlineGame_RoomInfo(int **len)
 {
-	static int info[12], count = 12;
+	static int info[13], count = 13;
 	*len = &count;
 	return info;
 }
@@ -234,6 +234,12 @@ int NativeOnlineGame_EndBots(void)
 	return ended;
 }
 int NativeOnlineGame_BotEndTime(int slot) { return stub.botEndTime[slot]; }
+int NativeOnlineGame_TakeSkipReset(void)
+{
+	int skip = stub.skipReset;
+	stub.skipReset = 0;
+	return skip;
+}
 void NativeOnlineGame_LobbyPointers(int **active, int **phase, int **characters)
 {
 	static int active_ = 1, phase_, characters_[8];

@@ -38,6 +38,7 @@ struct StubGame
 	int botShot[8];
 	int takenOver[8];
 	int botEndTime[8]; // session 32c : the estimate EndBots gave a bot, 0 : none
+	int skipReset;     // session 32d : the host's Cross asked the server's reset now (once)
 
 	// a guest finishing alone (session 32) : no AI in Battle, the title reloads
 	int noAI;

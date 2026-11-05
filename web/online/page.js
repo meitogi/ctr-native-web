@@ -482,8 +482,16 @@ export function attach(Module) {
     render();
   }
 
+  // the host's pause for everyone (D12.9) ends here : a game frozen by it runs no netcode, so it
+  // would never see the leave or the host's loss that follows
+  const unfreeze = () => {
+    const room = Module.ctrOnlineRoom?.();
+    if (room?.paused) Module.ctrOnlineRoomSet?.({ ...room, paused: 0 });
+  };
+
   /** Leaves the room : the game drops the mod, the lobby share stops, the room closes. */
   function leave() {
+    unfreeze();
     joinGen++; // a guest() still opening its room drops it
     rejoinToken++;
     rejoinTry = 0;
@@ -562,6 +570,7 @@ export function attach(Module) {
     render();
   };
   net.onHostLost = () => {
+    unfreeze();
     const room = net.room;
     setTimeout(() => {
       if (net.role !== 'guest' || net.room !== room) return;
@@ -659,6 +668,20 @@ export function attach(Module) {
   let toldWaiting = false;
   const waitingForRace = () => toldWaiting && net.role === 'guest' && !joined();
   const endTimer = createEndTimer();
+  // the host's pause for everyone (D12.9) stops the end-of-race clock : the time spent paused is
+  // taken off the clock the timer sees
+  let pausedSince = null;
+  let pausedMs = 0;
+  const raceNow = () => {
+    const now = Date.now();
+    const paused = Module.ctrOnlineRoom?.().paused > 0;
+    if (paused && pausedSince === null) pausedSince = now;
+    else if (!paused && pausedSince !== null) {
+      pausedMs += now - pausedSince;
+      pausedSince = null;
+    }
+    return (pausedSince ?? now) - pausedMs;
+  };
   let sentRoom = null; // host : the room info last sent to the guests (D12)
   let knownBots = 0; // host : the bots' slots at the race's start, then the takeovers told
   // to every guest of the lobby share that listens : our framing (Share's LOBBY message), not the game's
@@ -680,7 +703,7 @@ export function attach(Module) {
     if (net.role === 'host') {
       // the players who finished : the host's bots (session 23) never start the clock
       const finished = (Module.ctrOnlineOctr?.().raceStats ?? []).filter((x) => !((l.hostBots ?? 0) >> x.slot & 1)).length;
-      const step = endTimer.tick({ race: l.active && l.phase === PHASE.race, finished, endAfterMs: Number(endAfter.value) * 1000, now: Date.now() });
+      const step = endTimer.tick({ race: l.active && l.phase === PHASE.race, finished, endAfterMs: Number(endAfter.value) * 1000, now: raceNow() });
       if (step?.notice) {
         const secs = Math.round(step.notice / 1000);
         if ((Module.ctrOnlineOctr?.().CurrState ?? 0) < ST.endRace) ui?.toast(T.endIn(secs), T.endInDetail);
@@ -712,6 +735,11 @@ export function attach(Module) {
       if (room && l.active && (roomKey !== sentRoom || (l.phase === PHASE.starting && !startSent))) {
         sentRoom = roomKey;
         toGuests({ phase: l.phase, room });
+      } else if (!l.active && sentRoom && JSON.parse(sentRoom).paused) {
+        // the host's game left the room's race paused for everyone (its QUIT) : the guests run on (D12.9)
+        const unpaused = { ...JSON.parse(sentRoom), paused: 0 };
+        sentRoom = JSON.stringify(unpaused);
+        toGuests({ phase: PHASE.race, room: unpaused });
       }
       // the track lock : each guest gets the character its pad locked on this screen
       if (l.active && l.phase === PHASE.starting && !startSent) {
@@ -727,7 +755,7 @@ export function attach(Module) {
     if (net.role === 'guest' && solo) {
       // the race finished alone : its 11b timeout counts from this player's own finish, then the title
       const finished = (Module.ctrOnlineOctr?.().raceStats ?? []).filter((x) => x.slot === 0).length;
-      const step = endTimer.tick({ race: l.active && l.phase === PHASE.race, finished, endAfterMs: Number(endAfter.value) * 1000, now: Date.now() });
+      const step = endTimer.tick({ race: l.active && l.phase === PHASE.race, finished, endAfterMs: Number(endAfter.value) * 1000, now: raceNow() });
       if (step?.end) Module.ctrOnlineControl?.(CTL.endBots);
       if (!l.active) {
         solo = false;

@@ -197,6 +197,26 @@ static void SmoothFrame(void)
 	}
 }
 
+// Session 32d : the results in finishing-time order, not arrival order : a finish faked where it
+// stands (FINISH THE RACE, D12.9) or a bot's estimate can arrive before karts that finish earlier.
+// The table and the Cup's points read raceStats in this order ; a time of 0 (none) goes last.
+static void AddResult(int slot, int finalTime, int bestLap)
+{
+	int k = octr->numDriversEnded;
+
+	if (k >= MAX_NUM_PLAYERS)
+		return;
+	while ((k > 0) && (finalTime != 0) && ((octr->raceStats[k - 1].finalTime == 0) || (octr->raceStats[k - 1].finalTime > finalTime)))
+	{
+		octr->raceStats[k] = octr->raceStats[k - 1];
+		k--;
+	}
+	octr->raceStats[k].slot = slot;
+	octr->raceStats[k].finalTime = finalTime;
+	octr->raceStats[k].bestLap = bestLap;
+	octr->numDriversEnded++;
+}
+
 static void ProcessReceiveEvent(void *packet, int len)
 {
 	// zero-padded copy: a short packet never reads past its end
@@ -497,10 +517,13 @@ static void ProcessReceiveEvent(void *packet, int len)
 				seen = octr->raceStats[k].slot == slot;
 			if (seen) break;
 
-			octr->raceStats[octr->numDriversEnded].slot = slot;
-			memcpy(&octr->raceStats[octr->numDriversEnded].finalTime, &r->courseTime, sizeof(r->courseTime));
-			memcpy(&octr->raceStats[octr->numDriversEnded].bestLap, &r->lapTime, sizeof(r->lapTime));
-			octr->numDriversEnded++;
+			{
+				int courseTime, lapTime;
+
+				memcpy(&courseTime, &r->courseTime, sizeof(courseTime));
+				memcpy(&lapTime, &r->lapTime, sizeof(lapTime));
+				AddResult(slot, courseTime, lapTime);
+			}
 			break;
 		}
 
@@ -535,10 +558,7 @@ static void SoloEnd(int slot, int clock)
 	if (octr->numDriversEnded >= MAX_NUM_PLAYERS || SlotEnded(slot))
 		return;
 	NativeOnlineGame_GetKart(slot, &kart);
-	octr->raceStats[octr->numDriversEnded].slot = slot;
-	octr->raceStats[octr->numDriversEnded].finalTime = NativeOnlineGame_BotEndTime(slot) ? NativeOnlineGame_BotEndTime(slot) : clock;
-	octr->raceStats[octr->numDriversEnded].bestLap = kart.bestLapTime;
-	octr->numDriversEnded++;
+	AddResult(slot, NativeOnlineGame_BotEndTime(slot) ? NativeOnlineGame_BotEndTime(slot) : clock, kart.bestLapTime);
 }
 
 // The host's link closed (web/online/net.js) during this guest's race : the
@@ -1037,10 +1057,7 @@ void StatePC_Game_EndRace()
 		sendToHostReliable(&cg, sizeof(struct CG_MessageEndRace));
 
 		// end race for yourself
-		octr->raceStats[octr->numDriversEnded].slot = 0;
-		octr->raceStats[octr->numDriversEnded].finalTime = courseTime;
-		octr->raceStats[octr->numDriversEnded].bestLap = bestLapTime;
-		octr->numDriversEnded++;
+		AddResult(0, courseTime, bestLapTime);
 	}
 }
 

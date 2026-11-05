@@ -1764,6 +1764,12 @@ struct RectMenu *MainFreeze_GetMenuPtr(void)
 	struct GameTracker *gGT = GAME_TRACKER;
 	u32 gameMode = gGT->gameMode1;
 
+#ifdef USE_ONLINE
+	// ctr-native: a room's race has its own pause, which never freezes it (session 32d, D12.9)
+	if (ONLINE_RACE)
+		return OnlinePause_Menu();
+#endif
+
 	if ((gameMode & ADVENTURE_ARENA) != 0)
 	{
 		struct MenuRow *rows = data.rowsAdvHub;
@@ -1884,6 +1890,14 @@ void MainFreeze_IfPressStart(void)
 		return;
 	}
 
+#ifdef USE_ONLINE
+	// ctr-native: the room's race runs on under its pause menu (session 32d, D12.9)
+	if (ONLINE_RACE)
+	{
+		OnlinePause_Open();
+		return;
+	}
+#endif
 	gGT->gameMode1 = gameMode1 | PAUSE_1;
 
 	menu = MainFreeze_GetMenuPtr();

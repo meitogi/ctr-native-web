@@ -60,6 +60,7 @@ enum OnlineRoomInfo
 	ONLINE_ROOM_CUP_RACES, // races counted so far (1-4)
 	ONLINE_ROOM_POINTS,    // 8 totals, by clientID
 	ONLINE_ROOM_BOTS = ONLINE_ROOM_POINTS + 8, // the clientIDs the host's AI drives (bit per clientID)
+	ONLINE_ROOM_PAUSED,    // session 32d : the host paused the room's race for everyone
 	ONLINE_ROOM_INFO_LEN,
 };
 extern int octrRoomInfo[ONLINE_ROOM_INFO_LEN];
@@ -67,6 +68,12 @@ extern int octrCupInterlude; // between two races of a Cup : the race level stay
 int OnlineSlot_IsBot(int slot);   // a bot's kart, or one the AI took over : its name in the bots' colour
 void OnlineRoom_EndOfRace(void);  // every frame of the end of race : the humans left ; a Cup counted (host), its standings
 int OnlineCup_Showing(void);      // the standings replace the results
+// Session 32d, the Netplay pause (D12.9) and the host's skip (D12.10)
+struct RectMenu *OnlinePause_Menu(void); // the pause menu of a room's race (MainFreeze_GetMenuPtr)
+void OnlinePause_Open(void);      // Start in a room's race : the menu, the race running on
+int OnlinePause_Frame(void);      // every frame (MainFrame) : 1 when it owns Start and the pause this frame
+int OnlinePause_MaskPad(int on);  // around the karts' update : no drive input while the menu is open
+void OnlineRoom_HostSkip(int y);  // the host's « Cross : continue » under a table, and its Cross
 extern const unsigned char onlineItemSetRace2[0x34], onlineItemSetRace3[0x14], onlineItemSetRace4[0x14];
 #define ONLINE_LNG_ROW 0x9a // a language-table slot no code reads ; the mod's menus use 0x9a-0xa1 the same way
 

@@ -205,6 +205,12 @@ static int octrCupRacesAtStart;
 static int octrCupBefore[8];
 static char octrCupNames[8][NAME_LEN + 1];
 static int octrCupBots;
+// the host's Cross on the rankings (D12.10) : the server's reset now, then no wait in a Cup
+static int octrSkipReset;
+static int octrSkipCupHold;
+// frames the table has been complete : the hint and the Cross wait 1 s (Cross is the gas : a
+// host still pressing it at its finish must not skip the results)
+static int octrSkipFrames;
 // the humans still in the room at this race's end (a leaver's name emptied, or its kart the AI's)
 static int octrRaceHumans;
 struct OnlineBotShoot octrBotShoot[8];
@@ -329,6 +335,7 @@ void OnlineRuntime_LeaveRace(void)
 {
 	NativeOnlineGame_Log("[OnlineCTR] Left the race\n");
 	octr->CurrState = -1;
+	octrRoomInfo[ONLINE_ROOM_PAUSED] = 0;
 }
 
 // StatePS1_Lobby_StartLoading() without its text : the level load with the
@@ -342,6 +349,11 @@ static void OnlineExternal_StartLoading(void)
 	initRace = true;
 	endRace = true;
 	memset(octrBotEndTime, 0, sizeof(octrBotEndTime));
+	// the host's pause and skip belong to the race before (D12.9, D12.10)
+	octrRoomInfo[ONLINE_ROOM_PAUSED] = 0;
+	octrSkipReset = 0;
+	octrSkipCupHold = 0;
+	octrSkipFrames = 0;
 	// a shot fired after a kart's finish (the AI drives on, its shot never sent) must not go
 	// out at the next race's lights (session 32c : a warp orb before a Cup's start)
 	memset(octrBotShoot, 0, sizeof(octrBotShoot));
@@ -484,6 +496,7 @@ static void OnlineCup_Draw(void)
 			DecalFont_DrawLine(line, 330, 70 + i * 14, FONT_SMALL, TINY_GREEN);
 		}
 	}
+	OnlineRoom_HostSkip(70 + n * 14 + 8);
 }
 
 bool HasRaceEnded();
@@ -565,6 +578,7 @@ void OnlineExternal_State(void)
 			// its title behind the host's picture
 			octrLobbyPhase = ONLINE_LOBBY_MENUS;
 			octrOnlineMenuPath = 0;
+			octrSkipReset = 0; // the reset came (D12.10)
 			if (octrRoomInfo[ONLINE_ROOM_CUP] && (octrRoomInfo[ONLINE_ROOM_CUP_RACES] >= 4))
 				octrRoomInfo[ONLINE_ROOM_CUP] = 0; // the Cup is over : its final standings have shown
 			if (octrRoomInfo[ONLINE_ROOM_CUP] && ((sdata->gGT->gameMode1 & MAIN_MENU) == 0) && (sdata->Loading.stage == LOAD_IDLE))
@@ -573,7 +587,7 @@ void OnlineExternal_State(void)
 				// locks the next track after a few seconds of them
 				octrCupInterlude = 1;
 				octrLobbyPhase = ONLINE_LOBBY_RACE;
-				octrCupHold = FPS_DOUBLE(90);
+				octrCupHold = octrSkipCupHold ? 0 : FPS_DOUBLE(90);
 			}
 			else if (((sdata->gGT->gameMode1 & MAIN_MENU) == 0) && (sdata->Loading.stage == LOAD_IDLE))
 			{
@@ -815,6 +829,9 @@ int NativeOnlineGame_TakeOverKart(int slot)
 
 	octrHostBots |= 1 << slot;
 	octrBotShoot[slot].boolNow = 0;
+	// a guest's takeover : its host left (D11.6) ; a pause of that host's ends with it (D12.9)
+	if (octr->DriverID != 0)
+		octrRoomInfo[ONLINE_ROOM_PAUSED] = 0;
 	d->bestLapTime = HOURS(10);
 	BOTS_Driver_Convert(d);
 	if ((d->actionsFlagSet & ACTION_BOT) == 0)
@@ -878,22 +895,48 @@ void NativeOnlineGame_EndBotRace(int slot)
 	d->heldItemID = HELD_ITEM_NONE;
 }
 
+// Session 32c : the time a kart still racing would reach the line at its average pace so far
+// (BOTS.c's lap-and-distance progress), strictly later than `last` (the kart ahead's). The
+// results are kept in time order (native_online.c AddResult), so these times place each kart.
+static int EstimateEnd(struct Driver *d, int clock, int last)
+{
+	struct GameTracker *gGT = sdata->gGT;
+	int trackLength = 0;
+	int estimate = last + 1000;
+
+	if ((gGT->level1 != NULL) && (gGT->level1->ptr_restart_points != NULL))
+		trackLength = (s32)gGT->level1->ptr_restart_points[0].distToFinish << 3; // VehLap.c VEH_LAP_TRACK_DISTANCE_SCALE_SHIFT
+	if (trackLength > 0)
+	{
+		int lap = d->lapIndex - (((d->actionsFlagSet & ACTION_BEHIND_START_LINE) != 0) ? 1 : 0);
+		long long progress = (long long)lap * trackLength + (trackLength - (int)d->distanceToFinish_curr);
+		long long total = (long long)gGT->numLaps * trackLength;
+
+		// a kart not yet past the start (session 32d : FINISH THE RACE at the start) goes behind
+		// the others : as if it had covered 1/64th of the race
+		if (progress < total / 64)
+			progress = total / 64;
+		if ((progress > 0) && (progress < total))
+			estimate = (int)((long long)clock * total / progress);
+	}
+	if (estimate <= last)
+		estimate = last + 1;
+	return estimate;
+}
+
 // Session 32c : once every human has finished, the AI's karts end at once where they stand, as
-// retail's PlayLevel ends its AIs, each at the time it would reach the line at its average pace so
-// far (BOTS.c's lap-and-distance progress), in race order, each later than the one ahead : the
-// results come at once, in the order the race had. octrBotEndTime by slot, 0 : none (a real finish).
+// retail's PlayLevel ends its AIs, each at its EstimateEnd, in race order, each later than the one
+// ahead : the results come at once, in the order the race had. octrBotEndTime by slot, 0 : none
+// (a real finish).
 int NativeOnlineGame_EndBots(void)
 {
 	struct GameTracker *gGT = sdata->gGT;
 	const int clock = NativeOnlineGame_RaceClock();
-	int trackLength = 0;
 	int last = clock;
 	int ended = 0;
 
 	if (!ONLINE_RACE || ((gGT->gameMode1 & BATTLE_MODE) != 0))
 		return 0;
-	if ((gGT->level1 != NULL) && (gGT->level1->ptr_restart_points != NULL))
-		trackLength = (s32)gGT->level1->ptr_restart_points[0].distToFinish << 3; // VehLap.c VEH_LAP_TRACK_DISTANCE_SCALE_SHIFT
 
 	// rank by rank : driverRank 0 is the race's leader
 	for (int rank = 0; rank < 8; rank++)
@@ -901,23 +944,11 @@ int NativeOnlineGame_EndBots(void)
 		for (int slot = 0; slot < 8; slot++)
 		{
 			struct Driver *d = gGT->drivers[slot];
-			int estimate = last + 1000;
 
 			if (!ONLINE_HOST_BOT(slot) || (d == NULL) || (d->driverRank != rank) || ((d->actionsFlagSet & ACTION_RACE_FINISHED) != 0))
 				continue;
-			if (trackLength > 0)
-			{
-				int lap = d->lapIndex - (((d->actionsFlagSet & ACTION_BEHIND_START_LINE) != 0) ? 1 : 0);
-				long long progress = (long long)lap * trackLength + (trackLength - (int)d->distanceToFinish_curr);
-				long long total = (long long)gGT->numLaps * trackLength;
-
-				if ((progress > 0) && (progress < total))
-					estimate = (int)((long long)clock * total / progress);
-			}
-			if (estimate <= last)
-				estimate = last + 1;
-			last = estimate;
-			octrBotEndTime[slot] = estimate;
+			last = EstimateEnd(d, clock, last);
+			octrBotEndTime[slot] = last;
 			d->actionsFlagSet |= ACTION_RACE_FINISHED;
 			d->heldItemID = HELD_ITEM_NONE;
 			ended++;
@@ -947,4 +978,320 @@ void NativeOnlineGame_EndMyRace(void)
 	d->heldItemID = HELD_ITEM_NONE;
 	d->noItemTimer = 0;
 	BOTS_Driver_Convert(d);
+}
+
+// ---- The Netplay pause (docs/ONLINECTR_PORT.md, D12.9) ----
+// Start in a room's race opens this menu without retail's freeze : the karts, the clock and the
+// wire run on, this kart coasts (no drive input while it is open). RESUME, FINISH THE RACE (the
+// last human still racing), PAUSE FOR EVERYONE (the host), QUIT (retail's, the room left). The
+// host's pause for everyone goes to the guests in the room info (ONLINE_ROOM_PAUSED) : every game
+// of the room freezes the retail way (PAUSE_1) until the host resumes it.
+
+#define ONLINE_LNG_FINISH 0x9e
+#define ONLINE_LNG_EVERYONE 0x9f
+
+static void OnlinePause_MenuProc(struct RectMenu *menu);
+void NativeOnlineGame_FinishHere(void);
+static struct MenuRow onlinePauseRows[5];
+static struct RectMenu onlinePauseMenu =
+{
+	.stringIndexTitle = LNG_PAUSED,
+	.posX_curr = 0x100,
+	.posY_curr = 0x6c,
+	.state = ALL_PLAYERS_USE_MENU | RECTMENU_STATE_SMALL_EXEC_CENTERED | BIG_TEXT_IN_TITLE,
+	.rows = &onlinePauseRows[0],
+	.funcPtr = OnlinePause_MenuProc,
+	.drawStyle = 4,
+};
+// this game frozen by the room's pause ; the pad kept while the karts update without it
+static int octrPausedHere;
+static struct GamepadBuffer octrMaskedPad;
+
+struct RectMenu *OnlinePause_Menu(void)
+{
+	return &onlinePauseMenu;
+}
+
+// FINISH THE RACE : this kart still racing, every other human's finish in the results
+static int OnlinePause_LastHuman(void)
+{
+	struct Driver *d = sdata->gGT->drivers[0];
+
+	if ((d == NULL) || ((d->actionsFlagSet & ACTION_RACE_FINISHED) != 0) || ((sdata->gGT->gameMode1 & BATTLE_MODE) != 0))
+		return 0;
+	// a race under way : not in the fly-in or the lights
+	if ((octr->CurrState != GAME_START_RACE) || (sdata->gGT->trafficLightsTimer > 0) || (sdata->gGT->elapsedEventTime <= 0))
+		return 0;
+	for (int slot = 1; slot < octr->NumDrivers && slot < 8; slot++)
+	{
+		int ended = 0;
+
+		if ((octr->nameBuffer[slot][0] == 0) || OnlineSlot_IsBot(slot))
+			continue;
+		for (int k = 0; k < octr->numDriversEnded; k++)
+			if (octr->raceStats[k].slot == slot)
+				ended = 1;
+		if (!ended)
+			return 0;
+	}
+	return 1;
+}
+
+// the rows of this frame : RESUME, FINISH THE RACE (the last human, not frozen), PAUSE / RESUME
+// FOR EVERYONE (the host), QUIT ; the cursor stays on its row's label
+static void OnlinePause_Rows(void)
+{
+	int ids[4], n = 0;
+	int frozen = octrRoomInfo[ONLINE_ROOM_PAUSED];
+	int host = (octr->DriverID == 0);
+	int selected = onlinePauseRows[onlinePauseMenu.rowSelected & 3].stringIndex;
+
+	GAME_LANGUAGE_STRINGS[ONLINE_LNG_FINISH] = "FINISH THE RACE";
+	GAME_LANGUAGE_STRINGS[ONLINE_LNG_EVERYONE] = frozen ? "RESUME FOR EVERYONE" : "PAUSE FOR EVERYONE";
+	if (!(host && frozen))
+		ids[n++] = LNG_RESUME;
+	if (!frozen && OnlinePause_LastHuman())
+		ids[n++] = ONLINE_LNG_FINISH;
+	if (host)
+		ids[n++] = ONLINE_LNG_EVERYONE;
+	ids[n++] = LNG_QUIT;
+	for (int i = 0; i < n; i++)
+	{
+		onlinePauseRows[i].stringIndex = ids[i];
+		onlinePauseRows[i].rowOnPressUp = (i > 0) ? i - 1 : 0;
+		onlinePauseRows[i].rowOnPressDown = (i < n - 1) ? i + 1 : i;
+		onlinePauseRows[i].rowOnPressLeft = i;
+		onlinePauseRows[i].rowOnPressRight = i;
+	}
+	onlinePauseRows[n].stringIndex = RECTMENU_STRING_NONE;
+	if ((onlinePauseMenu.rowSelected < 0) || (onlinePauseMenu.rowSelected >= n) || (onlinePauseRows[onlinePauseMenu.rowSelected].stringIndex != selected))
+	{
+		int keep = 0;
+
+		for (int i = 0; i < n; i++)
+			if (ids[i] == selected)
+				keep = i;
+		onlinePauseMenu.rowSelected = keep;
+	}
+}
+
+static void OnlinePause_Close(void)
+{
+	RECTMENU_Hide(sdata->ptrActiveMenu);
+	sdata->gGT->cooldownFromUnpauseUntilPause = 5;
+}
+
+// the host : the room's race frozen for everyone, or running again ; each game applies the edge in
+// OnlinePause_Frame (the guests once their page copied the room info in)
+static void OnlinePause_Everyone(int paused)
+{
+	octrRoomInfo[ONLINE_ROOM_PAUSED] = paused;
+	NativeOnlineGame_Log("[OnlineCTR] The host %s the race for everyone\n", paused ? "paused" : "resumed");
+}
+
+void OnlinePause_Open(void)
+{
+	OnlinePause_Rows();
+	onlinePauseMenu.rowSelected = 0;
+	RECTMENU_Show(&onlinePauseMenu);
+	OtherFX_Play(1, 1);
+}
+
+static void OnlinePause_MenuProc(struct RectMenu *menu)
+{
+	int stringID;
+
+	if (menu->funcState != RECTMENU_FUNC_STATE_INPUT)
+	{
+		OnlinePause_Rows();
+		return;
+	}
+	// Triangle : the menu closes (the host's frozen race keeps its menu : RESUME FOR EVERYONE or Start)
+	if (menu->rowSelected < 0)
+	{
+		if (!((octr->DriverID == 0) && octrRoomInfo[ONLINE_ROOM_PAUSED]))
+			OnlinePause_Close();
+		return;
+	}
+	stringID = onlinePauseRows[menu->rowSelected].stringIndex;
+	switch (stringID)
+	{
+		case LNG_RESUME:
+			OnlinePause_Close();
+			break;
+		case ONLINE_LNG_FINISH:
+			OnlinePause_Close();
+			NativeOnlineGame_FinishHere();
+			break;
+		case ONLINE_LNG_EVERYONE:
+			if (octrRoomInfo[ONLINE_ROOM_PAUSED])
+				OnlinePause_Close();
+			OnlinePause_Everyone(!octrRoomInfo[ONLINE_ROOM_PAUSED]);
+			break;
+		case LNG_QUIT:
+			// retail's YES / NO ; its NO comes back here (MainFreeze_GetMenuPtr)
+			data.menuQuit.rowSelected = 1;
+			GAME_DESIRED_MENU = &data.menuQuit;
+			break;
+		default:
+			break;
+	}
+}
+
+static int OnlinePause_MenuOpen(void)
+{
+	struct RectMenu *m = sdata->ptrActiveMenu;
+
+	return ((m == &onlinePauseMenu) || (m == &data.menuQuit)) && ((m->state & NEEDS_TO_CLOSE) == 0);
+}
+
+// FINISH THE RACE : this kart ends where it stands, at the time the bots' estimate gives it, then
+// as the room's timeout ends a race (NativeOnlineGame_EndMyRace) ; with every human done the host
+// ends its bots at once (EndBotsWhenHumansDone), so the results come at once
+void NativeOnlineGame_FinishHere(void)
+{
+	struct Driver *d = sdata->gGT->drivers[0];
+	const int clock = NativeOnlineGame_RaceClock();
+
+	if (!ONLINE_RACE || (d == NULL) || ((d->actionsFlagSet & ACTION_RACE_FINISHED) != 0))
+		return;
+	d->timeElapsedInRace = EstimateEnd(d, clock, clock);
+	d->actionsFlagSet |= ACTION_RACE_TIMER_FROZEN;
+	NativeOnlineGame_Log("[OnlineCTR] Finished here : %d ms (clock %d)\n", d->timeElapsedInRace, clock);
+	NativeOnlineGame_EndMyRace();
+}
+
+int OnlinePause_Frame(void)
+{
+	struct GameTracker *gGT = sdata->gGT;
+	int tap = sdata->gGamepads->gamepad[0].buttonsTapped;
+	int paused;
+
+	if (!ONLINE_RACE)
+	{
+		// the room left (QUIT, a leave) : retail's load clears the freeze
+		octrPausedHere = 0;
+		return 0;
+	}
+	paused = octrRoomInfo[ONLINE_ROOM_PAUSED] && (sdata->Loading.stage == LOAD_IDLE);
+	if (paused && !octrPausedHere)
+	{
+		octrPausedHere = 1;
+		gGT->gameMode1 |= PAUSE_1;
+		MainFrame_TogglePauseAudio(1);
+		OtherFX_Play(1, 1);
+		// the host keeps its menu (RESUME FOR EVERYONE), a guest's closes : Start opens it again
+		if ((octr->DriverID != 0) && OnlinePause_MenuOpen())
+			RECTMENU_Hide(sdata->ptrActiveMenu);
+	}
+	else if (!paused && octrPausedHere)
+	{
+		octrPausedHere = 0;
+		gGT->gameMode1 &= ~PAUSE_1;
+		MainFrame_TogglePauseAudio(0);
+		OtherFX_Play(1, 1);
+		if (OnlinePause_MenuOpen())
+			RECTMENU_Hide(sdata->ptrActiveMenu);
+		gGT->cooldownFromUnpauseUntilPause = 5;
+	}
+
+	if (octrPausedHere)
+	{
+		DecalFont_DrawLine("PAUSED BY THE HOST", 256, 40, FONT_BIG, JUSTIFY_CENTER | ORANGE);
+		if ((tap & BTN_START) != 0)
+		{
+			RECTMENU_ClearInput();
+			if (octr->DriverID == 0)
+				OnlinePause_Everyone(0);
+			else if (OnlinePause_MenuOpen())
+				RECTMENU_Hide(sdata->ptrActiveMenu);
+			else if (sdata->ptrActiveMenu == NULL)
+				OnlinePause_Open();
+		}
+		return 1;
+	}
+	// this kart's race ended under the menu : retail's end of race takes over
+	if (((gGT->gameMode1 & END_OF_RACE) != 0) && OnlinePause_MenuOpen())
+	{
+		RECTMENU_Hide(sdata->ptrActiveMenu);
+		return 0;
+	}
+	if (OnlinePause_MenuOpen())
+	{
+		// retail's cooldown counts down only while paused (MainFrame) : ours never is
+		gGT->cooldownfromPauseUntilUnpause = 0;
+		if ((tap & BTN_START) != 0)
+		{
+			RECTMENU_ClearInput();
+			OtherFX_Play(1, 1);
+			OnlinePause_Close();
+		}
+		return 1;
+	}
+	return 0;
+}
+
+int OnlinePause_MaskPad(int on)
+{
+	struct GamepadBuffer *pad = &sdata->gGamepads->gamepad[0];
+
+	if (!on)
+	{
+		*pad = octrMaskedPad;
+		return 0;
+	}
+	if (!ONLINE_RACE || octrPausedHere || !OnlinePause_MenuOpen())
+		return 0;
+	octrMaskedPad = *pad;
+	pad->buttonsHeldCurrFrame = 0;
+	pad->buttonsTapped = 0;
+	pad->buttonsReleased = 0;
+	pad->stickLX = 0x80;
+	pad->stickLY = 0x80;
+	pad->stickRX = 0x80;
+	pad->stickRY = 0x80;
+	return 1;
+}
+
+// ---- The host skips the rankings (docs/ONLINECTR_PORT.md, D12.10) ----
+// The results, the Cup standings and the final standings wait for the server's reset (6 s after
+// the last finish, ROOM_RESET_MS), then a Cup's next track 3 s more : the host's Cross ends that
+// wait for everyone. The server runs in the host's page (WebHost_Service) : no wire change, the
+// guests follow its SG_NEWCLIENT / SG_TRACK as they would 6 s later. `y` : under the table.
+void OnlineRoom_HostSkip(int y)
+{
+	// a Cross on the pause menu's rows is the menu's
+	int cross = (sdata->gGamepads->gamepad[0].buttonsTapped & BTN_CROSS) && !OnlinePause_MenuOpen();
+
+	if (!octrActive || (octr->DriverID != 0))
+		return;
+	if (octrCupInterlude && (octr->CurrState == LOBBY_HOST_TRACK_PICK) && !octr->boolLockedInLevel)
+	{
+		// between two Cup races, after the reset : the next track now
+		if (cross)
+			octrCupHold = 0;
+	}
+	else if (!((octr->CurrState == GAME_END_RACE) && HasRaceEnded()))
+	{
+		octrSkipFrames = 0;
+		return;
+	}
+	else if (octrSkipFrames < FPS_DOUBLE(30))
+	{
+		octrSkipFrames++;
+		return;
+	}
+	else if (cross)
+	{
+		octrSkipReset = 1;
+		octrSkipCupHold = 1;
+	}
+	DecalFont_DrawLine("CROSS : CONTINUE", 256, y, FONT_SMALL, JUSTIFY_CENTER | WHITE);
+}
+
+// Asked each frame until the reset comes (LOBBY_ASSIGN_ROLE) : the server may not have seen the
+// last end yet when the host's table is complete
+int NativeOnlineGame_TakeSkipReset(void)
+{
+	return octrSkipReset;
 }

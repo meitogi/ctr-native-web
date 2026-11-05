@@ -14,6 +14,18 @@
 //                      Session 32 : then the host alone on the character select ; its way back,
 //                      Triangle out of it, then Triangle up to the main menu, still in the room.
 // ONLINE-ARCADE-CUP    session 32 : a whole Arcade Cup, the 4 races chained, the standings on both.
+//                      Session 32d : the host's Cross skips the standings after races 1-3 and the
+//                      final standings (D12.10), each wait timed.
+// NETPLAY-PAUSE        session 32d (D12.9) : the host's Start mid-race opens the pause menu, the
+//                      race clock runs on under it ; Triangle, Start and RESUME close it ; PAUSE FOR
+//                      EVERYONE freezes both games (their clocks still for 3 s, then 30 s with the
+//                      link alive, « PAUSED BY THE HOST »), the guest's Start opens RESUME / QUIT
+//                      and unfreezes nothing, the host's RESUME FOR EVERYONE runs both again.
+// NETPLAY-FINISH-HERE  session 32d : the host finishes, the guest (the last human) picks FINISH THE
+//                      RACE : the full results on both in < 2 s, its time the bots' estimate ;
+//                      the camera of the finished host on the guest's kart (a shot) ; then the
+//                      host's Cross on the results : its character select in < 2 s, the guest's
+//                      Cross on its results doing nothing.
 //
 // RUN : as online.suite.mjs (debug ON build served on 8091–8093, a keyed relay on 8788) :
 //   bash plans/ctr-native-web/tools/play.sh online-arcade <session> 8092 -- --set relay=ws://localhost:8788 --set rk=<key>
@@ -40,10 +52,14 @@ const TOASTS = `(() => {
 })()`
 // The fullest results table of the race, kept by the page itself (a read from outside can stall
 // beside the filmed race, and the room's reset clears the table 6 s after the last finisher)
+// Session 32d : when both humans (slots 0, 1) had finished, and when the table was full
 const RESULTS = `setInterval(() => {
 	const s = window.__ctrOnline?.state()
 	if (s?.octr && s.lobby.phase === 3 && s.octr.raceStats.length >= (window.__results?.octr.raceStats.length ?? 0)) window.__results = s
-}, 250)`
+	const stats = window.__results?.octr.raceStats ?? []
+	if (!window.__humansAt && [0, 1].every(slot => stats.some(x => x.slot === slot))) window.__humansAt = Date.now()
+	if (!window.__fullAt && stats.length === 8) window.__fullAt = Date.now()
+}, 50)`
 const toastsOf = tab => tab.js('return globalThis.__toasts ?? []')
 const netOf = tab => tab.js('return window.__ctr?.net?.summary() ?? null')
 const resetNet = tab => tab.js('window.__ctr?.net?.reset(); return true')
@@ -140,6 +156,9 @@ async function arcade(ctx) {
 			throw new Error(`results : host ${JSON.stringify(hs?.octr.raceStats.map(x => x.slot))}, guest ${JSON.stringify(gs?.octr.raceStats.map(x => x.slot))} · host log ${log}`)
 		}
 		await guestShot(ctx, guest, 'arcade-results')
+		// session 32d : the bots end at once once both humans are in (32c) : the full table < 2 s after
+		const humansToFull = await host.js('return window.__fullAt - window.__humansAt')
+		if (!(humansToFull >= 0 && humansToFull < 2000)) throw new Error(`the last human's finish to the full results : ${humansToFull} ms`)
 		const order = s => s.octr.raceStats.map(x => `${s.octr.names[x.slot] || '?'} ${(x.finalTime / 960).toFixed(1)}s`)
 		for (const s of [hs, gs]) if (new Set(s.octr.raceStats.map(x => x.slot)).size !== 8) throw new Error(`results : ${JSON.stringify(s.octr.raceStats)}`)
 		// session 32 : after the room's reset, the character select again, then a second race
@@ -150,7 +169,7 @@ async function arcade(ctx) {
 		const names2 = await eightKarts(host, guest)
 		say(`second race : 8 karts, the bots ${names2.join(', ')}`)
 		await shot(ctx, 'arcade-second-race')
-		return `${back} · second race with 8 karts (${names2.join(', ')}) · ${race} · host results ${order(hs).join(' / ')} · guest results ${order(gs).join(' / ')} · bots on the guest ${bots.map(b => `${b.slot}:${b.packetsPerSec}/s jerk ${b.jerk.p95}`).join(' ')} (host's kart jerk ${hostView.jerk.p95})`
+		return `the last human's finish to the full results ${humansToFull} ms · ${back} · second race with 8 karts (${names2.join(', ')}) · ${race} · host results ${order(hs).join(' / ')} · guest results ${order(gs).join(' / ')} · bots on the guest ${bots.map(b => `${b.slot}:${b.packetsPerSec}/s jerk ${b.jerk.p95}`).join(' ')} (host's kart jerk ${hostView.jerk.p95})`
 	} finally {
 		await r.close()
 	}
@@ -192,9 +211,213 @@ async function leave(ctx) {
 	}
 }
 
+// ---- Session 32d : the Netplay pause, FINISH THE RACE, the host's skip ----
+const START = 'Enter' // native_input.c : kc_start
+const raceTime = async tab => (await game(tab))?.raceTime ?? -1
+const PAUSE_TITLE = /PAUSE/
+
+/** The menu's cursor down to the row `label` (the row under the cursor is `menu.label`). */
+async function toRow(tab, label) {
+	for (let i = 0; i < 6; i++) {
+		const g = await game(tab)
+		if (g?.menu?.label === label) return
+		await tab.press('ArrowDown')
+		await sleep(400)
+	}
+	throw new Error(`no row « ${label} » : on « ${(await game(tab))?.menu?.label} »`)
+}
+
+/** Start until the pause menu shows (a press can land in a cooldown) ; never the retail freeze. */
+async function openPause(tab, label) {
+	for (let i = 0; i < 4; i++) {
+		if (PAUSE_TITLE.test((await game(tab))?.menu?.title ?? '')) break
+		await tab.press(START)
+		await sleep(600)
+	}
+	return untilGame(tab, `${label} : the pause menu`, s => PAUSE_TITLE.test(s.menu?.title ?? ''), 5000)
+}
+const menuClosed = (tab, label) => untilGame(tab, label, s => !s.menu, 5000)
+
+/** The race clock over `ms` : how far it moved. */
+async function clockOver(tab, ms) {
+	const t0 = await raceTime(tab)
+	await sleep(ms)
+	return (await raceTime(tab)) - t0
+}
+
+async function netplayPause(ctx) {
+	const r = await roomToRace(ctx, 'auto', { inject: [TOASTS], arcade: true })
+	const { host, guest } = r
+	const out = []
+	try {
+		await eightKarts(host, guest)
+		await untilGame(host, 'the lights over (host)', s => s.raceTime > 3000, 30_000)
+		await untilGame(guest, 'the lights over (guest)', s => s.raceTime > 3000, 30_000)
+		// 1. the menu over a running race : Triangle, Start, RESUME close it
+		for (const how of ['Triangle', 'Start', 'RESUME']) {
+			// the first time at full gas : the gas held through the open menu, the kart must coast
+			let gas = null
+			if (how === 'Triangle') {
+				await ctx.hold('c')
+				await sleep(4000)
+				gas = { before: (await game(host)).kart.speed }
+			}
+			const g = await openPause(host, `host (${how})`)
+			if (g.screen === 'paused') throw new Error(`the pause menu froze the host's game (${how})`)
+			const ran = await clockOver(host, 2500)
+			if (ran < 2000) throw new Error(`the race clock moved ${ran} ms in 2.5 s with the menu open`)
+			if (gas) {
+				gas.after = (await game(host)).kart.speed
+				await ctx.release('c')
+				if (!(gas.before > 0 && gas.after < gas.before * 0.8)) throw new Error(`the kart did not coast under the menu : speed ${gas.before} → ${gas.after} with the gas held`)
+				out.push(`gas held under the menu : speed ${gas.before} → ${gas.after}`)
+			}
+			if (how === 'Triangle') {
+				await guestShot(ctx, guest, 'pause-menu-running')
+				const rows = []
+				for (let i = 0; i < 4; i++) {
+					rows.push((await game(host)).menu.label)
+					await host.press('ArrowDown')
+					await sleep(300)
+				}
+				out.push(`host rows ${[...new Set(rows)].join(' / ')}`)
+				await host.press('z')
+			} else if (how === 'Start') await host.press(START)
+			else {
+				await toRow(host, 'RESUME')
+				await host.press('c')
+			}
+			await menuClosed(host, `the menu closed by ${how}`)
+			out.push(`${how} : clock +${ran} ms in 2.5 s, closed`)
+			await sleep(800) // retail's 5-frame cooldown before Start pauses again
+		}
+		// 2. PAUSE FOR EVERYONE : both frozen
+		await openPause(host, 'host')
+		await toRow(host, 'PAUSE FOR EVERYONE')
+		await host.press('c')
+		const t0 = Date.now()
+		await untilGame(host, 'the host frozen', s => s.screen === 'paused', 5000)
+		await untilGame(guest, 'the guest frozen', s => s.screen === 'paused', 5000)
+		out.push(`everyone frozen : the guest in ${Date.now() - t0} ms`)
+		const still = await Promise.all([clockOver(host, 3000), clockOver(guest, 3000)])
+		if (still.some(d => d !== 0)) throw new Error(`clocks moved while frozen : host ${still[0]}, guest ${still[1]} ms`)
+		await guestShot(ctx, guest, 'pause-everyone')
+		const hm = await game(host)
+		if (hm.menu?.label !== 'RESUME FOR EVERYONE') throw new Error(`the host's frozen menu row : ${hm.menu?.label}`)
+		// the guest : Start opens RESUME / QUIT, Triangle and Start unfreeze nothing
+		await guest.press(START)
+		const gm = await untilGame(guest, 'the guest\'s menu while frozen', s => PAUSE_TITLE.test(s.menu?.title ?? ''), 5000)
+		await guestShot(ctx, guest, 'pause-everyone-guest-menu')
+		const grows = []
+		for (let i = 0; i < 3; i++) {
+			grows.push((await game(guest)).menu.label)
+			await guest.press('ArrowDown')
+			await sleep(300)
+		}
+		if ([...new Set(grows)].join('/') !== 'RESUME/QUIT') throw new Error(`the frozen guest's rows ${JSON.stringify(grows)}`)
+		await guest.press('z')
+		await menuClosed(guest, 'the guest\'s menu closed by Triangle')
+		await guest.press(START)
+		await sleep(600)
+		await guest.press(START)
+		await sleep(600)
+		if ((await game(guest)).screen !== 'paused') throw new Error('the guest unfroze itself')
+		out.push(`guest rows ${gm.menu.label}… ${[...new Set(grows)].join(' / ')}, still frozen after its Triangle and Start`)
+		// 30 s more : the link holds
+		const long = await Promise.all([clockOver(host, 30_000), clockOver(guest, 0)])
+		const gs = await online(guest)
+		if (long[0] !== 0 || gs.share?.state !== 'connected' || gs.octr.CurrState !== ST.START_RACE) throw new Error(`after 30 s frozen : host clock +${long[0]}, guest share ${gs.share?.state}, state ${gs.octr.CurrState}`)
+		// 3. RESUME FOR EVERYONE
+		await host.press('c')
+		const t1 = Date.now()
+		await untilGame(host, 'the host running again', s => s.screen !== 'paused' && !s.menu, 5000)
+		await untilGame(guest, 'the guest running again', s => s.screen !== 'paused', 5000)
+		out.push(`resumed for everyone : the guest in ${Date.now() - t1} ms`)
+		const ran = await Promise.all([clockOver(host, 2000), clockOver(guest, 2000)])
+		if (ran.some(d => d < 1500)) throw new Error(`clocks after the resume : host +${ran[0]}, guest +${ran[1]} ms in 2 s`)
+		out.push(`30 s frozen, the link held · clocks +${ran.join(' / +')} ms in 2 s after`)
+		// 4. the host quits while everyone is frozen : the guest runs on (the review of 32d)
+		await sleep(800)
+		await openPause(host, 'host')
+		await toRow(host, 'PAUSE FOR EVERYONE')
+		await host.press('c')
+		await untilGame(guest, 'the guest frozen again', s => s.screen === 'paused', 5000)
+		await toRow(host, 'QUIT')
+		await host.press('c')
+		await untilGame(host, 'the quit box', s => s.menu?.label === 'NO' || s.menu?.label === 'YES', 5000)
+		await host.press('ArrowUp')
+		await sleep(400)
+		if ((await game(host)).menu?.label !== 'YES') throw new Error(`the quit box's row : ${(await game(host)).menu?.label}`)
+		await host.press('c')
+		const t2 = Date.now()
+		await untilGame(guest, 'the guest running after the host quit', s => s.screen !== 'paused', 10_000)
+		out.push(`the host quit while frozen : the guest ran on after ${Date.now() - t2} ms`)
+		return out.join(' · ')
+	} finally {
+		await r.close()
+	}
+}
+
+async function finishHere(ctx) {
+	const r = await roomToRace(ctx, 'auto', { inject: [TOASTS, RESULTS], arcade: true })
+	const { host, guest } = r
+	try {
+		await eightKarts(host, guest)
+		await ctx.js("const e = document.getElementById('online-end-after'); e.value = '120'; e.dispatchEvent(new Event('change')); return true")
+		// the host races alone ; the guest's kart sits at the start
+		const h = await drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, Date.now() + 300_000)
+		if (!h.finished) throw new Error('the host did not finish')
+		await until(guest, 'the host\'s finish on the guest', s => s.octr.raceStats.some(x => x.slot === 1), 15_000)
+		await sleep(2500)
+		await shot(ctx, 'finish-here-host-camera') // the host's camera on the guest's kart (32c)
+		const before = (await online(host)).octr.raceStats.length
+		await openPause(guest, 'guest')
+		await toRow(guest, 'FINISH THE RACE')
+		await guestShot(ctx, guest, 'finish-here-menu')
+		await guest.press('c')
+		const t0 = Date.now()
+		const full = tab => tab.js('return window.__results ?? null').catch(() => null)
+		let hs = null, gs = null
+		while (Date.now() - t0 < 10_000) {
+			hs = await full(host)
+			gs = await full(guest)
+			if (hs?.octr.raceStats.length === 8 && gs?.octr.raceStats.length === 8) break
+			await sleep(100)
+		}
+		const ms = Date.now() - t0
+		if (hs?.octr.raceStats.length !== 8 || gs?.octr.raceStats.length !== 8) throw new Error(`results after FINISH THE RACE : host ${hs?.octr.raceStats.length}, guest ${gs?.octr.raceStats.length}`)
+		if (ms > 2000) throw new Error(`the full results took ${ms} ms`)
+		await guestShot(ctx, guest, 'finish-here-results')
+		const time = s => slot => s.octr.raceStats.find(x => x.slot === slot)?.finalTime
+		const hostTime = time(hs)(0), guestTime = time(hs)(1)
+		if (!(guestTime > hostTime)) throw new Error(`the guest's estimated time ${guestTime} is not after the host's ${hostTime}`)
+		// the host's Cross on the results ; the guest's first, doing nothing
+		await guest.press('c')
+		await sleep(1500)
+		if ((await online(guest)).octr.CurrState !== ST.END_RACE) throw new Error('the guest\'s Cross moved the room on')
+		await guestShot(ctx, guest, 'finish-here-skip-hint') // « CROSS : CONTINUE » on the host only
+		await host.press('c')
+		const t1 = Date.now()
+		// the room's reset (the server's SG_NEWCLIENT : the lobby again), then the menu level's load
+		await until(host, 'the room reset after the host\'s Cross', s => s.octr.CurrState !== ST.END_RACE, 10_000, 100)
+		const skip = Date.now() - t1
+		if (skip > 2000) throw new Error(`the host's skip took ${skip} ms`)
+		await untilGame(host, 'the host\'s character select after its Cross', s => s.charSelect != null, 15_000)
+		const select = Date.now() - t1
+		await until(guest, 'the guest in the next lobby', s => s.octr.CurrState === ST.GUEST_TRACK_WAIT, 10_000)
+		const order = s => s.octr.raceStats.map(x => `${s.octr.names[x.slot] || '?'} ${(x.finalTime / 960).toFixed(1)}s`)
+		return `${before} finishers before FINISH THE RACE · 8 on both ${ms} ms after · the guest at ${(guestTime / 960).toFixed(1)} s (host ${(hostTime / 960).toFixed(1)} s) · the guest's Cross ignored · the host's Cross : the room reset in ${skip} ms, its character select loaded in ${select} ms · results ${order(hs).join(' / ')}`
+	} finally {
+		await r.close()
+	}
+}
+
 export default async ctx => {
 	await ctx.scenario('ONLINE-ARCADE', () => arcade(ctx))
 	await ctx.scenario('ONLINE-ARCADE-LEAVE', () => leave(ctx))
 	// Session 32 : a whole Arcade Cup with the host's bots (D12)
-	await ctx.scenario('ONLINE-ARCADE-CUP', () => cupOn(ctx, { arcade: true }))
+	await ctx.scenario('ONLINE-ARCADE-CUP', () => cupOn(ctx, { arcade: true, skip: true }))
+	// Session 32d : the Netplay pause, FINISH THE RACE, the host's skip (D12.9, D12.10)
+	await ctx.scenario('NETPLAY-PAUSE', () => netplayPause(ctx))
+	await ctx.scenario('NETPLAY-FINISH-HERE', () => finishHere(ctx))
 }

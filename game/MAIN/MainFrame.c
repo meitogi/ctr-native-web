@@ -320,6 +320,10 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 						continue;
 				}
 #endif
+#ifdef USE_ONLINE
+				// ctr-native: the kart coasts while the room's pause menu is open (session 32d)
+				int onlinePadMasked = (iVar4 == 0) && OnlinePause_MaskPad(1);
+#endif
 				if (iVar4 == 0)
 				{
 					for (psVar12 = gGT->threadBuckets[iVar4].thread; psVar12 != 0; psVar12 = psVar12->siblingThread)
@@ -366,6 +370,10 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 				}
 
 				ThTick_RunBucket(gGT->threadBuckets[iVar4].thread);
+#ifdef USE_ONLINE
+				if (onlinePadMasked)
+					OnlinePause_MaskPad(0);
+#endif
 			}
 		}
 
@@ -417,6 +425,14 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 	uVar5 = GAMEPAD_GetNumConnected(gGamepads);
 	uVar3 = gGT->gameMode1;
 
+#ifdef USE_ONLINE
+	// ctr-native: a room's race owns Start while its pause menu is open or the host froze the room
+	// (session 32d, D12.9)
+	if (OnlinePause_Frame())
+	{
+	}
+	else
+#endif
 	if ((uVar3 & END_OF_RACE) == 0)
 	{
 		if (wasPausedAtFrameStart || ((uVar3 & PAUSE_ALL) != 0))

@@ -143,6 +143,9 @@ static void WebHost_Service(void)
 		}
 	}
 
+	// the host's Cross on the rankings (D12.10)
+	if (NativeOnlineGame_TakeSkipReset())
+		SvCore_SkipReset();
 	SvCore_Tick(NativeOnlineGame_NowMs());
 }
 

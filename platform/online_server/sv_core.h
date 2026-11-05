@@ -33,4 +33,9 @@ void SvCore_Disconnect(int peerId);
 // wall-clock milliseconds ; upstream measured the 6 s room reset in CPU time
 void SvCore_Tick(unsigned int nowMs);
 
+// Session 32d : a room whose race has ended resets at the next tick instead of ROOM_RESET_MS later
+// (the web host's Cross on the rankings) ; a race still running is not touched. Local to the
+// process that runs the server, nothing on the wire.
+void SvCore_SkipReset(void);
+
 #endif

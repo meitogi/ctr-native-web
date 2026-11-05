@@ -256,6 +256,8 @@ void OnlineEndOfRace()
 	if (HasRaceEnded())
 	{
 		DecalFont_DrawLine("RACE COMPLETE", 256, 108, FONT_BIG, JUSTIFY_CENTER | color);
+		// ctr-native: the host's Cross skips the room's wait (session 32d, D12.10)
+		OnlineRoom_HostSkip(130);
 	}
 }
 

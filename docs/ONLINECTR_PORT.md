@@ -1433,3 +1433,33 @@ title) and joins the new one in place, with a toast. The game enters it once on 
 (`pendingEnter`) : behind the host's picture in its menus, or waiting for its race to end (11b).
 The same room's link again changes nothing. A player racing alone outside any room is not taken
 out of the race : the page joins and the game enters once back on its title.
+
+**D12.9 — The Netplay pause (session 32d, the user's design, 2026-11-05).** In a room's race Start
+opens the room's own pause menu (`OnlinePause_Menu`, `native_bridge.c`, returned by
+`MainFreeze_GetMenuPtr` and opened by `MainFreeze_IfPressStart` when `ONLINE_RACE`) without
+retail's freeze : no `PAUSE_1`, the karts, the race clock and the wire run on. This kart coasts
+while it is open (`OnlinePause_MaskPad` : pad 1 neutral while the karts update, then restored for
+the menu). Its rows : RESUME ; FINISH THE RACE, only for the last human still racing (every other
+human's finish in the results), whose finish is faked where it stands at the bots' estimate
+(`EstimateEnd`, shared with `NativeOnlineGame_EndBots`) — every human done, the host ends its bots
+at once and the results come at once ; PAUSE FOR EVERYONE, the host only ; QUIT, retail's (YES
+leaves the room for the title, NO comes back to this menu). Triangle, Start and RESUME close it
+(`OnlinePause_Frame`, called by `MainFrame_GameLogic` before retail's pause logic, owns Start
+while the menu is open or the room is frozen ; retail's pause cooldown only counts down under
+`PAUSE_1`, so it is reset there). PAUSE FOR EVERYONE sets `octrRoomInfo[ONLINE_ROOM_PAUSED]` on
+the host : the page relays the room info in our LOBBY message as D12.3, nothing on the wire, and
+each game freezes the retail way (`PAUSE_1`, the audio paused, « PAUSED BY THE HOST ») until the
+host's RESUME FOR EVERYONE (or its Start). `sv_core` keeps ticking in the host's page
+(`WebOnline_FrameEnd`), and the page's end-of-race timeout does not count the time paused. A
+frozen guest's Start opens its menu with RESUME (the menu closes, the game stays frozen) and QUIT ;
+only the host unfreezes. A guest whose host leaves while paused runs again with the takeover
+(D11.6).
+
+**D12.10 — The host skips the rankings (session 32d).** The results after a race, the Cup
+standings between two races and the final standings wait for the server's reset (`ROOM_RESET_MS`,
+6 s after the last finisher), then a Cup's next lock 3 s more (D12.1). On the host, once the
+table is complete, « CROSS : CONTINUE » shows under it and its Cross ends that wait for everyone :
+`SvCore_SkipReset` (the server runs in the host's page, `WebHost_Service`) resets the room at the
+next tick, a local call with nothing new on the wire, and a Cup's next track locks at once. The
+guests follow the server's `SG_NEWCLIENT` / `SG_TRACK` as they would 6 s later ; their Cross does
+nothing there. The native build's server runs in its own process : no skip there.

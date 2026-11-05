@@ -228,6 +228,15 @@ int main(void)
 	if (rx[GUEST_C].raceData[1] != 1)
 		Fail("the leaver's kart goes on sending kart states, from the host's AI");
 
+	// the host's skip mid-race does nothing (session 32d)
+	{
+		int before = rx[GUEST_C].newClient;
+		SvCore_SkipReset();
+		SvCore_Tick(now += 16);
+		if (rx[GUEST_C].newClient != before)
+			Fail("a skip mid-race leaves the race alone");
+	}
+
 	// the end : every kart finishes, each bot's CG_ENDRACE once. The bots of slots 3-7 were
 	// ended where they stood (session 32c) with estimates out of slot order : their ends go
 	// out in estimate order, with those times ; the leaver's kart (slot 1) crossed the line
@@ -275,11 +284,16 @@ int main(void)
 	}
 	memset(stub.botEndTime, 0, sizeof(stub.botEndTime));
 
-	// the room's reset 6 s after : the bots and the kept peer leave on the next frame
+	// the room's reset, 6 s after or at once when the host skips the wait (session 32d) : the
+	// bots and the kept peer leave on the next frame
 	SvCore_Tick(now += 16); // the core notes the end time
-	SvCore_Tick(now += 6001);
+	SvCore_Tick(now += 16);
+	if (rx[GUEST_C].newClient != 1)
+		Fail("no reset before 6 s");
+	SvCore_SkipReset();
+	SvCore_Tick(now += 16);
 	if (rx[GUEST_C].newClient != 2)
-		Fail("the room resets (SG_NEWCLIENT to the guest)");
+		Fail("the host's skip resets the room at the next tick (SG_NEWCLIENT to the guest)");
 	hooks->frame();
 	if (stub.hostBots != 0)
 		Fail("no host bot left after the reset");
@@ -296,6 +310,6 @@ int main(void)
 	}
 
 	if (failures == 0)
-		printf("PASSED: bots as virtual clients, takeover, reset\n");
+		printf("PASSED: bots as virtual clients, takeover, reset, the host's skip\n");
 	return failures ? 1 : 0;
 }

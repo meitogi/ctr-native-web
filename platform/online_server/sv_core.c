@@ -680,3 +680,16 @@ void SvCore_Tick(unsigned int nowMs)
 		}
 	}
 }
+
+void SvCore_SkipReset(void)
+{
+	for (int r = 0; r < NUM_ROOMS; r++)
+	{
+		RoomInfo *ri = &roomInfos[r];
+
+		if ((ri->clientCount == 0) || !ri->boolEndAll)
+			continue;
+		SV_LOG("[Room %d] Reset now (the host skipped the wait)\n", r + 1);
+		ri->endTime = nowTick - ROOM_RESET_MS;
+	}
+}

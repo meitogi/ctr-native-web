@@ -50,7 +50,7 @@ export const meta = {
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 // game/OnlineCTR/global.h
-export const ST = { PICK_SERVER: 1, PICK_ROOM: 2, HOST_TRACK_PICK: 5, GUEST_TRACK_WAIT: 6, CHARACTER_PICK: 7, START_RACE: 11, END_RACE: 12 }
+export const ST = { PICK_SERVER: 1, PICK_ROOM: 2, HOST_TRACK_PICK: 5, GUEST_TRACK_WAIT: 6, CHARACTER_PICK: 7, START_LOADING: 9, START_RACE: 11, END_RACE: 12 }
 // game/OnlineCTR/native_compat.h OnlineLobbyPhase (window.__ctrOnline.state().lobby.phase)
 export const PHASE = { none: 0, menus: 1, starting: 2, race: 3 }
 const CROSS = 'c' // keyboard C = Cross (platform/native_input.c)
@@ -791,7 +791,9 @@ async function linkChange(ctx) {
  * (the guest's table is the host's, by clientID) ; after the last, the host's character select.
  * The host's screen is filmed through the whole Cup. `arcade` : with the host's bots (8 karts).
  */
-export async function cupOn(ctx, { arcade = false } = {}) {
+// skip (session 32d, D12.10) : the host's Cross on each standings, the wait to the next lock (or
+// to the character select after the final standings) timed, under 2 s each
+export async function cupOn(ctx, { arcade = false, skip = false } = {}) {
 	const r = await roomToRace(ctx, 'auto', { arcade, cup: true })
 	const { host, guest, gp, gjs } = r
 	const rows = []
@@ -817,6 +819,16 @@ export async function cupOn(ctx, { arcade = false } = {}) {
 				say(`cup race ${race} (track ${track}) : points by clientID ${JSON.stringify(hr.points)}`)
 				await sleep(2000)
 				await guestShot(ctx, guest, `cup-standings-${race}`)
+				if (skip) {
+					await host.press('c')
+					const t0 = Date.now()
+					if (race < 4) await until(host, `the next track locked after the host's Cross (race ${race})`, s => s.lobby.phase === PHASE.starting || s.octr.CurrState >= ST.START_LOADING, 10_000, 100)
+					else await until(host, 'the room reset after the host\'s Cross (the final standings)', s => s.octr.CurrState !== ST.END_RACE, 10_000, 100)
+					const ms = Date.now() - t0
+					rows[race - 1].skipMs = ms
+					say(`cup race ${race} : the host's Cross, ${ms} ms to the ${race < 4 ? 'next lock' : 'room\'s reset'}`)
+					if (ms > 2000) throw new Error(`race ${race} : the host's skip took ${ms} ms`)
+				}
 				if (race < 4) {
 					// the next track by itself : no menu between the races, the same room
 					for (const tab of [host, guest]) await until(tab, `cup race ${race + 1}`, s => s.octr.CurrState === ST.START_RACE && s.lobby.active, 240_000, 500)
@@ -830,7 +842,8 @@ export async function cupOn(ctx, { arcade = false } = {}) {
 		if (new Set(tracks).size !== 4) throw new Error(`the Cup's tracks ${JSON.stringify(tracks)}`)
 		const last = rows[3].points
 		if (!(last[0] > 0 || last[1] > 0)) throw new Error(`no points for the humans : ${JSON.stringify(last)}`)
-		return `4 races on tracks ${tracks.join(', ')} · final points by clientID ${JSON.stringify(last)} · the guest's table equal after every race · then the character select`
+		const skips = skip ? ` · the host's Cross : ${rows.map(x => `${x.skipMs} ms`).join(', ')}` : ''
+		return `4 races on tracks ${tracks.join(', ')}${skips} · final points by clientID ${JSON.stringify(last)} · the guest's table equal after every race · then the character select`
 	} finally {
 		await r.close()
 	}
