@@ -74,7 +74,7 @@ export async function openRoom({ link, role, mode = 'auto', name = '', iceServer
   const pending = Object.create(null); // guest id → AbortController of a WebRTC attempt
   let closed = false;
 
-  const warn = (error, backend) => r.emit('warning', { code: error.code ?? 'error', message: error.message, backend });
+  const warn = (error, backend) => r.emit('warning', { code: error.code ?? 'error', message: error.message, url: error.url, backend });
   const add = (l, backend) => {
     l.signaling = backend;
     r.links[l.peerId] = l;

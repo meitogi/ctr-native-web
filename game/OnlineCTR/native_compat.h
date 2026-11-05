@@ -46,6 +46,7 @@ extern int octrThreadAlive;   // the mod thread runs on this level
 extern int octrOnlineArcade;  // the ONLINE row's ARCADE was taken (D11.8)
 extern int octrLobbyArcade;   // the host's track lock came from ONLINE > ARCADE : bots fill the room
 extern int octrLobbyPlayers;  // the menus' players at the host's last track lock : the character select after the race
+extern int octrSlotGone;      // host only : the lobby slot (1-3) a guest just left, the ones above moved down (session 32e)
 extern int octrHostBots;      // host only : bit per slot driven by the host's AI (D11.2), read by the page
 // a host bot's shot, as octr->Shoot[0] for the host's own kart (D11.4)
 extern struct OnlineBotShoot { unsigned char boolNow, Weapon, boolJuiced, flags; } octrBotShoot[8];

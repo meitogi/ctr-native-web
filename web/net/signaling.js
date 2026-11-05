@@ -17,12 +17,15 @@ import { b64u, createSealer } from './crypto.js';
 import { Emitter } from './events.js';
 
 const PING_MS = 20_000; // under every proxy's idle timeout
+const CONNECT_TIMEOUT_MS = 8_000; // the hello's welcome ; the relay itself waits 5 s for a hello
 const utf8 = new TextEncoder();
 const text = new TextDecoder();
 
 /**
  * Why join() failed or the backend closed :
  * - `relay` : unreachable, or closed by the network
+ * - `relay-silent` : no welcome within `connectTimeoutMs` (a port that accepts and never answers) ;
+ *   the error carries the relay's `url`
  * - `relay-key` : the relay refused its access key (rk), or no hello in time (close 4401)
  * - `room-full` / `id-taken` : the relay refused the hello (4403 / 4409)
  * @typedef {Error & {code: string}} SignalingError
@@ -45,9 +48,10 @@ function fail(code, message) {
  * @param {string} [options.id] - random when absent
  * @param {string} [options.name]
  * @param {string} [options.kind='guest'] - 'host' or 'guest'
+ * @param {number} [options.connectTimeoutMs]
  * @param {typeof WebSocket} [options.WebSocketImpl]
  */
-export function relaySignaling({ url, rk = '', room, aead, id = crypto.randomUUID(), name = '', kind = 'guest', WebSocketImpl = globalThis.WebSocket }) {
+export function relaySignaling({ url, rk = '', room, aead, id = crypto.randomUUID(), name = '', kind = 'guest', connectTimeoutMs = CONNECT_TIMEOUT_MS, WebSocketImpl = globalThis.WebSocket }) {
   const sig = new Emitter();
   const sealer = createSealer(aead, room, id);
   let ws = null;
@@ -90,11 +94,20 @@ export function relaySignaling({ url, rk = '', room, aead, id = crypto.randomUUI
 
   sig.join = () => new Promise((resolve, reject) => {
     let joined = false;
+    let silent = false;
     try {
       ws = new WebSocketImpl(url);
     } catch (e) {
       return reject(fail('relay', `invalid relay URL : ${e.message}`));
     }
+    // a port that takes the connection and never answers fires no close for minutes
+    const timer = setTimeout(() => {
+      silent = true;
+      const error = fail('relay-silent', `no answer from the relay in ${connectTimeoutMs / 1000} s`);
+      error.url = url;
+      reject(error);
+      ws.close();
+    }, connectTimeoutMs);
     ws.addEventListener('open', () => {
       sendRaw({ type: 'hello', id, name, kind, room, key: rk || undefined });
       ping = setInterval(() => sendRaw({ type: 'ping', ts: Date.now() }), PING_MS);
@@ -104,12 +117,15 @@ export function relaySignaling({ url, rk = '', room, aead, id = crypto.randomUUI
       try { msg = JSON.parse(event.data); } catch { return; }
       if (msg.type === 'welcome' && !joined) {
         joined = true;
+        clearTimeout(timer);
         resolve();
       }
       inbox = inbox.then(() => onMessage(msg)).catch(() => {});
     });
     ws.addEventListener('close', (event) => {
       clearInterval(ping);
+      clearTimeout(timer);
+      if (silent) return;
       const code = CLOSE_CODES[event.code] ?? 'relay';
       const error = fail(code, `relay closed (${event.code}${event.reason ? ` ${event.reason}` : ''})`);
       if (!joined) reject(error);
@@ -126,4 +142,26 @@ export function relaySignaling({ url, rk = '', room, aead, id = crypto.randomUUI
   };
 
   return sig;
+}
+
+/**
+ * Tries a relay and its key without opening a room : a hello for a throwaway room, then closes.
+ * @param {string} url - ws:// or wss://
+ * @param {string} rk - the relay access key
+ * @returns {Promise<'ok'|'key'|'unreachable'>} welcomed, the key refused (4401), or no relay there
+ */
+export function probeRelay(url, rk, { timeoutMs = CONNECT_TIMEOUT_MS, WebSocketImpl = globalThis.WebSocket } = {}) {
+  return new Promise((resolve) => {
+    let ws;
+    try { ws = new WebSocketImpl(url); } catch { return resolve('unreachable'); }
+    const done = (result) => { clearTimeout(timer); resolve(result); if (ws.readyState <= 1) ws.close(); };
+    const timer = setTimeout(() => done('unreachable'), timeoutMs);
+    ws.addEventListener('open', () => ws.send(JSON.stringify({ type: 'hello', id: crypto.randomUUID(), name: '', kind: 'guest', room: `probe-${crypto.randomUUID()}`, key: rk || undefined })));
+    ws.addEventListener('message', (event) => {
+      let msg;
+      try { msg = JSON.parse(event.data); } catch { return; }
+      if (msg.type === 'welcome') done('ok');
+    });
+    ws.addEventListener('close', (event) => done(CLOSE_CODES[event.code] === 'relay-key' ? 'key' : 'unreachable'));
+  });
 }

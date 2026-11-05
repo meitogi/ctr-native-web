@@ -1,4 +1,5 @@
 #include <common.h>
+#include <platform/native_web_ui.h>
 
 enum
 {
@@ -839,6 +840,104 @@ static inline u8 MM_Characters_ScaleColor(u8 color)
 	return (u8)((int)((u32)color << 2) / 5);
 }
 
+#ifdef USE_ONLINE
+// ctr-native: a Netplay room's character select follows its humans (session 32e, D12.7) : a
+// guest arriving gets a cursor, one leaving loses it, and the screen stays. Everyone keeps the
+// character they hover and their lock. A guest leaving moves the ones above it down a slot (the
+// page's web/share/slots.js compact, told by octrSlotGone) : their state moves with them. The
+// count must hold a few frames : the page's pad mask and its word come one input update apart.
+#define ONLINE_SELECT_SETTLE_FRAMES 3
+static void OnlineCharacters_Follow(void)
+{
+	static int settling, goneFrames;
+	struct GameTracker *gGT = GAME_TRACKER;
+	struct TransitionMeta *meta;
+	int was = gGT->numPlyrNextGame;
+	int now, p, iconIndex, gone;
+	u16 flags;
+
+	if ((sdata->Loading.stage != LOAD_IDLE) || (MM_CHARACTER_SELECT_MENU_STATE != IN_MENU))
+	{
+		// a word from before this screen took input (a guest who left the menus) : not for it
+		octrSlotGone = 0;
+		settling = 0;
+		return;
+	}
+	// a word that came with no change of count (a leaver above everyone) : forgotten
+	if (octrSlotGone && (++goneFrames > FPS_DOUBLE(30)))
+		octrSlotGone = 0;
+	if (!octrSlotGone)
+		goneFrames = 0;
+	now = OnlineRoom_Humans();
+	if ((now == was) || (++settling < ONLINE_SELECT_SETTLE_FRAMES))
+	{
+		if (now == was)
+			settling = 0;
+		return;
+	}
+	settling = 0;
+
+	// VS and BATTLE need a second human : back to the menu before, its row grey (D12.7)
+	if ((now < 2) && !octrOnlineArcade)
+	{
+		octrSlotGone = 0;
+		MM_CHARACTER_SELECT_FLAGS = 0;
+		MM_CHARACTER_SELECT_EXITS_FORWARD = 0;
+		MM_CHARACTER_SELECT_MENU_STATE = EXITING_MENU;
+		OtherFX_Play(2, 1);
+		NativeWeb_RoomAlone();
+		return;
+	}
+
+	flags = MM_CHARACTER_SELECT_FLAGS;
+	gone = octrSlotGone;
+	octrSlotGone = 0;
+	if ((now < was) && (gone > 0) && (gone < was))
+	{
+		// the players above the leaver, one slot down : their character, lock and driver
+		for (p = gone; p < was - 1; p++)
+		{
+			GAME_CHARACTER_IDS[p] = GAME_CHARACTER_IDS[p + 1];
+			MM_CHARACTER_SELECT_CURRENT_IDS[p] = MM_CHARACTER_SELECT_CURRENT_IDS[p + 1];
+			MM_CHARACTER_SELECT_DESIRED_IDS[p] = MM_CHARACTER_SELECT_DESIRED_IDS[p + 1];
+			MM_CHARACTER_SELECT_MOVE_TIMERS[p] = MM_CHARACTER_SELECT_MOVE_TIMERS[p + 1];
+		}
+		flags = (u16)((flags & ((1u << gone) - 1)) | ((flags >> 1) & ~((1u << gone) - 1)));
+	}
+	// the newcomers : unlocked, their driver turned as RestoreIDs does
+	for (p = was; p < now; p++)
+	{
+		MM_CHARACTER_SELECT_DESIRED_IDS[p] = MM_CHARACTER_SELECT_CURRENT_IDS[p] = GAME_CHARACTER_IDS[p];
+		MM_CHARACTER_SELECT_MOVE_TIMERS[p] = 0;
+		MM_CHARACTER_SELECT_ANGLE[p] = (p * MM_CHARACTER_SELECT_ANGLE_STEP) + MM_CHARACTER_SELECT_ANGLE_OFFSET;
+	}
+	// the leavers : their view and driver gone (as HideDrivers)
+	for (p = now; p < was; p++)
+	{
+		PushBuffer_Init(&gGT->pushBuffer[p], 0, 1);
+		gGT->drivers[p]->instSelf->flags |= HIDE_MODEL;
+	}
+	MM_CHARACTER_SELECT_FLAGS = flags & (u16)((1u << now) - 1);
+
+	// the layout of the new count (the 4P grid orders its icons differently) : its icon table,
+	// and its windows on screen (an earlier exit left them off it)
+	gGT->numPlyrNextGame = now;
+	MM_Characters_SetMenuLayout();
+	for (iconIndex = 0; iconIndex < MM_CHARACTER_SELECT_ICON_COUNT; iconIndex++)
+		MM_CHARACTER_MENU_ID[(s32)MM_ACTIVE_CHARACTER_SELECT_META[iconIndex].characterID] = iconIndex;
+	for (meta = MM_CHARACTER_SELECT_TRANSITION_META; meta->headStart > -1; meta++)
+		meta->currX = meta->currY = 0;
+	MM_Characters_PreventOverlap();
+
+	// everyone left had locked : on to the track (or cup) select
+	if ((now < was) && (MM_CHARACTER_SELECT_FLAGS == (u16)((1u << now) - 1)))
+	{
+		MM_CHARACTER_SELECT_EXITS_FORWARD = 1;
+		MM_CHARACTER_SELECT_MENU_STATE = EXITING_MENU;
+	}
+}
+#endif
+
 void MM_Characters_MenuProc(struct RectMenu *unused)
 {
 	s16 iconPerPlayer[4];
@@ -857,6 +956,10 @@ void MM_Characters_MenuProc(struct RectMenu *unused)
 
 	(void)unused;
 
+#ifdef USE_ONLINE
+	if (ONLINE_ROOM)
+		OnlineCharacters_Follow();
+#endif
 
 	for (playerIndex = 0; playerIndex < MM_CHARACTER_SELECT_MAX_PLAYERS; playerIndex++)
 	{

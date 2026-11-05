@@ -49,12 +49,14 @@ const players = createPlayers({
   onChange: (slots) => { ui.players = slots },
   onAnalog: (slot, pad) => toast(pad.analog ? T.analogOn(slot + 1) : T.analogOff(slot + 1), pad.analog ? '' : T.analogOffHelp, pad.family),
 })
-const input = createInputHook(settings, { blocked: () => ui.phase === 'running' && (ui.lobbyGuest || ui.listening !== null || ui.confirm !== null || (ui.settingsOpen && inPanel() && !ui.bot)) }, { players })
+const input = createInputHook(settings, { blocked: () => ui.phase === 'running' && (ui.lobbyGuest || ui.listening !== null || ui.confirm !== null || (ui.settingsOpen && inPanel() && !ui.bot)), skipAll: () => !!ui.joining }, { players })
 if (Module) Module.ctrInput = input
 
 // ---- boot ----
 function bootGame(serial) {
   ui.disc = ui.disc ?? { serial, size: 0 }
+  // a room link : the boot screen says « Joining the room… » until the host's picture (page.js)
+  if (location.hash.includes('room=')) ui.joining = { state: 'joining' }
   ui.phase = 'starting'
   ui.status = T.booting
   const script = document.createElement('script')
@@ -147,12 +149,25 @@ export function forgetStoredDisc() {
 }
 
 let toastSeq = 0
-export function toast(title, detail = '', family = '') {
+export function toast(title, detail = '', family = '', { sticky = false } = {}) {
   const id = ++toastSeq
   ui.toasts = [...ui.toasts, { id, title, detail, family }]
-  setTimeout(() => { ui.toasts = ui.toasts.filter((t) => t.id !== id) }, 4500)
+  if (!sticky) setTimeout(() => dismissToast(id), 4500)
   return id
 }
+export function dismissToast(id) {
+  ui.toasts = ui.toasts.filter((t) => t.id !== id)
+}
+
+/** The joining screen's Back (or Escape) : out of the room, the player's own title. */
+export function joinBack() {
+  ui.joining = null
+  history.replaceState(null, '', location.pathname + location.search)
+  globalThis.ctrUI.onJoinBack?.()
+}
+// page.js : the joining screen's state ; nothing once it is gone (a room joined later from the
+// panel has no boot screen)
+const joining = (j) => { if (ui.joining) ui.joining = j }
 
 // Adopted panels live in a hidden parking spot while their tab is not shown, so their elements
 // stay in the document (scripts and suites reach them by id).
@@ -170,7 +185,7 @@ function adopt(id, title, el) {
 // An Online room's guest in the lobby (web/online/page.js) : the game ignores the local devices
 // and the page sends them to the host as a Share guest does — with the player's own mapping.
 const lobby = (on) => { ui.lobbyGuest = !!on }
-globalThis.ctrUI = { settings, adopt, toast, handleFile, players, text: T, lobby, guestInput: () => guestInput(settings.get()) }
+globalThis.ctrUI = { settings, adopt, toast, dismissToast, handleFile, players, text: T, lobby, joining, guestInput: () => guestInput(settings.get()) }
 
 // Test-only hook (session 3) : the agent browser runs on another machine than the files, so CDP's
 // DOM.setFileInputFiles cannot point at them ; suites fetch a same-origin fixture into the same
@@ -183,7 +198,7 @@ globalThis.__ctrTestHandleFileFromUrl = async (url) => {
 
 if (__CTR_DEV__) import('./dev/index.js').then((dev) => dev.install({ toast }))
 
-mount(App, { target: document.getElementById('ctr-ui'), props: { input, handleFile, forgetStoredDisc, startGame } })
+mount(App, { target: document.getElementById('ctr-ui'), props: { input, handleFile, forgetStoredDisc, startGame, joinBack } })
 
 ;(async () => {
   if (globalThis.__CTR_WEB_PRELOAD) {
@@ -214,6 +229,8 @@ mount(App, { target: document.getElementById('ctr-ui'), props: { input, handleFi
   globalThis.__ctrDisc = cached
   ui.phase = 'ready'
   ui.status = ''
+  // a room link : no press, the game boots behind « Joining the room… » (session 32e)
+  if (location.hash.includes('room=')) startGame()
   // the second window of Settings › Dev (debug) : in the room already, nobody to press
   if (__CTR_DEV__ && role.second) startGame()
 })()

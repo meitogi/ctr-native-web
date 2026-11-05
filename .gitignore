@@ -6,6 +6,8 @@
 /cmake-build-*/
 /dist/
 /debug/
+# The VPS relay's key, for web/dev.sh's ready link (never committed).
+/web/.relay-key
 # web/pages/assemble.sh's output — rebuilt by the Pages workflow every run.
 /site/
 

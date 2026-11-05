@@ -13,7 +13,7 @@
   import { ui } from './state.svelte.js'
   import { live } from './store.js'
 
-  let { handleFile, startGame, layout = null } = $props()
+  let { handleFile, startGame, joinBack, layout = null } = $props()
   let input = $state()
 
   const mb = (n) => Math.round(n / (1024 * 1024))
@@ -39,6 +39,16 @@
           <li class="done">{T.found(ui.progress.serial?.replace('_', '-').replace('.', ''))}</li>
           <li class="now">{ui.progress.kind === 'zip' ? T.unzipping : T.copying}</li>
         </ul>
+      </section>
+    {:else if ui.joining}
+      <section id="joining" class="card ready" data-state={ui.joining.state} aria-live="polite">
+        <svg class="disc" class:spin={ui.joining.state === 'joining'} viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
+          <circle cx="32" cy="32" r="27" /><circle cx="32" cy="32" r="7" /><path d="M32 13a19 19 0 0 1 19 19" stroke-linecap="round" opacity=".6" />
+        </svg>
+        <div class="disp big">{ui.joining.state === 'failed' ? T.joinFailed : T.joinTitle}</div>
+        {#if ui.joining.state === 'racing'}<div class="dim">{T.joinRacing}</div>{/if}
+        {#if ui.joining.state === 'failed'}<div class="error" id="joining-reason">{ui.joining.reason}</div>{/if}
+        <button id="join-back" type="button" class="primary" onclick={joinBack}>{T.joinBack}</button>
       </section>
     {:else if ui.phase === 'ready'}
       <section id="press-start" class="card ready">

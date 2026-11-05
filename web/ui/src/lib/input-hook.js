@@ -34,7 +34,7 @@ const PRESS_WINDOW_MS = 1000
 
 /**
  * @param {{ get: () => { keyboard: number[], gamepad: number[], skipIntro: boolean, duo: boolean, keyboardLeft: number[], keyboardRight: number[] } }} settings
- * @param {{ blocked: () => boolean }} ui
+ * @param {{ blocked: () => boolean, skipAll?: () => boolean }} ui
  * @param {{ now?: () => number, players?: { next: () => number, report: (slots: object[]) => void } }} [opts]
  */
 export function createInputHook(settings, ui, { now = () => performance.now(), players = null } = {}) {
@@ -63,6 +63,8 @@ export function createInputHook(settings, ui, { now = () => performance.now(), p
     players,
     blocked: () => ui.blocked(),
     introSkip() {
+      // a room link at boot : every intro wait ends at once (session 32e)
+      if (ui.skipAll?.()) return true
       if (!settings.get().skipIntro || now() - lastPress > PRESS_WINDOW_MS) return false
       lastPress = -Infinity
       return true

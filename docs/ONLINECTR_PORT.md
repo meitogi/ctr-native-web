@@ -1416,13 +1416,21 @@ the characters (retail).
 **D12.7 — No players menu, NETPLAY opens the room (session 32b, the user, 2026-11-05).** In a
 room the number of players is the room's humans, one per machine : the host's pad and its guests'
 (P2–P4, plugged while the host's menus run), counted when the character select opens
-(`OnlineRoom_Humans`, `MainFrame_HaveAllPads`). NETPLAY › VS → SINGLE RACE / CUP → the
+(`OnlineRoom_Humans`, `MainFrame_HaveAllPads`) and followed while it is open (session 32e, below). NETPLAY › VS → SINGLE RACE / CUP → the
 characters ; NETPLAY › BATTLE → the characters, then the retail arena and setup ; NETPLAY › ARCADE
 → SINGLE RACE / CUP → the difficulty → the characters, the bots filling up to 8 (D11). The 1P–4P
 menu of D11.8 and the 2P–4P step of VS and BATTLE are gone from the room's path ; solo play keeps
 them. Alone in the room, VS and BATTLE are `MENU_ROW_LOCKED` (grey, Cross refused) ; ARCADE
-works alone. A guest arriving after the character select opened joins the next one, as after a
-race. NETPLAY with no room has the page host one at once with its saved relay and key (a toast
+works alone. The character select follows the room (session 32e, the user's design) :
+`OnlineCharacters_Follow` (`game/230/MM_Characters.c`, before the screen reads its input) recounts
+the humans each frame and, once a new count has held 3 frames, rebuilds the screen for it — the
+retail layout of that count (1P, 2P, 3P, 4P ; the 4P grid orders its icons differently, so the
+icon table is rebuilt), every player's hovered character and lock kept, a newcomer unlocked, a
+leaver's window and driver gone ; everyone left locked, the screen goes on. A guest leaving moves
+the guests above it down a slot (`web/share/slots.js` `compact`, Netplay rooms only ; each moved
+guest gets a new WELCOME) and the page tells the game which slot left (`NATIVE_ONLINE_CTL_SLOT_GONE`
+→ `octrSlotGone`) : P3 becomes P2 with its character and lock. VS and BATTLE left with one human
+go back as Triangle does, with the page's toast « Alone in the room » (`NativeWeb_RoomAlone`). NETPLAY with no room has the page host one at once with its saved relay and key (a toast
 carries the link ; with none, the game's box offers the page's Netplay settings), then opens
 this menu by itself.
 
@@ -1432,7 +1440,11 @@ bar's hash (`hashchange`) or the panel's Join, which no longer reloads — leave
 title) and joins the new one in place, with a toast. The game enters it once on its title
 (`pendingEnter`) : behind the host's picture in its menus, or waiting for its race to end (11b).
 The same room's link again changes nothing. A player racing alone outside any room is not taken
-out of the race : the page joins and the game enters once back on its title.
+out of the race : the page joins and the game enters once back on its title. Session 32e : the
+guest who joined a room before keeps no ended track of it in the lobby's picture (a black screen
+over the game), and the host's server hears no guest until the host's own game has its seat
+(`WebHost_Service` waits for `LOBBY_ASSIGN_ROLE`) : a guest quicker than a host that just reopened
+a room took DriverID 0.
 
 **D12.9 — The Netplay pause (session 32d, the user's design, 2026-11-05).** In a room's race Start
 opens the room's own pause menu (`OnlinePause_Menu`, `native_bridge.c`, returned by
@@ -1463,3 +1475,15 @@ table is complete, « CROSS : CONTINUE » shows under it and its Cross ends that
 next tick, a local call with nothing new on the wire, and a Cup's next track locks at once. The
 guests follow the server's `SG_NEWCLIENT` / `SG_TRACK` as they would 6 s later ; their Cross does
 nothing there. The native build's server runs in its own process : no skip there.
+
+**D12.11 — A room link skips everything (session 32e, the user's design).** A room link opened
+with the disc stored boots the game at once, no press : the page's boot screen stays, saying
+« Joining the room… » with a Back button (Escape too), while the game runs behind it with every
+intro wait cut (`introSkip()` true while joining, `web/ui/src/lib/input-hook.js`) and enters the
+room on its title (`pendingEnter`). The boot screen goes once the game is in the host's menus with
+its picture over the canvas (`page.js` `ctrUI.joining(null)`). The room racing : « The room is
+racing — you join at the next character select ». A failure (the relay silent, no host in the room)
+shows its reason ; Back clears the link, leaves the room and shows the player's own title. With no
+stored disc the drop comes first, then the same screen. A pad press is no gesture for the
+browser's sound : a player on a pad alone gets a « Click for sound » toast that stays until the
+first click or key.

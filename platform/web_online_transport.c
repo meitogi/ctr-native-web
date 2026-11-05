@@ -119,7 +119,11 @@ static void WebHost_Service(void)
 		return;
 	servicedFrame = drawnFrame + 1;
 
-	while ((len = ctr_web_online_poll(packet, sizeof(packet), info)) >= 0)
+	// the guests wait in the page's queue until this game has its seat : the
+	// host is DriverID 0. A host that left a room and opened another while the
+	// guests' pages were quicker gave a guest that seat (session 32e, D12.8)
+	while ((NativeOnlineGame_Octr()->CurrState >= LOBBY_ASSIGN_ROLE) &&
+		((len = ctr_web_online_poll(packet, sizeof(packet), info)) >= 0))
 	{
 		switch (info[1])
 		{

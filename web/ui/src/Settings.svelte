@@ -133,6 +133,7 @@
       {/if}
       <div class="label">{T.about}</div>
       <p class="about">{T.aboutText}</p>
+      <p class="about" id="ctr-version">{T.version} {globalThis.__CTR_VERSION ?? 'dev'}</p>
       <div class="label">{T.licences}</div>
       <ul class="lic">{#each T.licenceLines as l}<li>{l}</li>{/each}</ul>
       <p class="help">{T.keysHint}</p>
@@ -187,10 +188,25 @@
   .adopted :global(h2) { display: none; }
   .adopted :global([hidden]) { display: none !important; }
   .adopted :global(h3) { font: 400 17px var(--display) !important; margin: 18px 0 6px !important; color: #fff !important; }
-  .adopted :global(input[type=text]), .adopted :global(input[type=password]), .adopted :global(textarea) { font: 13px var(--text) !important; background: rgba(255, 255, 255, 0.06) !important; color: #fff !important; border: 1px solid var(--line) !important; border-radius: 10px !important; padding: 8px 10px !important; }
-  .adopted :global(button) { font: 600 13px var(--text) !important; background: rgba(255, 255, 255, 0.08) !important; color: #fff !important; border: 0 !important; border-radius: 10px !important; padding: 8px 14px !important; cursor: pointer; }
-  .adopted :global(button:hover) { background: rgba(255, 255, 255, 0.14) !important; }
+  /* the panel's own header (its title, its Hide) : Settings has both */
+  .adopted :global(header) { display: none !important; }
+  /* fields and buttons one height : the same line, padding and 1 px border (a button's is its fill) */
+  .adopted :global(input[type=text]), .adopted :global(input[type=password]), .adopted :global(textarea), .adopted :global(select) { box-sizing: border-box; font: 13px/18px var(--text) !important; background-color: rgba(255, 255, 255, 0.06) !important; color: #fff !important; border: 1px solid var(--line) !important; border-radius: 10px !important; padding: 8px 10px !important; outline: none; }
+  .adopted :global(:is(input, textarea, select):focus-visible) { border-color: var(--accent) !important; }
+  .adopted :global(select) { appearance: none; padding-right: 30px !important; cursor: pointer; background-repeat: no-repeat; background-position: right 10px center; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none' stroke='%23ffffff' stroke-opacity='0.6' stroke-width='1.6'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E"); }
+  .adopted :global(select option) { background: var(--panel-solid); color: #fff; }
+  .adopted :global(button) { box-sizing: border-box; font: 600 13px/18px var(--text) !important; background: rgba(255, 255, 255, 0.08) !important; color: #fff !important; border: 1px solid transparent !important; border-radius: 10px !important; padding: 8px 14px !important; cursor: pointer; transition: background 100ms, transform 60ms; }
+  .adopted :global(button:hover:not(:disabled)) { background: rgba(255, 255, 255, 0.14) !important; }
+  .adopted :global(button:active:not(:disabled)) { background: rgba(255, 255, 255, 0.22) !important; transform: translateY(1px); }
+  .adopted :global(button:focus-visible) { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .adopted :global(button:disabled) { opacity: 0.4; cursor: default; }
+  .adopted :global(input:is([type=checkbox], [type=radio])) { accent-color: var(--accent); width: 16px; height: 16px; margin: 0 8px 0 0; vertical-align: -3px; cursor: pointer; }
   .adopted :global(.help), .adopted :global(.hint) { color: var(--ink-dim) !important; }
   .adopted :global(label) { margin: 12px 0 !important; }
-  .adopted :global(label > input:is([type=text], [type=password], [type=range])) { display: block; margin-top: 6px !important; }
+  .adopted :global(.opt > label), .adopted :global(.opt) { margin: 10px 0 4px !important; }
+  .adopted :global(label > :is(input:is([type=text], [type=password], [type=range]), select)) { display: block; margin-top: 6px !important; }
+  .adopted :global(label > select) { width: 100%; }
+  .adopted :global(.row) { gap: 8px !important; }
+  .adopted :global(.row > button) { margin: 0 !important; }
+  .adopted :global(section > button) { margin-top: 10px !important; }
 </style>

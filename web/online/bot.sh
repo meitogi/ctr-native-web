@@ -6,7 +6,7 @@
 #
 #   web/online/bot.sh '<room link>'
 #
-# Serve with web/dev.sh dev relay=local (8090 + 8787) : the agent browser's proxy only opens the ports
+# Serve with web/dev.sh dev (8090 + 8787) : the agent browser's proxy only opens the ports
 # in AGENT_BROWSER_ORIGINS, and only a debug build lets the bot follow the racing line (a
 # release build cannot steer). Start it once your room exists. Screenshots and the run's index
 # land in build-bot-proofs/.
@@ -26,7 +26,7 @@ for o in "$origin" ${relay:+"$(node -e 'const u = new URL(process.argv[1]); cons
   case " ${AGENT_BROWSER_ORIGINS:-} " in
     *" $o "*) ;;
     *) echo "bot.sh: the agent browser does not open $o (AGENT_BROWSER_ORIGINS : ${AGENT_BROWSER_ORIGINS:-none})" >&2
-       echo "  serve on its ports instead : wtf ctr dev relay=local (8090 + 8787, web/dev-ports.tsv)" >&2
+       echo "  serve on its ports instead : wtf ctr dev (8090 + 8787, web/dev-ports.tsv)" >&2
        exit 1 ;;
   esac
 done

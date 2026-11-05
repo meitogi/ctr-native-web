@@ -4,17 +4,18 @@
 #
 #   web/dev.sh build [debug|release]    (re)build the game into build-web-<config> ; a page reload
 #                                       in a running `dev` picks the new wasm up
-#   web/dev.sh dev [relay=vps|local]    Vite's dev server on 8090 : the page's sources with hot
+#   web/dev.sh dev                      Vite's dev server on 8090 : the page's sources with hot
 #                                       reload (web/ui, index.html, share/, online/, net/), the
-#                                       game from build-web-debug (built first if missing) ;
-#                                       relay=local also starts a ctr-relay on 8787 with a fresh key
+#                                       game from build-web-debug (built first if missing)
 #   web/dev.sh prod [debug|release]     the site exactly as web/pages/assemble.sh publishes it,
 #                                       served on 8090 (release : guard.sh checks it first)
+#   Both start a ctr-relay on 8787 with a fresh key and print two ready links : that local relay,
+#   and the VPS one with the key from web/.relay-key (gitignored, the VPS's CTR_RELAY_KEY).
 #   web/dev.sh ports [--env|--check]    the port list (web/dev-ports.tsv) ; --env : the agent
 #                                       browser's AGENT_BROWSER_ORIGINS value ; --check : README,
 #                                       .devcontainer/.env and .env.example agree with it
 #
-# From a container, forward 8090 (and 8787 with relay=local) to your machine : VS Code's Ports
+# From a container, forward 8090 and 8787 to your machine : VS Code's Ports
 # panel, same local number. Ctrl-C stops what dev / prod started.
 # Needs what web/build-web.sh needs (emsdk, cmake), python3, openssl.
 set -euo pipefail
@@ -24,10 +25,12 @@ tree=$(cd "$(dirname "$0")/.." && pwd)
 source "$tree/web/build-progress.sh"
 PAGE=8090
 RELAY=8787
+DEFAULT_RELAY=wss://ctr-relay.suuuper.app # web/online/page.js's DEFAULT_RELAY
+RELAY_KEY_FILE="$tree/web/.relay-key"
 PORTS_FILE="$tree/web/dev-ports.tsv"
 DEVCONTAINER=${DEVCONTAINER_DIR:-/workspace/.devcontainer}
 
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; }
 
 config_of() {
   case "${1:-debug}" in debug|release) echo "${1:-debug}" ;; *) usage >&2; exit 2 ;; esac
@@ -75,33 +78,44 @@ wait_port() {
   exit 1
 }
 
+# a ctr-relay on 8787 with a fresh key, its log beside the build ; sets relay_key
+start_relay() {
+  [ -d "$tree/relay/node_modules" ] || (cd "$tree/relay" && npm ci --no-audit --no-fund --loglevel=error)
+  relay_key=$(openssl rand -hex 12)
+  (cd "$tree/relay" && RELAY_KEY="$relay_key" PORT="$RELAY" exec node relay.js) > "$1.relay.log" 2>&1 &
+  servers+=($!)
+  wait_port "$RELAY" "the relay did not start (log $1.relay.log)"
+}
+
+# the page with each relay and its key in the query (page.js reads relay / rk from it)
+print_links() {
+  local vps_key=''
+  [ -f "$RELAY_KEY_FILE" ] && vps_key=$(tr -d '[:space:]' < "$RELAY_KEY_FILE")
+  echo "Ready, local relay : http://localhost:$PAGE/?relay=ws://localhost:$RELAY&rk=$relay_key"
+  if [ -n "$vps_key" ]; then
+    echo "Ready, VPS relay   : http://localhost:$PAGE/?relay=$DEFAULT_RELAY&rk=$vps_key"
+  else
+    echo "Ready, VPS relay   : http://localhost:$PAGE/   (no key : paste the VPS's CTR_RELAY_KEY into web/.relay-key)"
+  fi
+}
+
 cmd_dev() {
-  local relay=vps arg build="$tree/build-web-debug" query=''
-  for arg in "$@"; do
-    case "$arg" in relay=vps|relay=local) relay=${arg#relay=} ;; *) usage >&2; exit 2 ;; esac
-  done
+  local build="$tree/build-web-debug" relay_key
+  [ $# -eq 0 ] || { usage >&2; exit 2; }
   port_free "$PAGE"
-  [ "$relay" = local ] && port_free "$RELAY"
+  port_free "$RELAY"
   [ -f "$build/ctr_native.wasm" ] || cmd_build debug
   emsdk_env
   [ -d "$tree/web/ui/node_modules" ] || (cd "$tree/web/ui" && npm ci --no-audit --no-fund --loglevel=error)
   trap stop_servers EXIT INT TERM
-  if [ "$relay" = local ]; then
-    [ -d "$tree/relay/node_modules" ] || (cd "$tree/relay" && npm ci --no-audit --no-fund --loglevel=error)
-    local key
-    key=$(openssl rand -hex 12)
-    (cd "$tree/relay" && RELAY_KEY="$key" PORT="$RELAY" exec node relay.js) > "$build.relay.log" 2>&1 &
-    servers+=($!)
-    wait_port "$RELAY" "the relay did not start (log $build.relay.log)"
-    query="?relay=ws://localhost:$RELAY&rk=$key"
-  fi
+  start_relay "$build"
   (cd "$tree/web/ui" && CTR_GAME_DIR="$build" exec node node_modules/vite/bin/vite.js --port "$PAGE" --strictPort --host 127.0.0.1 --clearScreen false) > "$build.vite.log" 2>&1 &
   servers+=($!)
   wait_port "$PAGE" "Vite did not start (log $build.vite.log)"
   cat <<EOF
 
-Ready : http://localhost:$PAGE/$query
-  Forward $PAGE in VS Code's Ports panel$([ "$relay" = local ] && echo " (and $RELAY, the local relay)"), same local number.
+$(print_links)
+  Forward $PAGE and $RELAY (the local relay) in VS Code's Ports panel, same local numbers.
   The page's sources reload as you edit them ; the game : wtf ctr build in another terminal,
   then reload the page.
   Debug build, from the main menu : Settings › Dev › « Second window » (Online VS, Online Battle
@@ -112,23 +126,26 @@ EOF
 }
 
 cmd_prod() {
-  local config build site
+  local config build site relay_key
   config=$(config_of "${1:-}")
   build="$tree/build-web-$config"
   site="$build-site"
   port_free "$PAGE"
+  port_free "$RELAY"
   # the cmake build also runs vite build into $build/ui : the Svelte production bundle
   cmd_build "$config"
   bash "$tree/web/pages/assemble.sh" "$build" "$site"
   if [ "$config" = release ]; then bash "$tree/web/pages/guard.sh" "$site"; fi
   trap stop_servers EXIT INT TERM
+  start_relay "$build"
   python3 "$tree/web/test/player/serve.py" "$site" "$PAGE" > /dev/null 2>&1 &
   servers+=($!)
   wait_port "$PAGE" "the page server did not start"
   cat <<EOF
 
-Ready : http://localhost:$PAGE/   ($config build, the tree assemble.sh publishes : $site)
-  Forward $PAGE in VS Code's Ports panel. Ctrl-C here stops the server.
+$(print_links)
+  ($config build, the tree assemble.sh publishes : $site)
+  Forward $PAGE and $RELAY (the local relay) in VS Code's Ports panel. Ctrl-C here stops both.
 EOF
   wait
 }

@@ -318,6 +318,10 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		{
 			DecalFont_DrawLineOT(GAME_LANGUAGE_STRINGS[LNG_TM], MM_TITLE_TM_X, MM_TITLE_TM_Y, FONT_SMALL, ORANGE,
 			                     &GAME_TRACKER->backBuffer->otMem.uiOT[MM_TITLE_TM_OT_INDEX]);
+#if defined(USE_ONLINE) && defined(CTR_WEB_VERSION)
+			// ctr-native web: the version (git describe, web/build-web.sh), bottom right
+			DecalFont_DrawLine((char *)CTR_WEB_VERSION, 0x1f6, 0xcc, FONT_SMALL, JUSTIFY_RIGHT | GRAY);
+#endif
 		}
 
 		if ((MM_MENU_MAIN.state & DRAW_NEXT_MENU_IN_HIERARCHY) == 0)

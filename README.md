@@ -82,7 +82,7 @@ the ports (one list : [web/dev-ports.tsv](web/dev-ports.tsv), checked by `web/de
 | 8091 | player suites' page server (one per parallel session) | yes |
 | 8092 | player suites' page server (one per parallel session) | yes |
 | 8093 | player suites' page server (one per parallel session) | yes |
-| 8787 | local relay, only with wtf ctr dev relay=local (the VPS relay is the default) | yes |
+| 8787 | local relay, started by wtf ctr dev and prod | yes |
 | 8788 | player suites' relay | yes |
 | 8790 | the web/net and web/share demo pages | yes |
 | 9001 | MQTT stand-in (signaling suite) | yes |

@@ -26,7 +26,7 @@
   import { ui } from './state.svelte.js'
   import { settings } from './store.js'
 
-  let { input, handleFile, forgetStoredDisc, startGame } = $props()
+  let { input, handleFile, forgetStoredDisc, startGame, joinBack } = $props()
 
   const running = $derived(ui.phase === 'running' || ui.phase === 'starting')
   let layout = $state(null)
@@ -168,6 +168,13 @@
       e.stopImmediatePropagation()
       return
     }
+    if (e.code === 'Escape' && ui.joining) {
+      // the joining screen's way back (session 32e)
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      joinBack()
+      return
+    }
     if (e.code === 'Escape' && running) {
       e.preventDefault()
       e.stopImmediatePropagation()
@@ -185,7 +192,16 @@
   // ---- gamepads ----
   const ctrToast = (...a) => globalThis.ctrUI?.toast(...a)
 
+  // a pad press is no gesture for the browser's sound : a player on a pad alone hears nothing
+  // until a click (or a key), and is told so once (session 32e)
+  let soundHint = 0
+  const clearSoundHint = () => {
+    if (!soundHint) return
+    globalThis.ctrUI?.dismissToast(soundHint)
+    soundHint = -1
+  }
   function onPadDown(index, button) {
+    if (!soundHint && globalThis.ctrAudio?.context?.state === 'suspended') soundHint = ctrToast(T.clickForSound, '', '', { sticky: true })
     if (ui.phase === 'ready' && !ui.confirm) {
       const gamepad = settings.get().gamepad
       if (START_BUTTONS.some((b) => gamepad[b] === STANDARD_TO_SDL[button])) startGame()
@@ -224,6 +240,8 @@
     // a click on the game folds Settings away and gives the game the keys
     const focusGame = () => { if (ui.settingsOpen) setOpen(false); else canvas?.focus() }
     canvas?.addEventListener('pointerdown', focusGame)
+    window.addEventListener('pointerdown', clearSoundHint, opts)
+    window.addEventListener('keydown', clearSoundHint, opts)
     const stop = watchPads(onPadDown)
     return () => {
       window.removeEventListener('keydown', onKeyCapture, opts)
@@ -234,13 +252,15 @@
       window.removeEventListener('drop', onDrop)
       stopPads()
       canvas?.removeEventListener('pointerdown', focusGame)
+      window.removeEventListener('pointerdown', clearSoundHint, opts)
+      window.removeEventListener('keydown', clearSoundHint, opts)
       stop()
     }
   })
 </script>
 
-<div id="boot" class:hidden={running && !ui.progress}>
-  <Boot {handleFile} {startGame} {layout} />
+<div id="boot" class:hidden={running && !ui.progress && !ui.joining}>
+  <Boot {handleFile} {startGame} {joinBack} {layout} />
 </div>
 
 {#if running}

@@ -186,6 +186,7 @@ int octrActive;
 int octrBootOnline = 1;
 int octrExternalLobby;
 int octrOnlineMenuPath;
+int octrSlotGone;
 int octrLobbyPhase;
 int octrLobbyCharacters[8];
 
@@ -279,6 +280,7 @@ void OnlineRuntime_Deactivate(void)
 
 	octrActive = 0;
 	octrOnlineMenuPath = 0;
+	octrSlotGone = 0;
 	octrOnlineArcade = 0;
 	octrLobbyArcade = 0;
 	octrLobbyPlayers = 0;
@@ -1287,6 +1289,13 @@ void OnlineRoom_HostSkip(int y)
 		octrSkipCupHold = 1;
 	}
 	DecalFont_DrawLine("CROSS : CONTINUE", 256, y, FONT_SMALL, JUSTIFY_CENTER | WHITE);
+}
+
+// The page's lobby moved its guests down a slot after one left (session 32e) : the character
+// select moves their state with them (game/230/MM_Characters.c OnlineCharacters_Follow)
+void NativeOnlineGame_SlotGone(int slot)
+{
+	octrSlotGone = slot;
 }
 
 // Asked each frame until the reset comes (LOBBY_ASSIGN_ROLE) : the server may not have seen the

@@ -20,6 +20,8 @@ export const BITRATE = { min: 500_000, max: 6_000_000, default: 2_500_000 };
  * @param {string} [o.hostName] - the host's player name (WELCOME, PLAYERS)
  * @param {() => object|null} [o.game] - the game's debug state (window.__ctr, debug builds) : what
  *   a bot guest (BOT) is sent of its own kart ; null = nothing to send (release build)
+ * @param {boolean} [o.compact] - a guest leaving moves the ones above it down a slot (a Netplay
+ *   room, session 32e : P3 becomes P2 and is told so) ; plain Share keeps every slot
  * @param {boolean} [o.relayGuests] - keep a guest whose link is not WebRTC : its pad plays, it
  *   gets no stream (state 'nomedia') — an Online room's lobby (session 14), never plain Share
  * @returns {Emitter & {slots, guests: object, maxBitrate: number, hostName: string, setBitrate(bps: number): Promise<void>,
@@ -28,7 +30,7 @@ export const BITRATE = { min: 500_000, max: 6_000_000, default: 2_500_000 };
  *   'streaming' | 'failed'), error?, senders?, bot?, link} ; `refusals` : the last 8 {peerId, code, path} ;
  *   events 'change', 'join' (guest : streaming), 'leave' (guest).
  */
-export function createShareHost({ room, stream, maxBitrate = BITRATE.default, scale = 1, slots = createSlots(), hostName = '', game = () => null, relayGuests = false }) {
+export function createShareHost({ room, stream, maxBitrate = BITRATE.default, scale = 1, slots = createSlots(), hostName = '', game = () => null, relayGuests = false, compact = false }) {
   const host = new Emitter();
   host.slots = slots;
   host.guests = Object.create(null);
@@ -127,6 +129,14 @@ export function createShareHost({ room, stream, maxBitrate = BITRATE.default, sc
     slots.release(link.peerId);
     delete host.guests[link.peerId];
     host.emit('leave', guest);
+    if (compact) {
+      for (const { peerId, to } of slots.compact()) {
+        const moved = host.guests[peerId];
+        if (!moved) continue;
+        moved.slot = to;
+        if (moved.listening) moved.link.send(encodeControl(TAG.welcome, { slot: to, host: nameOf(0, host.hostName) }), { reliable: true });
+      }
+    }
     change();
   });
 

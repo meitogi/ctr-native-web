@@ -240,6 +240,7 @@ int NativeOnlineGame_TakeSkipReset(void)
 	stub.skipReset = 0;
 	return skip;
 }
+void NativeOnlineGame_SlotGone(int slot) { (void)slot; }
 void NativeOnlineGame_LobbyPointers(int **active, int **phase, int **characters)
 {
 	static int active_ = 1, phase_, characters_[8];

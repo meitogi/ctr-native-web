@@ -9,7 +9,7 @@
 //
 // RUN : web/online/bot.sh '<room link>' (it brings the agent browser up and calls e2e.mjs).
 //   The page and the relay must be on ports the agent browser's proxy opens
-//   (AGENT_BROWSER_ORIGINS) : web/dev.sh dev relay=local (8090 + 8787).
+//   (AGENT_BROWSER_ORIGINS) : web/dev.sh dev (8090 + 8787).
 //   Start it once your room exists ; it joins, then follows your menus.
 // Not a node --test file.
 

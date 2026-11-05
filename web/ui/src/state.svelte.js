@@ -22,6 +22,8 @@ export const ui = $state({
   // an Online room's guest in the lobby (web/online/page.js) : the local keys and pads go to the
   // host, not to this game
   lobbyGuest: false,
+  // a room link opened at boot (session 32e) : null, or { state: 'joining' | 'racing' | 'failed', reason }
+  joining: null,
   // Share's guest page : the connection as web/share/guest-page.js reports it (guest.js)
   guest: null,
   // panels other modules hand over (web/online/page.js, web/share/panel.js) : { id, title, el }

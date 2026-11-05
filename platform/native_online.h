@@ -26,6 +26,7 @@ enum NativeOnlineControl
 	NATIVE_ONLINE_CTL_CHARACTER, // arg = this guest's character, picked on the host
 	NATIVE_ONLINE_CTL_END_RACE,  // end this player's race now (the host's end-of-race timeout)
 	NATIVE_ONLINE_CTL_END_BOTS,  // the host : end its bots' races too (docs/ONLINECTR_PORT.md, D11.7)
+	NATIVE_ONLINE_CTL_SLOT_GONE, // the host : arg = the lobby slot a guest left, the ones above moved down (session 32e)
 };
 void NativeOnline_SetControl(int (*poll)(int *arg));
 

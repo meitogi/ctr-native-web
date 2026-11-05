@@ -345,6 +345,11 @@ EM_JS(int, NativeWeb_NetplayHost, (void), {
 	const input = Module.ctrInput;
 	return input && input.netplayHost ? input.netplayHost() : 0;
 });
+
+EM_JS(void, NativeWeb_RoomAlone, (void), {
+	const input = Module.ctrInput;
+	if (input && input.roomAlone) input.roomAlone();
+});
 #endif
 
 EM_JS(int, NativeWeb_IntroSkip, (void), {

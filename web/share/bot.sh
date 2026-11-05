@@ -7,7 +7,7 @@
 #   web/share/bot.sh '<guest link>'
 #
 # Host with a debug build on two of the agent browser's ports (AGENT_BROWSER_ORIGINS) :
-# web/dev.sh dev relay=local (8090 + 8787) — then Share → Copy guest link. A release host sends the bot
+# web/dev.sh dev (8090 + 8787) — then Share → Copy guest link. A release host sends the bot
 # no kart state : it holds Cross (accelerates, locks its character) and does not steer.
 # BOT_INSTANCE=b runs it on agent browser b (default a). The run's index lands in build-bot-proofs/
 # (no screenshot : the agent browser shoots a guest page's <video> grey — the host's screen is the proof).
@@ -30,7 +30,7 @@ for o in "$origin" ${relay:+"$(node -e 'const u = new URL(process.argv[1]); cons
   case " ${AGENT_BROWSER_ORIGINS:-} " in
     *" $o "*) ;;
     *) echo "bot.sh: the agent browser does not open $o (AGENT_BROWSER_ORIGINS : ${AGENT_BROWSER_ORIGINS:-none})" >&2
-       echo "  host on its ports instead : wtf ctr dev relay=local (8090 + 8787, web/dev-ports.tsv)" >&2
+       echo "  host on its ports instead : wtf ctr dev (8090 + 8787, web/dev-ports.tsv)" >&2
        exit 1 ;;
   esac
 done

@@ -33,7 +33,9 @@ elif [ -x /workspace/.tmp/cmake/bin/cmake ]; then
 fi
 
 build="$root/build-web-$config"
-emcmake cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE="$build_type" -DBUILD_TESTING=ON "$@"
+# the version the page and the title show : our v* tags only (upstream's beta-* are not ours)
+version=$(git -C "$root" describe --tags --match 'v*' 2>/dev/null || echo dev)
+emcmake cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE="$build_type" -DBUILD_TESTING=ON -DCTR_WEB_VERSION="$version" "$@"
 cmake --build "$build" -j"$(nproc)"
 
 echo ""

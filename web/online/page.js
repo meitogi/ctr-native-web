@@ -26,6 +26,7 @@
 // which is T3's).
 import { formatRoomLink, newRoom, parseRoomLink } from '../net/link.js';
 import { openRoom } from '../net/room.js';
+import { probeRelay } from '../net/signaling.js';
 import { createShareGuest } from '../share/guest.js';
 import { TAG, encodeControl, nameOf, pickPad } from '../share/protocol.js';
 import { createOnlineNet } from './net.js';
@@ -34,7 +35,7 @@ import { END_AFTER_CHOICES, END_AFTER_DEFAULT, createEndTimer, rejoinLoop } from
 /** enum OnlineLobbyPhase (game/OnlineCTR/native_compat.h) */
 export const PHASE = { none: 0, menus: 1, starting: 2, race: 3 };
 /** enum NativeOnlineControl (platform/native_online.h) */
-export const CTL = { enter: 1, leave: 2, character: 3, endRace: 4, endBots: 5 };
+export const CTL = { enter: 1, leave: 2, character: 3, endRace: 4, endBots: 5, slotGone: 6 };
 /** enum OnlineState (game/OnlineCTR/global.h), the few the page reads */
 const ST = { pickRoom: 2, assignRole: 4, waitForRace: 10, endRace: 12 };
 /** The page's one OnlineCTR room (OnlineExternal_State) ; SG_ROOMS adds 8 to a locked room's count. */
@@ -66,6 +67,10 @@ const STRINGS = {
     noRelayUrl: 'The relay needs an address.',
     link: 'Room link — send it to the other players',
     copy: 'Copy',
+    copied: 'Copied',
+    copyFailed: 'Select the link and copy it (Cmd-C).',
+    checking: 'Checking the relay…',
+    relayChecks: { ok: '✓ The relay accepts this key.', key: '✗ The relay refused this key.', unreachable: '✗ The relay does not answer.' },
     joinTitle: 'Join a room',
     joinPlaceholder: 'paste a room link',
     join: 'Join',
@@ -103,6 +108,8 @@ const STRINGS = {
     hostLeft: 'The host left the room.',
     hostLeftSolo: 'The host left — you finish this race alone, the other karts are now driven by the computer.',
     roomOpen: 'Room open.',
+    roomAlone: 'Alone in the room.',
+    roomAloneDetail: 'VS and Battle need a second player : Arcade fills the race with bots.',
     linkCopied: 'The link is copied : send it to the other players.',
     copyFromSettings: 'Copy the link from Settings › Netplay and send it to the other players.',
     roomClosed: 'The room is closed (the host left).',
@@ -135,6 +142,7 @@ const STRINGS = {
       ice: 'Direct connection failed ; trying the relay.',
       relay: 'The relay closed the connection.',
       'relay-key': 'The relay refused the key : check it in Settings › Netplay.',
+      'relay-silent': (e) => `The relay does not answer (${e.url}).`,
       paste: 'This room has no copy-paste meeting point.',
     },
   },
@@ -254,6 +262,10 @@ const CSS = `
 #online .row input { flex: 1; }
 #online .status { white-space: pre-wrap; margin-top: 10px; color: #ddd; }
 #online .error { color: #f66; white-space: pre-wrap; }
+#online .check { color: #888; }
+#online .check:empty { display: none; }
+#online .check.ok { color: #6c6; }
+#online .check.key, #online .check.unreachable { color: #f66; }
 #online .hint { color: #888; margin-top: 10px; }
 #online-toggle { position: fixed; top: 40px; right: 10px; z-index: 16; width: 36px; height: 36px; border-radius: 50%;
   border: 1px solid #555; background: #111; color: #ddd; cursor: pointer; padding: 0; opacity: 0;
@@ -314,24 +326,24 @@ export function attach(Module) {
   // the main menu's NETPLAY row, picked with no room (game/230/MM_MenuFlow.c) : a room at once
   // with the saved relay and key (session 32), its link in a toast ; none saved : 0, the game
   // says why and its OPEN brings this panel
+  let hosting = false; // a room on its way : a second NETPLAY press or Create room opens no other
   if (Module.ctrInput) {
     Module.ctrInput.openMultiplayer = () => setOpen(true);
-    let hosting = false; // a room on its way : a second NETPLAY press opens no other
+    // a VS / BATTLE character select left with one human went back a menu (session 32e)
+    Module.ctrInput.roomAlone = () => ui?.toast(T.roomAlone, T.roomAloneDetail);
     Module.ctrInput.netplayHost = () => {
       // a room the game left on its own (the pause menu's QUIT mid-race) : closed, a new one
       if (net.room && !hosting && !lobby().active) leave();
       if (net.room || hosting) return 1;
       if (!relay.value.trim() || !rk.value.trim()) return 0;
-      hosting = true;
       const relayBox = meets.find((m) => m.id === 'relay').box;
       relayBox.checked = true;
-      host().finally(() => { hosting = false; }).then(() => {
-        if (!net.room || !linkText) return ui?.toast(error || T.errors.relay);
-        navigator.clipboard?.writeText(linkText).then(() => ui?.toast(T.roomOpen, T.linkCopied), () => ui?.toast(T.roomOpen, T.copyFromSettings));
-      });
+      hostAndTell();
       return 1;
     };
   }
+  // the boot screen's « Joining the room… » (a room link at boot, session 32e) : its Back
+  if (ui) ui.onJoinBack = () => { asGuest = false; leave(); };
   // keys typed in the panel are not the game's
   panel.addEventListener('keydown', (e) => e.stopPropagation());
   panel.addEventListener('keyup', (e) => e.stopPropagation());
@@ -382,8 +394,29 @@ export function attach(Module) {
   };
   const relay = el('input', { type: 'text', id: 'online-relay', value: query.get('relay') ?? load('relay', DEFAULT_RELAY) });
   const rk = el('input', { type: 'password', id: 'online-rk', value: query.get('rk') ?? load('rk'), autocomplete: 'off' });
+  // the relay and its key tried on leaving either field (no room opened) : only the last try shows
+  const relayCheck = el('div', { className: 'check', id: 'online-relay-check', role: 'status' });
+  let checked = '';
+  let checkGen = 0;
+  const checkRelay = () => {
+    const url = relay.value.trim();
+    const key = rk.value.trim();
+    if (relay.disabled || `${url}\n${key}` === checked) return;
+    checked = `${url}\n${key}`;
+    const gen = ++checkGen;
+    relayCheck.className = 'check';
+    relayCheck.textContent = url ? T.checking : '';
+    if (url) probeRelay(url, key).then((result) => {
+      if (gen !== checkGen) return;
+      if (result === 'unreachable') checked = ''; // tried again on the next focus out (a relay started since)
+      relayCheck.className = `check ${result}`;
+      relayCheck.textContent = T.relayChecks[result];
+    });
+  };
+  relay.addEventListener('focusout', checkRelay);
+  rk.addEventListener('focusout', checkRelay);
   const meets = [
-    meet('relay', T.relay, T.relayHelp, el('div', { className: 'sub' }, el('label', {}, T.relayUrl, relay), el('label', {}, T.relayKey, rk))),
+    meet('relay', T.relay, T.relayHelp, el('div', { className: 'sub' }, el('label', {}, T.relayUrl, relay), el('label', {}, T.relayKey, rk), relayCheck)),
     meet('mqtt', T.mqtt, T.mqttHelp),
     meet('paste', T.paste, T.pasteHelp),
   ];
@@ -445,7 +478,11 @@ export function attach(Module) {
   hideButton.addEventListener('click', () => setOpen(false));
   leaveButton.addEventListener('click', () => leave());
 
-  const explain = (e) => T.errors[e?.code] ?? `${e?.code ? `${e.code} : ` : ''}${e?.message ?? e}`;
+  const explain = (e) => {
+    const text = T.errors[e?.code];
+    if (typeof text === 'function') return text(e);
+    return text ?? `${e?.code ? `${e.code} : ` : ''}${e?.message ?? e}`;
+  };
   const fail = (e) => { error = explain(e); render(); };
 
   async function host() {
@@ -474,12 +511,42 @@ export function attach(Module) {
       // the lobby : this game's screen to the guests, their pads as P2–P4, on the same room
       const share = globalThis.ctrShareApi;
       if (share) shareHost = await share.startOn(room, { relayGuests: true, by: 'online' });
+      // a guest leaving : the ones above it moved down a slot (web/share/slots.js compact), and the
+      // character select moves their picks with them (session 32e)
+      shareHost?.on('leave', (g) => { if (lobby().phase === PHASE.menus) Module.ctrOnlineControl?.(CTL.slotGone, g.slot); });
       Module.ctrOnlineControl?.(CTL.enter);
     } catch (e) {
       link = null;
       fail(e);
     }
     render();
+  }
+
+  /** Copy : « Copied » on the button for 2 s ; refused, the text is selected for the player's Cmd-C. */
+  function copyText(button, text, field) {
+    const failed = () => {
+      ui?.toast(T.copyFailed);
+      field.focus();
+      field.select();
+    };
+    const write = navigator.clipboard?.writeText(text);
+    if (!write) return failed();
+    write.then(() => {
+      button.textContent = T.copied;
+      clearTimeout(button.copiedTimer);
+      button.copiedTimer = setTimeout(() => { button.textContent = T.copy; }, 2000);
+    }, failed);
+  }
+
+  /** NETPLAY's room and the panel's Create room : one at a time, and a toast either way. */
+  function hostAndTell() {
+    if (hosting || net.room) return;
+    hosting = true;
+    render();
+    host().finally(() => { hosting = false; render(); }).then(() => {
+      if (!net.room || !linkText) return ui?.toast(error || T.errors.relay);
+      navigator.clipboard?.writeText(linkText).then(() => ui?.toast(T.roomOpen, T.linkCopied), () => ui?.toast(T.roomOpen, T.copyFromSettings));
+    });
   }
 
   // the host's pause for everyone (D12.9) ends here : a game frozen by it runs no netcode, so it
@@ -502,6 +569,7 @@ export function attach(Module) {
     shareHost = null;
     shareGuest?.close();
     shareGuest = null;
+    for (const t of lobbyStream.getTracks()) lobbyStream.removeTrack(t);
     net.disconnect?.();
     net.room?.close();
     net.room = null;
@@ -541,6 +609,7 @@ export function attach(Module) {
       lobbyGuestOn(room).catch(fail).finally(render);
     } catch (e) {
       fail(e);
+      ui?.joining?.({ state: 'failed', reason: error });
       render();
       return e;
     }
@@ -620,11 +689,14 @@ export function attach(Module) {
   // ?bot : a scripted guest (web/online/bot.sh) asks a debug host for its kart as Share's bot does.
   async function lobbyGuestOn(room) {
     for (let i = 0; i < 600 && !net.hostLink && net.room === room; i++) await new Promise((r) => setTimeout(r, 100));
+    if (net.room === room && !net.hostLink) ui?.joining?.({ state: 'failed', reason: explain(net.lastError ?? { code: 'absent' }) });
     if (net.room !== room || !net.hostLink) return;
     shareGuest?.close();
     const g = createShareGuest(room, {
       link: net.hostLink, name: net.name, bot: query.has('bot'), relay: true,
       onTrack(e) {
+        // one track of a kind : a previous room's ended one would be the one the video shows
+        for (const t of lobbyStream.getTracks()) if (t.kind === e.track.kind) lobbyStream.removeTrack(t);
         lobbyStream.addTrack(e.track);
         if (lobbyVideo.srcObject !== lobbyStream) lobbyVideo.srcObject = lobbyStream;
       },
@@ -656,7 +728,7 @@ export function attach(Module) {
   const inHostMenus = () => lobby().phase === PHASE.menus && joined();
   const setLobbyGuest = (on) => {
     ui?.lobby?.(on);
-    lobbyVideo.classList.toggle('hidden', !(on && joined() && shareGuest?.media && lobbyStream.getTracks().length));
+    lobbyVideo.classList.toggle('hidden', !(on && joined() && shareGuest?.media && lobbyStream.getVideoTracks().some((t) => t.readyState === 'live')));
   };
   // guest : the game asked the room and was refused because it is racing
   const refused = () => {
@@ -769,7 +841,12 @@ export function attach(Module) {
       if (refused() && !toldWaiting) {
         ui?.toast(T.roomRacing, T.nextLobby);
         toldWaiting = true;
+        ui?.joining?.({ state: 'racing' });
       } else if (joined()) toldWaiting = false;
+      // the joining screen goes once the game is in the host's menus (its picture over the canvas) ;
+      // the link to the host refused (no host there) : the reason, Back to leave
+      if (l.active && inHostMenus() && (!lobbyVideo.classList.contains('hidden') || (shareGuest?.state === 'connected' && !shareGuest.media))) ui?.joining?.(null);
+      else if (net.lastError && !net.hostLink && !net.pending) ui?.joining?.({ state: 'failed', reason: explain(net.lastError) });
     }
   }
   setInterval(lobbyTick, 100);
@@ -795,9 +872,9 @@ export function attach(Module) {
   // second window, beside a host already playing the same sound)
   ui?.settings.subscribe((s) => { lobbyVideo.muted = !!s.muted || !!window.ctrAudio?.forcedMute; lobbyVideo.volume = Math.min(1, Math.max(0, s.volume ?? 1)); });
 
-  createButton.addEventListener('click', host);
-  copyButton.addEventListener('click', () => navigator.clipboard?.writeText(linkText));
-  codeOutCopy.addEventListener('click', () => navigator.clipboard?.writeText(codeOutBox.value));
+  createButton.addEventListener('click', hostAndTell);
+  copyButton.addEventListener('click', () => copyText(copyButton, linkText, linkBox));
+  codeOutCopy.addEventListener('click', () => copyText(codeOutCopy, codeOutBox.value, codeOutBox));
   codeInButton.addEventListener('click', async () => {
     error = '';
     try { await net.room.paste(codeInBox.value.trim()); codeInBox.value = ''; } catch (e) { fail(e); }
@@ -857,7 +934,8 @@ export function attach(Module) {
     hostBox.style.display = net.role === 'guest' || asGuest ? 'none' : '';
     joinBox.style.display = net.role === 'host' ? 'none' : '';
     for (const m of meets) m.box.disabled = !!room;
-    relay.disabled = rk.disabled = createButton.disabled = !!room;
+    relay.disabled = rk.disabled = !!room;
+    createButton.disabled = !!room || hosting;
     linkRow.style.display = room && net.role === 'host' ? '' : 'none';
     linkBox.value = linkText;
     codeBox.style.display = codeOut || link?.signaling?.includes('paste') ? '' : 'none';
@@ -923,8 +1001,9 @@ export function attach(Module) {
   for (const line of T.controls) Module.print?.(line);
 
   // One build : a solo boot keeps the panel closed, as the OFF build had none (nothing stored :
-  // session 9's remembered state kept it open at every boot) ; a room link opens it.
-  setOpen(asGuest);
+  // session 9's remembered state kept it open at every boot) ; a room link opens it, but for the
+  // page's UI, whose boot screen says « Joining the room… » (session 32e).
+  setOpen(asGuest && !ui);
   if (asGuest) guest();
   render();
 }

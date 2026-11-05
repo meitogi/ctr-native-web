@@ -63,7 +63,9 @@
 //                pool leaves it intact)
 //   charSelect   while the character select is the active menu (D230.menuCharacterSelect) :
 //                { locked } = sdata->characterSelectFlags, bit n set once player n
-//                locked a character (MM_Characters.c) ; null otherwise
+//                locked a character (MM_Characters.c), { players } = gGT->numPlyrNextGame, the
+//                cursors shown, { characters } = data.characterIDs[0..players-1] (session 32e) ;
+//                null otherwise
 //   net          ON builds, in an online race : the remote karts as this screen draws them
 //                (per-present position, SG_RACEDATA applied, corrections) — the block above
 //                WebDebugBridge_Publish, `__ctr.net.summary()` / `.reset()`
@@ -153,7 +155,8 @@ EM_JS(void, WebDebugBridge_PushMoreJS,
 	const str = p => (p ? UTF8ToString(p) : null);
 	c.sub = hasSub ? { title: str(subTitle), row: subRow, label: str(subLabel), state: subState >>> 0, input: !(subState & 0x20) } : null;
 	c.players = players;
-	c.charSelect = charSelect < 0 ? null : { locked: charSelect };
+	c.charSelect = charSelect < 0 ? null : { locked: charSelect & 0xf, players: (charSelect >> 4) & 7,
+		characters: Array.from({ length: (charSelect >> 4) & 7 }, (_, p) => (charSelect >> (8 + p * 4)) & 0xf) };
 	c.karts = [];
 	for (let i = 0; i < players; i++) {
 		const k = HEAP32.subarray((karts >> 2) + i * 22, (karts >> 2) + (i + 1) * 22);
@@ -815,8 +818,16 @@ internal void WebDebugBridge_Publish(void)
 				o[21] |= ((k->instSelf->idpp[v].instFlags & HIDE_MODEL) != 0) << v;
 			}
 		}
+		// charSelect packed : locked bits 0-3, players 4-6, each player's character 4 bits from bit 8
+		int charSelect = -1;
+		if (menu == &D230.menuCharacterSelect)
+		{
+			charSelect = (int)(sdata->characterSelectFlags & 0xf) | ((gGT->numPlyrNextGame & 7) << 4);
+			for (int p = 0; p < 4; p++)
+				charSelect |= (data.characterIDs[p] & 0xf) << (8 + p * 4);
+		}
 		WebDebugBridge_PushMoreJS(sub != NULL, subTitle, sub ? sub->rowSelected : -1, subLabel, sub ? (int)sub->state : 0, players, karts,
-		                          menu == &D230.menuCharacterSelect ? (int)(sdata->characterSelectFlags & 0xf) : -1,
+		                          charSelect,
 		                          WebDebugBridge_PoolFree(&gGT->JitPools.thread), WebDebugBridge_PoolFree(&gGT->JitPools.smallStack));
 	}
 

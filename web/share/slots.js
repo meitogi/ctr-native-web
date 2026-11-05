@@ -49,6 +49,26 @@ export function createSlots({ now = () => performance.now(), staleMs = 500 } = {
       }
       return s;
     },
+    /**
+     * Moves the guests above a free slot down, so P2..Pn stay a run with no gap (a Netplay room's
+     * character select counts its humans that way, session 32e). Returns [{peerId, from, to}].
+     */
+    compact() {
+      const moves = [];
+      let to = FIRST_SLOT;
+      for (let s = FIRST_SLOT; s < SLOT_COUNT; s++) {
+        if (owner[s] === null) continue;
+        if (s !== to) {
+          owner[to] = owner[s];
+          pads[to] = pads[s];
+          owner[s] = null;
+          pads[s] = null;
+          moves.push({ peerId: owner[to], from: s, to });
+        }
+        to++;
+      }
+      return moves;
+    },
     /** A PAD message from `peerId` ; older or foreign messages are dropped. True when applied. */
     receive(peerId, bytes) {
       const s = slotOf(peerId);

@@ -1154,6 +1154,10 @@ static void ProcessControl(void)
 				NativeOnlineGame_EndBots();
 				break;
 
+			case NATIVE_ONLINE_CTL_SLOT_GONE:
+				NativeOnlineGame_SlotGone(arg);
+				break;
+
 			default:
 				break;
 		}

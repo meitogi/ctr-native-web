@@ -60,6 +60,12 @@ else()
     file(WRITE "${CMAKE_BINARY_DIR}/preload-flag.js" "window.__CTR_WEB_PRELOAD = false;\n")
 endif()
 
+# The version (web/build-web.sh : git describe --tags --match 'v*') : Settings › System reads it
+# from the same small file, the Netplay build's title draws it (game/230/MM_MenuFlow.c)
+set(CTR_WEB_VERSION "dev" CACHE STRING "The version shown on the page and the title")
+file(APPEND "${CMAKE_BINARY_DIR}/preload-flag.js" "window.__CTR_VERSION = \"${CTR_WEB_VERSION}\";\n")
+target_compile_definitions(ctr_native PRIVATE CTR_WEB_VERSION=\"${CTR_WEB_VERSION}\")
+
 add_custom_command(
     OUTPUT "${CMAKE_BINARY_DIR}/index.html"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/web/index.html" "${CMAKE_BINARY_DIR}/index.html"

@@ -15,7 +15,16 @@
 
   const s = $derived(live.current)
 
-  let device = $state(ui.pads.length ? 'gamepad' : 'keyboard')
+  // the tab the player picked, kept (session 32e : a plugged pad no longer brings Gamepad back) ;
+  // none picked yet : the gamepad's when one is plugged
+  const TAB_KEY = 'ctr-ui.controls-tab'
+  const picked = (() => { try { return localStorage.getItem(TAB_KEY) } catch { return null } })()
+  let device = $state(['keyboard', 'keyboard2', 'gamepad'].includes(picked) ? picked : ui.pads.length ? 'gamepad' : 'keyboard')
+  const pick = (d) => {
+    device = d
+    ui.listening = null
+    try { localStorage.setItem(TAB_KEY, d) } catch {}
+  }
   const pad = $derived(ui.pads[0] ?? null)
   const family = $derived(pad?.family ?? 'other')
   // the settings field each device edits : the keyboard is its left half while two players share it
@@ -44,17 +53,17 @@
 
 <div class="controls">
   <div class="seg" role="tablist">
-    <button role="tab" aria-selected={device === 'keyboard'} class:on={device === 'keyboard'} onclick={() => { device = 'keyboard'; ui.listening = null }}>
+    <button role="tab" aria-selected={device === 'keyboard'} class:on={device === 'keyboard'} onclick={() => pick('keyboard')}>
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" stroke-linecap="round" /></svg>
       {s.duo ? T.keyboardLeft : T.keyboard}
     </button>
     {#if s.duo}
-      <button role="tab" data-device="keyboard2" aria-selected={device === 'keyboard2'} class:on={device === 'keyboard2'} onclick={() => { device = 'keyboard2'; ui.listening = null }}>
+      <button role="tab" data-device="keyboard2" aria-selected={device === 'keyboard2'} class:on={device === 'keyboard2'} onclick={() => pick('keyboard2')}>
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" stroke-linecap="round" /></svg>
         {T.keyboardRight}
       </button>
     {/if}
-    <button role="tab" aria-selected={device === 'gamepad'} class:on={device === 'gamepad'} onclick={() => { device = 'gamepad'; ui.listening = null }}>
+    <button role="tab" aria-selected={device === 'gamepad'} class:on={device === 'gamepad'} onclick={() => pick('gamepad')}>
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M7 6h10c3 0 4.5 2 5 5l.5 4c.3 2.5-2 4-4 2l-2.5-2.5h-8L5.5 17c-2 2-4.3.5-4-2L2 11c.5-3 2-5 5-5z" /></svg>
       {pad ? T.families[family] : T.gamepad}
     </button>

@@ -127,7 +127,15 @@ export async function toMainMenu(tab) {
 	let beat = Date.now() + HEARTBEAT_MS
 	// a Cross landing as the menu wakes picks ADVENTURE : the title leaves, still reading as the
 	// main menu for a moment, every input ignored (ctr.mjs bootToMenu, session 32b)
-	const idle = s => s && onMainMenu(s) && !s.mode?.includes('ADVENTURE_MODE')
+	// ... but a main menu still showing and taking input 3 s on is the menu : the flag can stay
+	// set there after such a press is backed out (session 32e, the stall shot)
+	let adventureSince = 0
+	const idle = s => {
+		if (!s || !onMainMenu(s)) { adventureSince = 0; return false }
+		if (!s.mode?.includes('ADVENTURE_MODE')) return true
+		adventureSince ||= Date.now()
+		return Date.now() - adventureSince > 3000
+	}
 	let s = await game(tab)
 	for (;;) {
 		while (!idle(s) && Date.now() < deadline) {
@@ -169,7 +177,8 @@ export async function boot(tab, url) {
 		// the stored disc found : the boot screen waits for the player's press (#press-start)
 		const screen = Date.now() + 30_000
 		let shown
-		while (!(shown = await tab.js('return document.getElementById("press-start") ? "ready" : document.getElementById("drop-zone") && !document.getElementById("boot-status").textContent ? "drop" : document.getElementById("boot").classList.contains("hidden") ? "running" : ""').catch(() => ''))) {
+		// a room link boots at once behind « Joining the room… » (#joining, session 32e)
+		while (!(shown = await tab.js('return document.getElementById("joining") ? "running" : document.getElementById("press-start") ? "ready" : document.getElementById("drop-zone") && !document.getElementById("boot-status").textContent ? "drop" : document.getElementById("boot").classList.contains("hidden") ? "running" : ""').catch(() => ''))) {
 			if (Date.now() > screen) throw new Error(`${tab.name} : no boot screen after 30 s (${await pageLog(tab)})`)
 			await sleep(250)
 		}
@@ -203,7 +212,9 @@ export async function boot(tab, url) {
 	}
 	// one build : the normal game boots ; the room is joined from the title
 	await until(tab, 'the Online panel', s => !!s, 180_000)
-	await toMainMenu(tab)
+	// a room link skips the intro and the title by itself (session 32e) : no press here, which
+	// would reach the host as this guest's pad
+	if (!url.includes('room=')) await toMainMenu(tab)
 	await tab.js(R6_PROBE)
 }
 
@@ -341,13 +352,13 @@ export async function roomToRace(ctx, mode, { inject = [], arcade = false, cup =
  * The guest's page, not loaded yet : `{ guestBrowser, guest, gp, gjs }`, its name and path stored
  * before it loads (roomToRace, LINK-CHANGE).
  */
-async function openGuestPage(ctx, origin, { inject = [], mode = 'auto' } = {}) {
+export async function openGuestPage(ctx, origin, { inject = [], mode = 'auto', cdp = ctx.args.guestCdp, name = 'Guest' } = {}) {
 	// The guest : a second browser when the run has one (--set guestCdp=<host:port>, play.sh
 	// passes `agent-browser -i b env`), its own Chromium, CDP connection and recorder ; else a
 	// second tab of this browser, in a window of its own (a background tab would stop
 	// painting). Either way its page opens on a small same-origin file (the agent browser's
 	// proxy refuses about:blank), so the player's page script is in place before the game loads.
-	const guestBrowser = await openGuest(ctx, `${origin}/preload-flag.js`)
+	const guestBrowser = await openGuest(ctx, `${origin}/preload-flag.js`, cdp)
 	const { targetId, conn: gc } = guestBrowser
 	// The guest's session, re-attached when the agent browser's proxy stops knowing it (it
 	// refuses « session is not one of this page » mid-run, with no detach event) ; every guest
@@ -390,7 +401,7 @@ async function openGuestPage(ctx, origin, { inject = [], mode = 'auto' } = {}) {
 		// One browser = one localStorage for both (the host's name is already taken by then) ; the
 		// second browser has its own, written from the guest's same-origin first page — the forced
 		// path too, or a guest in its own browser stays on auto and pairs over WebRTC.
-		await (guestOwnBrowser ? gjs : ctx.js)(`localStorage.setItem('ctr-online.name', 'Guest')
+		await (guestOwnBrowser ? gjs : ctx.js)(`localStorage.setItem('ctr-online.name', ${JSON.stringify(name)})
 			localStorage.setItem('ctr-online.path', ${JSON.stringify(mode === 'ws' ? 'relay' : 'auto')}); return true`)
 		return { guestBrowser, guest, gp, gjs }
 	} catch (e) {
@@ -442,12 +453,12 @@ async function twoTabs(ctx, mode, { itemRace = false } = {}) {
  * `agent-browser -i b up` opened, navigated to `url`, over a CDP connection of its own ; else
  * a new window of this browser. Returns { conn, targetId, close }.
  */
-async function openGuest(ctx, url) {
-	if (!ctx.args.guestCdp) {
+async function openGuest(ctx, url, cdp = ctx.args.guestCdp) {
+	if (!cdp) {
 		const { targetId } = await ctx.conn.send('Target.createTarget', { url, newWindow: true })
 		return { conn: ctx.conn, targetId, close: () => ctx.conn.send('Target.closeTarget', { targetId }).catch(() => {}) }
 	}
-	const [host, port] = ctx.args.guestCdp.split(':')
+	const [host, port] = cdp.split(':')
 	const release = lockBrowser(host, port)
 	const ip = isIP(host) ? host : (await lookup(host, { family: 4 })).address
 	const conn = await connect(await fetchBrowserWsUrl({ ip, port: Number(port), httpBase: `http://${ip}:${port}` }))
@@ -462,11 +473,11 @@ async function openGuest(ctx, url) {
 		if (i) await sleep(500)
 		pages = (await conn.send('Target.getTargets')).targetInfos.filter(t => t.type === 'page')
 		page = pages.find(t => t.url.startsWith(origin)) ?? pages.find(t => /^https?:/.test(t.url)) ?? pages[0]
-		if (!page) throw new Error(`guest browser ${ctx.args.guestCdp} : no page (agent-browser -i b up <url> first)`)
+		if (!page) throw new Error(`guest browser ${cdp} : no page (agent-browser -i b up <url> first)`)
 		try {
 			sessionId = (await conn.send('Target.attachToTarget', { targetId: page.targetId, flatten: true })).sessionId
 		} catch (e) {
-			if (!/not a target on an allowed origin/.test(e.message) || i === 9) throw new Error(`${e.message} (guest browser pages : ${pages.map(t => t.url).join(' , ')})`)
+			if (!/not a target on an allowed origin/.test(e.message) || i === 9) throw new Error(`${e.message} (guest browser ${cdp} pages : ${pages.map(t => t.url).join(' , ')})`)
 		}
 	}
 	await conn.send('Page.navigate', { url }, sessionId)

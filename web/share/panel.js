@@ -133,7 +133,7 @@ async function startOn(room, { relayGuests = false, by = 'share' } = {}) {
   room.on('warning', (w) => { error = `${w.code}: ${w.message}`; render(); });
   room.on('close', () => { error = 'relay: the relay closed the room'; render(); });
   host = createShareHost({ room, stream: capture.stream, maxBitrate: Number(bitrate.value), scale: capture.scale, slots, hostName: hostName(),
-    game: () => globalThis.__ctr ?? null, relayGuests });
+    game: () => globalThis.__ctr ?? null, relayGuests, compact: by === 'online' });
   host.on('change', render);
   // the host is told who comes and goes, Settings open or not
   host.on('join', (g) => ui?.toast(ui.text.joined(nameOf(g.slot, g.name), g.slot + 1)));
