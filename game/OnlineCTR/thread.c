@@ -162,14 +162,14 @@ void octr_ThreadFunc(struct Thread* t) // ctr-native: ThreadFunc is a typedef
 	// page : the lobby states draw nothing (native_bridge.c)
 	if (octrExternalLobby && octr->CurrState >= 0 && octr->CurrState < GAME_WAIT_FOR_RACE)
 		OnlineExternal_State();
+	else
+	if (octr->CurrState >= 0)
+		funcs[octr->CurrState]();
 
 	// ctr-native: what the host's guests learn beside the wire (session 32) : its AI's karts,
 	// by clientID (= slot here), its takeovers mid-race included
 	if (octrExternalLobby && octr->DriverID == 0)
 		octrRoomInfo[ONLINE_ROOM_BOTS] = octrHostBots;
-	else
-	if (octr->CurrState >= 0)
-		funcs[octr->CurrState]();
 
 	// if connecting, or entering IP
 	if (octr->boolClientBusy && !octrExternalLobby) // ctr-native: the page shows the status
