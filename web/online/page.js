@@ -588,6 +588,8 @@ export function attach(Module) {
     let seen = null; // each LOBBY message once
     g.on('change', () => {
       const body = g.lobby;
+      // the host's word beside the wire (D12) : the Cup's table, its AI's karts — into our game
+      if (body && body !== seen && body.room && lobby().active) Module.ctrOnlineRoomSet?.(body.room);
       if (body && body.phase === PHASE.starting && Number.isInteger(body.character)) Module.ctrOnlineControl?.(CTL.character, body.character);
       if (body && body !== seen && body.phase === PHASE.race && lobby().phase === PHASE.race) {
         // the host's end-of-race timeout (session 11b)
@@ -613,8 +615,6 @@ export function attach(Module) {
   };
   // guest : the game asked the room and was refused because it is racing
   const refused = () => {
-      // the host's word beside the wire (D12) : the Cup's table, its AI's karts — into our game
-      if (body && body !== seen && body.room && lobby().active) Module.ctrOnlineRoomSet?.(body.room);
     const o = Module.ctrOnlineOctr?.();
     return net.role === 'guest' && lobby().active && o?.CurrState === ST.pickRoom && o.clientCount[ROOM] >= 8;
   };
@@ -623,6 +623,7 @@ export function attach(Module) {
   let toldWaiting = false;
   const waitingForRace = () => toldWaiting && net.role === 'guest' && !joined();
   const endTimer = createEndTimer();
+  let sentRoom = null; // host : the room info last sent to the guests (D12)
   let knownBots = 0; // host : the bots' slots at the race's start, then the takeovers told
   // to every guest of the lobby share that listens : our framing (Share's LOBBY message), not the game's
   const toGuests = (body) => {
@@ -648,7 +649,6 @@ export function attach(Module) {
         const secs = Math.round(step.notice / 1000);
         if ((Module.ctrOnlineOctr?.().CurrState ?? 0) < ST.endRace) ui?.toast(T.endIn(secs), T.endInDetail);
         toGuests({ phase: PHASE.race, endIn: step.notice });
-  let sentRoom = null; // host : the room info last sent to the guests (D12)
       }
       if (step?.end) {
         toGuests({ phase: PHASE.race, endRace: true });
@@ -669,6 +669,14 @@ export function attach(Module) {
       }
     }
     if (net.role === 'host' && shareHost) {
+      // the host's word beside the wire (D12) : the Cup's table and its AI's karts, to every
+      // guest when it changes, and again at each track lock (a guest that joined since)
+      const room = Module.ctrOnlineRoom?.();
+      const roomKey = room && JSON.stringify(room);
+      if (room && l.active && (roomKey !== sentRoom || (l.phase === PHASE.starting && !startSent))) {
+        sentRoom = roomKey;
+        toGuests({ phase: l.phase, room });
+      }
       // the track lock : each guest gets the character its pad locked on this screen
       if (l.active && l.phase === PHASE.starting && !startSent) {
         startSent = true;
@@ -694,14 +702,6 @@ export function attach(Module) {
       // the title reloaded after a race) ; the pad goes to the host only while its menus run
       setLobbyGuest(l.active && l.phase !== PHASE.race);
       if (l.active && inHostMenus() && shareGuest?.state === 'connected') sendPad();
-      // the host's word beside the wire (D12) : the Cup's table and its AI's karts, to every
-      // guest when it changes, and again at each track lock (a guest that joined since)
-      const room = Module.ctrOnlineRoom?.();
-      const roomKey = room && JSON.stringify(room);
-      if (room && l.active && (roomKey !== sentRoom || (l.phase === PHASE.starting && !startSent))) {
-        sentRoom = roomKey;
-        toGuests({ phase: l.phase, room });
-      }
       if (refused() && !toldWaiting) {
         ui?.toast(T.roomRacing, T.nextLobby);
         toldWaiting = true;
@@ -819,6 +819,7 @@ export function attach(Module) {
         octr: Module.ctrOnlineOctr?.() ?? null,
         karts: Module.ctrOnlineKarts?.() ?? null,
         lobby: lobby(),
+        roomInfo: Module.ctrOnlineRoom?.() ?? null,
         rejoin: rejoinTry,
         waitingForRace: waitingForRace(),
         share: net.role === 'host'
@@ -844,5 +845,4 @@ export function attach(Module) {
   setOpen(asGuest);
   if (asGuest) guest();
   render();
-        roomInfo: Module.ctrOnlineRoom?.() ?? null,
 }

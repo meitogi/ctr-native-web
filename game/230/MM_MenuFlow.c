@@ -158,6 +158,8 @@ static void OnlineArcadeRaceType_Proc(struct RectMenu *menu)
 		return;
 
 	GAME_TRACKER->gameMode2 &= ~(CUP_ANY_KIND);
+	if (row == 1)
+		GAME_TRACKER->gameMode2 |= CUP_ANY_KIND;
 	menu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
 	menu->ptrNextBox_InHierarchy = &onlineMenuPlayers;
 	MM_CHARACTER_SELECT_TRANSITION_STATE = IN_MENU;
@@ -193,8 +195,6 @@ static void OnlineMenu_Proc(struct RectMenu *menu)
 		return;
 	}
 	if (row < -1 || row > 2 || !ONLINE_ROOM)
-	if (row == 1)
-		GAME_TRACKER->gameMode2 |= CUP_ANY_KIND;
 	{
 		return;
 	}
@@ -224,6 +224,11 @@ static void OnlineMenu_Proc(struct RectMenu *menu)
 		{
 			GAME_TRACKER->numLaps = MM_ONE_LAP_CHEAT_COUNT;
 		}
+		// VS : the retail race type, single race or Cup (D12.6), then 2P-4P
+		octrOnlineMenuPath = 1;
+		menu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
+		menu->ptrNextBox_InHierarchy = &MM_MENU_RACE_TYPE;
+		return;
 	}
 	else
 	{
@@ -259,11 +264,6 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		onlineMenu.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
 		onlineMenu.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
 		onlineMenuRaceType.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
-		// VS : the retail race type, single race or Cup (D12.6), then 2P-4P
-		octrOnlineMenuPath = 1;
-		menu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
-		menu->ptrNextBox_InHierarchy = &MM_MENU_RACE_TYPE;
-		return;
 		onlineMenuRaceType.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
 		onlineMenuPlayers.posX_curr = MM_MENU_PLAYERS_1P2P.posX_curr;
 		onlineMenuPlayers.posY_curr = MM_MENU_PLAYERS_1P2P.posY_curr;
@@ -915,6 +915,18 @@ void MM_JumpTo_Title_Returning(void)
 	MM_DESIRED_MENU = &MM_MENU_MAIN;
 
 	MM_TITLE_MENU_TRANSITION_FRAME = MM_TITLE_TRANSITION_DURATION;
+
+#ifdef USE_ONLINE
+	// ctr-native: in a Netplay room (session 32) the character select's way back
+	// is the ONLINE menu, still in the room ; its Triangle then the main menu
+	if (ONLINE_ROOM && octrOnlineMenuPath)
+	{
+		MM_MENU_MAIN.rowSelected = ONLINE_MAIN_ROW;
+		MM_MENU_MAIN.ptrNextBox_InHierarchy = &onlineMenu;
+		MM_MENU_MAIN.state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
+		onlineMenu.state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+	}
+#endif
 }
 
 void MM_JumpTo_Title_FirstTime(void)
@@ -972,18 +984,6 @@ void MM_JumpTo_TrackSelect(void)
 
 	menu->state &= ~(ONLY_DRAW_TITLE);
 
-
-#ifdef USE_ONLINE
-	// ctr-native: in a Netplay room (session 32) the character select's way back
-	// is the ONLINE menu, still in the room ; its Triangle then the main menu
-	if (ONLINE_ROOM && octrOnlineMenuPath)
-	{
-		MM_MENU_MAIN.rowSelected = ONLINE_MAIN_ROW;
-		MM_MENU_MAIN.ptrNextBox_InHierarchy = &onlineMenu;
-		MM_MENU_MAIN.state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
-		onlineMenu.state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
-	}
-#endif
 	MM_TrackSelect_Init();
 }
 
