@@ -5,7 +5,7 @@
 //                browser, two windows : session 20's SHARE-ONE-MACHINE), joins the room by itself
 //                as « Bot » with its Bot switch on ; the button stops there (« ready ») and the
 //                suite has this window walk its own menus to the race (ctrDev.walk)
-//                (ONLINE → VS → players → character → track) ; then this window's Bot switch too,
+//                (ONLINE → VS → character → track) ; then this window's Bot switch too,
 //                and the whole race is driven by both, filmed side by side ; afterwards the
 //                player's own name and « Who plays » are untouched (the bot's settings live in memory)
 //   SECOND-SHARE the same with Share : the second window is Share's guest page, P2 on this game's

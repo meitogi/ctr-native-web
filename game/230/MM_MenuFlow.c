@@ -52,10 +52,10 @@ s32 MM_TransitionInOut(struct TransitionMeta *meta, s32 framesPassed, s32 numFra
 #ifdef USE_ONLINE
 #include <platform/native_web_ui.h>
 // ctr-native: one build — the main menu's ONLINE row and its VS / BATTLE /
-// ARCADE sub-menu. Without a room the row opens the page's multiplayer panel ; with
-// one, VS and BATTLE take the retail paths (players, characters, track) with
-// the room's players as P2-P4, and the track lock starts the room's race
-// (QueueLoadTrack.c). The native build boots into the mod's own menus and
+// ARCADE sub-menu. Without a room the row has the page host one ; with one, VS and
+// BATTLE take the retail paths (characters, track) with the room's players as P2-P4,
+// their count the room's humans (no players menu, session 32b), and the track lock
+// starts the room's race (QueueLoadTrack.c). The native build boots into the mod's own menus and
 // never shows this row.
 static struct MenuRow onlineRowsMainBasic[8] =
 {
@@ -100,7 +100,7 @@ static struct RectMenu onlineMenu =
 
 // ONLINE > ARCADE (docs/ONLINECTR_PORT.md, D11.8) : the retail Arcade path with
 // the room's humans as P1-P4 and the host's bots filling up to 8 karts. Its own
-// race type (single race, the Cup : D12) and players menu (1P-4P) : solo Arcade
+// race type (single race, the Cup : D12), then the retail difficulty : solo Arcade
 // keeps D230's 1P / 2P and its Cup.
 static struct MenuRow onlineRowsRaceType[3] =
 {
@@ -108,29 +108,13 @@ static struct MenuRow onlineRowsRaceType[3] =
 	{0x15F, 0, 1, 1, 1},
 	{RECTMENU_STRING_NONE},
 };
-static struct MenuRow onlineRowsPlayers[5] =
-{
-	{0x54, 0, 1, 0, 0},
-	{0x55, 0, 2, 1, 1},
-	{0x56, 1, 3, 2, 2},
-	{0x57, 2, 3, 3, 3},
-	{RECTMENU_STRING_NONE},
-};
 static void OnlineArcadeRaceType_Proc(struct RectMenu *menu);
-static void OnlineArcadePlayers_Proc(struct RectMenu *menu);
 static struct RectMenu onlineMenuRaceType =
 {
 	.stringIndexTitle = LNG_RACE_TYPE,
 	.state = CENTER_ON_X,
 	.rows = &onlineRowsRaceType[0],
 	.funcPtr = OnlineArcadeRaceType_Proc,
-};
-static struct RectMenu onlineMenuPlayers =
-{
-	.stringIndexTitle = LNG_PLAYERS,
-	.state = CENTER_ON_X,
-	.rows = &onlineRowsPlayers[0],
-	.funcPtr = OnlineArcadePlayers_Proc,
 };
 
 // NETPLAY with no room (session 32) : the page hosts one at once with its saved relay and key,
@@ -140,6 +124,8 @@ static struct RectMenu onlineMenuPlayers =
 #define ONLINE_LNG_NO_KEY 0x9b
 #define ONLINE_LNG_OPEN_SETTINGS 0x9c
 #define ONLINE_LNG_BACK 0x9d
+// frames left for the room NETPLAY asked for to come on (a refused host never opens the menu later)
+#define ONLINE_AUTO_OPEN_FRAMES 1800
 static int onlineAutoOpen;
 static struct MenuRow onlineRowsNoKey[3] =
 {
@@ -168,15 +154,38 @@ static void OnlineNoKey_Proc(struct RectMenu *menu)
 	menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
 }
 
-// as MM_ToggleRows_PlayerCount : a row needs its pads (the room's guests are P2-P4)
-static void OnlineArcade_TogglePlayerRows(void)
+// The room's humans, one per machine : the host's pad and its guests' (P2-P4, plugged while
+// the host's menus run)
+static int OnlineRoom_Humans(void)
 {
-	for (int i = 0; i < 4; i++)
+	int n = 1;
+
+	while ((n < 4) && MainFrame_HaveAllPads(n + 1))
+		n++;
+	return n;
+}
+
+// as MM_ToggleRows_PlayerCount : VS and BATTLE need a second human, ARCADE has its bots
+static void OnlineMenu_ToggleModeRows(void)
+{
+	int alone = OnlineRoom_Humans() < 2;
+
+	for (int i = 0; i < 2; i++)
 	{
-		onlineRowsPlayers[i].stringIndex &= MENU_ROW_LNG_MASK;
-		if ((s16)MainFrame_HaveAllPads(i + 1) == 0)
-			onlineRowsPlayers[i].stringIndex |= MENU_ROW_LOCKED;
+		onlineRowsModes[i].stringIndex &= MENU_ROW_LNG_MASK;
+		if (alone)
+			onlineRowsModes[i].stringIndex |= MENU_ROW_LOCKED;
 	}
+}
+
+// No players menu in a room (session 32b) : the room's humans, then the character select,
+// as MM_MenuProc_2p3p4p's exit
+static void OnlineMenu_ToCharacters(struct RectMenu *menu)
+{
+	GAME_TRACKER->numPlyrNextGame = OnlineRoom_Humans();
+	MM_TITLE_MENU_STATE = TITLE_MENU_STATE_EXITING;
+	MM_DESIRED_MENU_INDEX = MM_EXIT_ROUTE_CHARACTER_SELECT;
+	menu->state = (menu->state & ~DRAW_NEXT_MENU_IN_HIERARCHY) | ONLY_DRAW_TITLE;
 }
 
 // as MM_MenuProc_SingleCup's Arcade branch
@@ -196,28 +205,8 @@ static void OnlineArcadeRaceType_Proc(struct RectMenu *menu)
 	if (row == 1)
 		GAME_TRACKER->gameMode2 |= CUP_ANY_KIND;
 	menu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
-	menu->ptrNextBox_InHierarchy = &onlineMenuPlayers;
-	MM_CHARACTER_SELECT_TRANSITION_STATE = IN_MENU;
-}
-
-// as MM_MenuProc_1p2p, with 1P-4P : then the retail difficulty menu
-static void OnlineArcadePlayers_Proc(struct RectMenu *menu)
-{
-	s16 row = menu->rowSelected;
-
-	if (row == -1)
-	{
-		menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
-		GAME_TRACKER->numPlyrNextGame = 1;
-		MM_CHARACTER_SELECT_TRANSITION_STATE = ENTERING_MENU;
-		return;
-	}
-	if (row < 0 || row > 3)
-		return;
-
-	GAME_TRACKER->numPlyrNextGame = row + 1;
 	menu->ptrNextBox_InHierarchy = &MM_MENU_DIFFICULTY;
-	menu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
+	MM_CHARACTER_SELECT_TRANSITION_STATE = IN_MENU;
 }
 
 static void OnlineMenu_Proc(struct RectMenu *menu)
@@ -259,21 +248,17 @@ static void OnlineMenu_Proc(struct RectMenu *menu)
 		{
 			GAME_TRACKER->numLaps = MM_ONE_LAP_CHEAT_COUNT;
 		}
-		// VS : the retail race type, single race or Cup (D12.6), then 2P-4P
+		// VS : the retail race type, single race or Cup (D12.6), then the characters
 		octrOnlineMenuPath = 1;
 		menu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
 		menu->ptrNextBox_InHierarchy = &MM_MENU_RACE_TYPE;
 		return;
 	}
-	else
-	{
-		GAME_TRACKER->gameMode1 |= BATTLE_MODE;
-	}
 
+	// BATTLE : the characters at once, then the retail arena and setup
+	GAME_TRACKER->gameMode1 |= BATTLE_MODE;
 	octrOnlineMenuPath = 1;
-	MM_CHARACTER_SELECT_TRANSITION_STATE = EXITING_MENU;
-	menu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
-	menu->ptrNextBox_InHierarchy = &MM_MENU_PLAYERS_2P3P4P;
+	OnlineMenu_ToCharacters(menu);
 }
 #endif
 
@@ -303,12 +288,12 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		onlineMenu.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
 		onlineMenuRaceType.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
 		onlineMenuRaceType.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
-		onlineMenuPlayers.posX_curr = MM_MENU_PLAYERS_1P2P.posX_curr;
-		onlineMenuPlayers.posY_curr = MM_MENU_PLAYERS_1P2P.posY_curr;
 		onlineMenuNoKey.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
 		onlineMenuNoKey.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
-		OnlineArcade_TogglePlayerRows();
+		OnlineMenu_ToggleModeRows();
 		// the room NETPLAY asked for is on : its menu, as the row would open it
+		if (onlineAutoOpen && !ONLINE_ROOM)
+			onlineAutoOpen--;
 		if (onlineAutoOpen && ONLINE_ROOM && ((mainMenu->state & DRAW_NEXT_MENU_IN_HIERARCHY) == 0))
 		{
 			onlineAutoOpen = 0;
@@ -519,7 +504,7 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 			// main menu stays whole meanwhile ; no relay key saved : the box says why
 			if (NativeWeb_NetplayHost())
 			{
-				onlineAutoOpen = 1;
+				onlineAutoOpen = ONLINE_AUTO_OPEN_FRAMES;
 				mainMenu->state &= ~ONLY_DRAW_TITLE;
 				return;
 			}
@@ -819,6 +804,11 @@ void MM_MenuProc_Difficulty(struct RectMenu *menu)
 
 	// set difficulty to value, from array of fixed difficulty values
 	GAME_TRACKER->arcadeDifficulty = MM_CUP_DIFFICULTY_SPEED[row];
+#ifdef USE_ONLINE
+	// ctr-native: ONLINE > ARCADE has no players menu, the room's humans play (session 32b)
+	if (ONLINE_ROOM && octrOnlineArcade)
+		GAME_TRACKER->numPlyrNextGame = OnlineRoom_Humans();
+#endif
 
 	MM_TITLE_MENU_STATE = TITLE_MENU_STATE_EXITING;
 	MM_DESIRED_MENU_INDEX = MM_EXIT_ROUTE_CHARACTER_SELECT;
@@ -876,6 +866,22 @@ void MM_MenuProc_SingleCup(struct RectMenu *menu)
 	}
 
 	// if mode is VS
+
+#ifdef USE_ONLINE
+	// ctr-native: ONLINE > VS has no players menu, the room's humans play (session 32b) ; the
+	// last guest gone meanwhile : back to the ONLINE menu, its VS row grey
+	if (ONLINE_ROOM && octrOnlineMenuPath)
+	{
+		if (OnlineRoom_Humans() < 2)
+		{
+			menu->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+			previousMenuOwner->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+			return;
+		}
+		OnlineMenu_ToCharacters(menu);
+		return;
+	}
+#endif
 
 	// set next menu to 2P+3P+4P (vs or battle)
 	menu->ptrNextBox_InHierarchy = &MM_MENU_PLAYERS_2P3P4P;

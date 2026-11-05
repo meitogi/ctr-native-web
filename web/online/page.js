@@ -106,6 +106,7 @@ const STRINGS = {
     linkCopied: 'The link is copied : send it to the other players.',
     copyFromSettings: 'Copy the link from Settings › Netplay and send it to the other players.',
     roomClosed: 'The room is closed (the host left).',
+    joiningRoom: 'Joining the new room…',
     hostLost: 'Connection to the host lost.',
     backToSolo: 'Your game is back to solo.',
     reconnecting: 'Reconnecting…',
@@ -198,6 +199,7 @@ const STRINGS = {
     linkCopied: 'Le lien est copié : envoie-le aux autres joueurs.',
     copyFromSettings: 'Copie le lien depuis Réglages › Netplay et envoie-le aux autres joueurs.',
     roomClosed: 'La partie est fermée (l\'hôte est parti).',
+    joiningRoom: 'Connexion à la nouvelle partie…',
     hostLost: 'Connexion à l\'hôte perdue.',
     backToSolo: 'Ton jeu repasse en solo.',
     reconnecting: 'Reconnexion…',
@@ -286,7 +288,7 @@ export function attach(Module) {
   const query = new URLSearchParams(location.search);
   const net = createOnlineNet({ name: globalThis.ctrUI?.settings.get().name || load('name', 'Player') });
   Module.ctrOnlineNet = net;
-  const asGuest = location.hash.includes('room=');
+  let asGuest = location.hash.includes('room=');
 
   let link = null; // the parsed room link, once there is a room
   let linkText = '';
@@ -480,6 +482,7 @@ export function attach(Module) {
 
   /** Leaves the room : the game drops the mod, the lobby share stops, the room closes. */
   function leave() {
+    joinGen++; // a guest() still opening its room drops it
     rejoinToken++;
     rejoinTry = 0;
     toldWaiting = false;
@@ -511,7 +514,12 @@ export function attach(Module) {
       linkText = location.href;
       net.reset();
       net.room?.close();
+      const gen = ++joinGen;
       const room = await openRoom({ link, role: 'guest', mode: pathRelay.checked ? 'ws' : 'auto', name: net.name, rtcTimeoutMs: 5000 });
+      if (gen !== joinGen) { // left, or another link opened, while this room was opening
+        room.close();
+        return null;
+      }
       room.on('link', render);
       room.on('linkclose', render);
       room.on('warning', (w) => { if (w.code !== 'no-webrtc') fail(w); });
@@ -539,6 +547,7 @@ export function attach(Module) {
   // WebRTC else the relay as the path setting says, the same name ; the game waits on its title
   // for the room's race to end (a locked room refuses the join, OnlineExternal_State retries).
   let rejoinToken = 0;
+  let joinGen = 0; // guest()'s room opening, superseded by a leave or a newer join
   let rejoinTry = 0; // the attempt in flight, for the status line (0 : none)
   // Mid-race the game does not leave : it finishes the race alone (session 32, the bridge's
   // GoSolo), its room still active until the results have shown, then lobbyTick closes the page's
@@ -768,9 +777,27 @@ export function attach(Module) {
     const text = joinInput.value.trim();
     if (!text.includes('#')) return fail({ code: 'link' });
     try { parseRoomLink(text); } catch (e) { return fail(e); }
-    location.hash = text.slice(text.indexOf('#') + 1);
-    location.reload();
+    const hash = `#${text.slice(text.indexOf('#') + 1)}`;
+    if (location.hash === hash) switchRoom();
+    else location.hash = hash; // hashchange : switchRoom
   });
+  // A changed link (session 32b) : another room's link opened in this page — the address bar, or
+  // Join above — leaves the current room (a host's guests are told it closed ; a race of the room
+  // ends the retail way, back to the title) and joins that one in place : the game enters it once
+  // on its title, behind the host's picture in its menus, or waiting for its race to end
+  let switching = null; // the room a changed link is joining, until its guest() settles
+  function switchRoom() {
+    if (!location.hash.includes('room=')) return;
+    let next;
+    try { next = parseRoomLink(location.hash); } catch (e) { return fail(e); }
+    if ((net.room && link?.room === next.room) || switching === next.room) return;
+    leave(); // also a rejoin between its attempts, or a join still opening
+    asGuest = true;
+    ui?.toast(T.joiningRoom);
+    switching = next.room;
+    guest().finally(() => { if (switching === next.room) switching = null; });
+  }
+  window.addEventListener('hashchange', switchRoom);
   const onPath = () => {
     save('path', pathRelay.checked ? 'relay' : 'auto');
     const inGame = (Module.ctrOnlineOctr?.().CurrState ?? 0) >= 2;

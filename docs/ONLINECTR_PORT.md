@@ -1412,3 +1412,24 @@ D11.8) : `CUP_ANY_KIND`, then 1P–4P, the difficulty, the characters and the re
 ONLINE › VS gains a race type of its own, SINGLE RACE / CUP, before 2P–4P. The cup select's Cross
 leads to the track lock (`QueueLoadTrack`) as the track select's does ; its Triangle goes back to
 the characters (retail).
+
+**D12.7 — No players menu, NETPLAY opens the room (session 32b, the user, 2026-11-05).** In a
+room the number of players is the room's humans, one per machine : the host's pad and its guests'
+(P2–P4, plugged while the host's menus run), counted when the character select opens
+(`OnlineRoom_Humans`, `MainFrame_HaveAllPads`). NETPLAY › VS → SINGLE RACE / CUP → the
+characters ; NETPLAY › BATTLE → the characters, then the retail arena and setup ; NETPLAY › ARCADE
+→ SINGLE RACE / CUP → the difficulty → the characters, the bots filling up to 8 (D11). The 1P–4P
+menu of D11.8 and the 2P–4P step of VS and BATTLE are gone from the room's path ; solo play keeps
+them. Alone in the room, VS and BATTLE are `MENU_ROW_LOCKED` (grey, Cross refused) ; ARCADE
+works alone. A guest arriving after the character select opened joins the next one, as after a
+race. NETPLAY with no room has the page host one at once with its saved relay and key (a toast
+carries the link ; with none, the game's box offers the page's Netplay settings), then opens
+this menu by itself.
+
+**D12.8 — A changed link (session 32b).** Another room's link opened in the page — the address
+bar's hash (`hashchange`) or the panel's Join, which no longer reloads — leaves the current room
+(as a host, its guests are told it closed ; a race of that room ends the retail way, back to the
+title) and joins the new one in place, with a toast. The game enters it once on its title
+(`pendingEnter`) : behind the host's picture in its menus, or waiting for its race to end (11b).
+The same room's link again changes nothing. A player racing alone outside any room is not taken
+out of the race : the page joins and the game enters once back on its title.

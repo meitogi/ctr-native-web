@@ -1,6 +1,6 @@
 // Player suite : Online Arcade with the host's bots (session 23, docs/ONLINECTR_PORT.md D11).
 // Two browsers (agent browser a hosts, b is the guest — LOG T4) ; the host plays ONLINE → ARCADE
-// → single race → 2P → the difficulty's default → characters → track, as online.suite.mjs plays
+// → single race → the difficulty's default → characters → track, as online.suite.mjs plays
 // VS. The host's bots fill the race up to 8 karts ; the guest's game sees them as remote karts.
 //
 // ONLINE-ARCADE        8 karts on both screens, the bots named after their character, the bots'

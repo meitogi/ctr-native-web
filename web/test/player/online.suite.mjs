@@ -1,6 +1,6 @@
 // Player suite : Online 2-tab. The suite's tab hosts a room (sv_core runs in its wasm, the
 // lobby is its own game's menus, shared to the guest as Share does), a second tab opens the
-// room link as the guest ; the host plays ONLINE → VS → 2 players → characters → track with
+// room link as the guest ; the host plays ONLINE → VS → characters (the room's 2) → track with
 // the keyboard, the guest locks its character with its own keys (they reach the host as P2's
 // pad), each game loads its own race, both hold Cross, and each side must see the other's kart
 // move. Once over WebRTC (P2P), once with the guest forced onto the relay's WebSocket path
@@ -258,8 +258,9 @@ export async function charactersToRace(host, guest) {
  * own (or the second browser), driven with the same player harness. `inject` : page scripts
  * both pages get before they load (web/net/test/impair.js). Resolves at SG_STARTRACE on both
  * sides with { host, guest, gp, gjs, gl, hl, leave, close } — `close()` lets the guest's browser go.
- * `arcade` : ONLINE → ARCADE → single race → 2P → the difficulty's default (session 23, the
- * host's bots fill the race up to 8 karts) instead of ONLINE → VS → single race → 2P.
+ * `arcade` : ONLINE → ARCADE → single race → the difficulty's default (session 23, the
+ * host's bots fill the race up to 8 karts) instead of ONLINE → VS → single race. No players
+ * menu (session 32b) : the room's two humans play.
  * `cup` : the race type's CUP instead (session 32, D12), then the first cup of the cup select.
  */
 export async function roomToRace(ctx, mode, { inject = [], arcade = false, cup = false } = {}) {
@@ -282,6 +283,57 @@ export async function roomToRace(ctx, mode, { inject = [], arcade = false, cup =
 	if (hs.role !== 'host' || hs.backend !== 'relay') throw new Error(`host : no room on the relay (${hs.error})`)
 	if (/[?&](key|rk)=/.test(hs.link.split('#')[0])) throw new Error('host : a secret left the # part of the link')
 
+	const { guestBrowser, guest, gp, gjs } = await openGuestPage(ctx, origin, { inject, mode })
+	try {
+		await boot(guest, hs.link)
+		const vis = [await ctx.js('return document.visibilityState'), await gjs('return document.visibilityState')]
+		if (vis.join() !== 'visible,visible') throw new Error(`a tab is not painting : visibility ${vis.join(' / ')}`)
+
+		// The host's game joined its own room (the lobby states draw nothing : it stays on its
+		// title) ; the guest's game joined the host's and sits behind the host's picture.
+		await until(host, 'the host in its room', s => s.lobby.active && s.octr.CurrState === ST.HOST_TRACK_PICK, 30_000)
+		await until(guest, 'the guest in the room', s => s.lobby.active && s.octr.CurrState === ST.GUEST_TRACK_WAIT && s.share?.state === 'connected' && s.share.slot === 1, 60_000)
+		const gl = (await online(guest)).links[0]
+		const hl = (await online(host)).links[0]
+		if (mode !== 'ws' && gl?.backend === 'ws') {
+			// An agent browser older than the sandbox's WebRtcHideLocalIpsWithMdns flag resolves
+			// only its origins (--host-resolver-rules) : WebRTC's mDNS host candidates (….local)
+			// never resolve, ICE fails, the guest falls back to the relay. Not this build's fault.
+			const why = (await online(guest)).error || 'WebRTC attempt failed'
+			ctx.skip(`no WebRTC path in this browser (${why}) : the guest fell back to the relay`)
+		}
+		if (mode === 'ws' && gl?.backend !== 'ws') throw new Error(`guest path ${gl?.backend}/${gl?.path}, wanted the forced WebSocket path`)
+		if (hl?.peer !== 0) throw new Error(`host : guest peer id ${hl?.peer}`)
+		await until(host, 'two drivers', s => s.octr.NumDrivers === 2 && s.octr.names[1] === 'Guest', 15_000)
+		await until(guest, 'two drivers', s => s.octr.NumDrivers === 2 && s.octr.names[1] === 'Host', 15_000)
+		if ((await online(guest)).lobby.phase !== PHASE.menus) throw new Error(`guest : lobby phase ${(await online(guest)).lobby.phase}, wanted the host's menus`)
+		await shot(ctx, `${mode}-room`)
+
+		// The lobby is the host's own menus : ONLINE → VS → the race type → the character select,
+		// with the room's 2 humans (the guest's pad is plugged as P2 by the Share host)
+		await menuTo(host, 'NETPLAY', dir => host.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
+		const raceType = cup ? ['ArrowDown', CROSS] : [CROSS]
+		const presses = arcade ? [CROSS, 'ArrowDown', 'ArrowDown', CROSS, ...raceType, CROSS] : [CROSS, CROSS, ...raceType]
+		for (const key of presses) {
+			await host.press(key)
+			await host.frames(15)
+		}
+		await untilGame(host, 'the character select', s => s.charSelect != null, 15_000)
+		await charactersToRace(host, guest)
+		// leave(): the guest's page goes away (navigates off the game : its links close as a closed tab's do)
+		const leave = () => guest.navigate(`${origin}/preload-flag.js`)
+		return { host, guest, gp, gjs, gl, hl, leave, close: () => guestBrowser.close() }
+	} catch (e) {
+		await guestBrowser.close()
+		throw e
+	}
+}
+
+/**
+ * The guest's page, not loaded yet : `{ guestBrowser, guest, gp, gjs }`, its name and path stored
+ * before it loads (roomToRace, LINK-CHANGE).
+ */
+async function openGuestPage(ctx, origin, { inject = [], mode = 'auto' } = {}) {
 	// The guest : a second browser when the run has one (--set guestCdp=<host:port>, play.sh
 	// passes `agent-browser -i b env`), its own Chromium, CDP connection and recorder ; else a
 	// second tab of this browser, in a window of its own (a background tab would stop
@@ -332,44 +384,7 @@ export async function roomToRace(ctx, mode, { inject = [], arcade = false, cup =
 		// path too, or a guest in its own browser stays on auto and pairs over WebRTC.
 		await (guestOwnBrowser ? gjs : ctx.js)(`localStorage.setItem('ctr-online.name', 'Guest')
 			localStorage.setItem('ctr-online.path', ${JSON.stringify(mode === 'ws' ? 'relay' : 'auto')}); return true`)
-		await boot(guest, hs.link)
-		const vis = [await ctx.js('return document.visibilityState'), await gjs('return document.visibilityState')]
-		if (vis.join() !== 'visible,visible') throw new Error(`a tab is not painting : visibility ${vis.join(' / ')}`)
-
-		// The host's game joined its own room (the lobby states draw nothing : it stays on its
-		// title) ; the guest's game joined the host's and sits behind the host's picture.
-		await until(host, 'the host in its room', s => s.lobby.active && s.octr.CurrState === ST.HOST_TRACK_PICK, 30_000)
-		await until(guest, 'the guest in the room', s => s.lobby.active && s.octr.CurrState === ST.GUEST_TRACK_WAIT && s.share?.state === 'connected' && s.share.slot === 1, 60_000)
-		const gl = (await online(guest)).links[0]
-		const hl = (await online(host)).links[0]
-		if (mode !== 'ws' && gl?.backend === 'ws') {
-			// An agent browser older than the sandbox's WebRtcHideLocalIpsWithMdns flag resolves
-			// only its origins (--host-resolver-rules) : WebRTC's mDNS host candidates (….local)
-			// never resolve, ICE fails, the guest falls back to the relay. Not this build's fault.
-			const why = (await online(guest)).error || 'WebRTC attempt failed'
-			ctx.skip(`no WebRTC path in this browser (${why}) : the guest fell back to the relay`)
-		}
-		if (mode === 'ws' && gl?.backend !== 'ws') throw new Error(`guest path ${gl?.backend}/${gl?.path}, wanted the forced WebSocket path`)
-		if (hl?.peer !== 0) throw new Error(`host : guest peer id ${hl?.peer}`)
-		await until(host, 'two drivers', s => s.octr.NumDrivers === 2 && s.octr.names[1] === 'Guest', 15_000)
-		await until(guest, 'two drivers', s => s.octr.NumDrivers === 2 && s.octr.names[1] === 'Host', 15_000)
-		if ((await online(guest)).lobby.phase !== PHASE.menus) throw new Error(`guest : lobby phase ${(await online(guest)).lobby.phase}, wanted the host's menus`)
-		await shot(ctx, `${mode}-room`)
-
-		// The lobby is the host's own menus : ONLINE → VS → the race type → 2 players (open : the
-		// guest's pad is plugged as P2 by the Share host) → the character select
-		await menuTo(host, 'NETPLAY', dir => host.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
-		const raceType = cup ? ['ArrowDown', CROSS] : [CROSS]
-		const presses = arcade ? [CROSS, 'ArrowDown', 'ArrowDown', CROSS, ...raceType, 'ArrowDown', CROSS, CROSS] : [CROSS, CROSS, ...raceType, CROSS]
-		for (const key of presses) {
-			await host.press(key)
-			await host.frames(15)
-		}
-		await untilGame(host, 'the character select', s => s.charSelect != null, 15_000)
-		await charactersToRace(host, guest)
-		// leave(): the guest's page goes away (navigates off the game : its links close as a closed tab's do)
-		const leave = () => guest.navigate(`${origin}/preload-flag.js`)
-		return { host, guest, gp, gjs, gl, hl, leave, close: () => guestBrowser.close() }
+		return { guestBrowser, guest, gp, gjs }
 	} catch (e) {
 		await guestBrowser.close()
 		throw e
@@ -654,11 +669,89 @@ async function netplayRow(ctx) {
 	const g = await untilGame(host, 'the ONLINE menu by itself', s => s.sub?.title === 'NETPLAY', 20_000)
 	await shot(ctx, 'netplay-auto-host')
 	const toasts = await ctx.js('return globalThis.__toasts ?? []')
-	await ctx.js('window.__ctrOnline.leave(); return true')
 	if (!toasts.some(t => /Room open/.test(t))) throw new Error(`no « Room open » toast : ${JSON.stringify(toasts)}`)
 	steps.push(`key saved : a room on ${s.backend}, the ONLINE menu (${g.sub.label}) by itself, toasts ${JSON.stringify(toasts)}`)
+	// Alone in the room (session 32b) : VS and BATTLE grey, Cross on VS stays ; ARCADE's race
+	// type and its way back ; Triangle to the main menu, the room kept
+	await untilGame(host, 'the cursor on VS', s => s.sub?.label === 'VS.', 5_000)
+	await ctx.press(CROSS)
+	await ctx.frames(30)
+	const vs = await game(host)
+	if (vs?.sub?.title !== 'NETPLAY') throw new Error(`alone, Cross on VS left the ONLINE menu : ${vs?.sub?.title}/${vs?.sub?.label}`)
+	for (let i = 0; i < 6 && (await game(host))?.sub?.label !== 'ARCADE'; i++) {
+		await ctx.press('ArrowDown')
+		await ctx.frames(10)
+	}
+	await untilGame(host, 'the cursor on ARCADE', s => s.sub?.label === 'ARCADE', 5_000)
+	await ctx.press(CROSS)
+	const rt = await untilGame(host, 'ARCADE\'s race type', s => s.sub?.title === 'RACE TYPE', 10_000)
+	await ctx.press('z')
+	await untilGame(host, 'the ONLINE menu again', s => s.sub?.title === 'NETPLAY', 10_000)
+	// a press landing as a menu opens is lost (as the box's above) : again until it leaves
+	for (let i = 0; i < 4 && (await game(host))?.sub; i++) {
+		await ctx.press('z')
+		await ctx.frames(20)
+	}
+	const main = await untilGame(host, 'the main menu', s => !s.sub && s.menu?.label === 'NETPLAY', 10_000)
+	const kept = (await online(host)).role === 'host'
+	await ctx.js('window.__ctrOnline.leave(); return true')
+	steps.push(`alone : VS stays grey, ARCADE → ${rt.sub.title}, Triangle ×2 → ${main.menu.label}, room ${kept ? 'kept' : 'lost'}`)
+	if (!kept) throw new Error(steps.join(' · '))
 	if (/did not close/.test(steps[1])) throw new Error(steps.join(' · '))
 	return steps.join(' · ')
+}
+
+/**
+ * Session 32b, a changed link : the guest's page hosts its own room B, then its address bar gets
+ * the host's room A link. Its page leaves B and joins A in place (no reload) : a toast, then A's
+ * lobby on both games (the guest behind the host's picture, its pad as P2). The same link again
+ * changes nothing.
+ */
+async function linkChange(ctx) {
+	const relay = ctx.args.relay
+	const rk = ctx.args.rk ?? ''
+	if (!relay) ctx.skip('no relay : --set relay=ws://localhost:8787 --set rk=<key> (a local ctr-relay, see RUN)')
+	const origin = new URL(ctx.args.url).origin
+	const host = { name: 'host', js: ctx.js, press: ctx.press, frames: ctx.frames, navigate: url => ctx.conn.send('Page.navigate', { url }, ctx.sid) }
+	const hostRoom = js => js(`localStorage.setItem('ctr-online.points', 'relay')
+		const set = (id, v) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('input')) }
+		set('online-relay', ${JSON.stringify(relay)}); set('online-rk', ${JSON.stringify(rk)})
+		await window.__ctrOnline.host()
+		return true`)
+	await boot(host, `${origin}/index.html`)
+	await ctx.js(`localStorage.setItem('ctr-online.path', 'auto'); return true`)
+	await hostRoom(ctx.js)
+	const a = await online(host)
+	if (a.role !== 'host') throw new Error(`host : no room A (${a.error})`)
+
+	const { guestBrowser, guest, gjs } = await openGuestPage(ctx, origin)
+	try {
+		await guest.gconn.send('Page.addScriptToEvaluateOnNewDocument', { source: TOASTS })
+		await boot(guest, `${origin}/index.html`)
+		await hostRoom(gjs)
+		const b = await until(guest, 'room B on the guest\'s page', s => s.role === 'host' && s.lobby.active, 30_000)
+		if (b.room === a.room) throw new Error('room B is room A')
+
+		await gjs(`location.hash = new URL(${JSON.stringify(a.link)}).hash; return true`)
+		const g = await until(guest, 'the guest in room A', s => s.role === 'guest' && s.room === a.room && s.lobby.active && s.octr.CurrState === ST.GUEST_TRACK_WAIT && s.share?.state === 'connected' && s.share.slot === 1, 60_000)
+		await until(host, 'two drivers in room A', s => s.octr.NumDrivers === 2, 15_000)
+		const loads = await gjs('return performance.getEntriesByType(\'navigation\').length + \':\' + location.hash.includes(\'room=\')')
+		const toasts = await gjs('return globalThis.__toasts ?? []')
+		if (!toasts.some(t => /Joining the new room/.test(t))) throw new Error(`no « Joining » toast : ${JSON.stringify(toasts)}`)
+		await guestShot(ctx, guest, 'link-change-in-a')
+
+		// the same link again : nothing happens
+		const selfId = g.selfId
+		await gjs(`window.dispatchEvent(new HashChangeEvent('hashchange')); return true`)
+		await sleep(2000)
+		const same = await online(guest)
+		if (same.role !== 'guest' || same.room !== a.room || same.selfId !== selfId) throw new Error(`the same link moved the guest : ${same.role} ${same.room} ${same.selfId} (was ${selfId})`)
+		await gjs('window.__ctrOnline.leave(); return true')
+		await ctx.js('window.__ctrOnline.leave(); return true')
+		return `room B ${b.room} → room A ${a.room} in place (navigations ${loads}), the guest P2 in A's lobby on ${g.links[0]?.backend}/${g.links[0]?.path}, toasts ${JSON.stringify(toasts)} ; the same link again : unchanged`
+	} finally {
+		await guestBrowser.close()
+	}
 }
 
 /**
@@ -728,5 +821,7 @@ export default async ctx => {
 	await ctx.scenario('ONLINE-ITEM-RACE', () => twoTabs(ctx, 'auto', { itemRace: true }))
 	// Session 32 : NETPLAY with no room (the no-key box, a room at once) ; a whole VS Cup, humans only (D12)
 	await ctx.scenario('NETPLAY-ROW', () => netplayRow(ctx))
+	// Session 32b : another room's link opened in the page : leave this room, join that one in place
+	await ctx.scenario('LINK-CHANGE', () => linkChange(ctx))
 	await ctx.scenario('ONLINE-VS-CUP', () => cupOn(ctx))
 }

@@ -8,7 +8,7 @@
 //   4. once Bot is in the room, the player picks the race from this window's own menus ; Bot
 //      follows (its character locked, its race driven by its Bot switch).
 // walkToRace (globalThis.ctrDev.walk, for the player suites) walks this window's menus to the race
-// instead : ONLINE → VS, BATTLE or ARCADE (Share : VS.) → players → character → the defaults.
+// instead : ONLINE → VS, BATTLE or ARCADE (Share : VS. → players) → character → the defaults.
 import { MAIN_MENU, menuTo, onMainMenu } from '../lib/autopilot.js'
 import { SECOND, host, secondWindowUrl, waitFor, windowFeatures } from '../lib/second-window.js'
 import { frames, out } from './keys.js'
@@ -37,10 +37,11 @@ export async function walkToRace(spec, { step = () => {} } = {}) {
   const read = async () => game()
   await until('main menu', onMainMenu, 60_000)
   await menuTo({ read, out, label: spec.menu, rows: MAIN_MENU, settle: () => frames(8) })
-  // ONLINE → VS (first row) or BATTLE (second) → players ; VS. → single race → players
-  // ONLINE → ARCADE (third) → single race → 2P (Bot is P2) → the difficulty's default
+  // ONLINE → VS (first row) → single race, or BATTLE (second) : the room's 2 humans, no players
+  // menu (session 32b) ; VS. → single race → players
+  // ONLINE → ARCADE (third) → single race → the difficulty's default
   const presses = spec.arcade
-    ? ['c', 'ArrowDown', 'ArrowDown', 'c', 'c', 'ArrowDown', 'c', 'c']
+    ? ['c', 'ArrowDown', 'ArrowDown', 'c', 'c', 'c']
     : ['c', ...(spec.battle ? ['ArrowDown'] : []), 'c', 'c']
   for (const key of presses) {
     await out.press(key)
