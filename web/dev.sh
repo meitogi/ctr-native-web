@@ -72,8 +72,9 @@ stop_servers() {
   echo "dev.sh: stopped"
 }
 
+# 60 s : Vite's first start after a container restart re-optimizes its deps (~25 s on a busy machine)
 wait_port() {
-  for _ in $(seq 1 100); do ss -ltn | grep -q ":$1 " && return 0; sleep 0.2; done
+  for _ in $(seq 1 300); do ss -ltn | grep -q ":$1 " && return 0; sleep 0.2; done
   echo "dev.sh: nothing listens on $1 — $2" >&2
   exit 1
 }
