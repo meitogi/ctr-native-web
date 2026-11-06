@@ -5,6 +5,7 @@
   // #drop-progress, #drop-error, #boot-status) : suites read them.
   // With a stored disc (phase 'ready'), #press-start : the disc, and the real button that starts
   // the game — the connected pad's Cross in its family's look, the keyboard's Start key.
+  // #boot-version : the build's version (preload-flag.js), bottom right as on the game's title.
   import Glyph from './Glyph.svelte'
   import Logo from './Logo.svelte'
   import { codeOf } from './lib/keys.js'
@@ -85,6 +86,7 @@
     <p id="boot-status" class="dim small" aria-live="polite">{ui.status}</p>
     <div id="drop-error" class="error" role="alert" hidden={!ui.error}>{ui.error}</div>
   </div>
+  <p id="boot-version" class="version dim small">{T.version} {globalThis.__CTR_VERSION ?? 'dev'}</p>
 </div>
 
 <style>
@@ -129,4 +131,5 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .error { margin-top: 10px; width: 100%; box-sizing: border-box; text-align: left; padding: 14px 18px; border-radius: 16px; background: rgba(255, 80, 80, 0.12); border: 1px solid rgba(255, 107, 107, 0.5); white-space: pre-wrap; }
   #boot-status { min-height: 1.4em; margin: 12px 0 0; }
+  .version { position: fixed; right: 16px; bottom: 12px; margin: 0; pointer-events: none; }
 </style>
