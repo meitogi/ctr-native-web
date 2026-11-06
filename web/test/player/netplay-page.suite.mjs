@@ -338,6 +338,163 @@ export default async ctx => {
 	await ctx.scenario('SELECT-GROW', () => selectGrow(ctx))
 	// VS left with one human : back a menu, its row grey, a toast
 	await ctx.scenario('SELECT-ALONE', () => selectAlone(ctx))
+	// the host alone with a pad plugged : the pad is this machine's, not a guest (32e follow-up)
+	await ctx.scenario('ROOM-PAD-ALONE', () => roomPadAlone(ctx))
+	// BATTLE, back to the ONLINE menu, then ARCADE : no battle left in the Arcade cup
+	await ctx.scenario('BATTLE-THEN-ARCADE', () => battleThenArcade(ctx))
+	// NETPLAY's « Room open » toast is a button : a click copies the link (32e follow-up)
+	await ctx.scenario('TOAST-COPY', () => toastCopy(ctx))
+}
+
+// the clipboard stubbed : every write kept in __clip, accepted or refused
+const clipStub = ok => `globalThis.__clip = []
+	navigator.clipboard.writeText = t => (__clip.push(t), ${ok} ? Promise.resolve() : Promise.reject(new DOMException('denied', 'NotAllowedError'))); return true`
+
+async function toastCopy(ctx) {
+	const tab = await bootWith(ctx, ctx.args.relay, ctx.args.rk)
+	const press = keyboard(ctx)
+	const actionToast = async label => {
+		const t0 = Date.now()
+		let text
+		while (!(text = await ctx.js("return document.querySelector('.toast.action')?.innerText.replace(/\\s+/g, ' ').trim() ?? null")) && Date.now() - t0 < 15_000) await sleep(250)
+		if (!text) throw new Error(`${label} : no clickable toast in 15 s (${JSON.stringify(await toasts(ctx))})`)
+		return text
+	}
+	const netplay = async () => {
+		// back to the main menu first : a submenu left open (the ONLINE menu after a leave) is not it
+		for (let i = 0; i < 4 && (await game(tab))?.sub; i++) { await press('triangle'); await sleep(600) }
+		await menuTo(ctx, 'NETPLAY', press)
+		await press('cross')
+		return until(tab, 'a room', s => s?.role === 'host' && !!s.link, 15_000)
+	}
+	try {
+		// 1. the clipboard refuses NETPLAY's copy : « Click here to copy » ; refused again on the click :
+		//    Settings › Netplay opens with the link selected
+		await ctx.js(clipStub(false))
+		const a = await netplay()
+		const refusedText = await actionToast('refused')
+		await shot(ctx, 'toast-copy-refused')
+		await click(ctx, '.toast.action')
+		await sleep(800)
+		const selected = await ctx.js("const b = document.getElementById('online-link'); return document.activeElement === b && b.value.length > 0 && b.selectionEnd - b.selectionStart === b.value.length")
+		await shot(ctx, 'toast-copy-refused-click')
+		await closePanel(ctx)
+		if (!/Click here to copy the link/.test(refusedText) || !selected) throw new Error(`refused : « ${refusedText} », the link selected after the click ${selected}`)
+		await ctx.js('window.__ctrOnline.leave(); return true')
+		await sleep(2000)
+
+		// 2. the clipboard accepts : « the link is copied », and the click copies it again
+		await ctx.js(clipStub(true))
+		const b = await netplay()
+		const copiedText = await actionToast('accepted')
+		const before = (await ctx.js('return __clip')).length
+		await click(ctx, '.toast.action')
+		await sleep(500)
+		const clip = await ctx.js('return __clip')
+		const list = await toasts(ctx)
+		await shot(ctx, 'toast-copy-clicked')
+		if (!/the link is copied/.test(copiedText) || clip.length !== before + 1 || clip.at(-1) !== b.link || list.at(-1) !== 'Copied') throw new Error(`accepted : « ${copiedText} », clipboard ${JSON.stringify(clip)}, toasts ${JSON.stringify(list.slice(-2))}`)
+		return `refused : « ${refusedText} », its click opened Settings with the link selected (room ${a.room}) ; accepted : « ${copiedText} », its click copied ${b.link.slice(0, 40)}… and toasted « Copied »`
+	} finally {
+		await ctx.js('window.__ctrOnline.leave(); return true').catch(() => {})
+	}
+}
+
+// the open menu : the deepest submenu the bridge reports, else the main menu
+const cur = g => g?.sub ?? g?.menu ?? null
+/** The open menu's cursor to the row `label` ; null when no row has it (a grey row is skipped). */
+async function toRow(tab, press, label) {
+	const seen = []
+	for (let i = 0; i < 6; i++) {
+		const l = cur(await game(tab))?.label
+		if (l === label) return seen
+		seen.push(l)
+		await press('down')
+		await sleep(400)
+	}
+	return null
+}
+async function pick(tab, press, label) {
+	if (!(await toRow(tab, press, label))) throw new Error(`no row « ${label} » : on « ${cur(await game(tab))?.label} »`)
+	await press('cross')
+	await sleep(600)
+}
+const ONLINE_ROWS = g => !g?.charSelect && /VS|BATTLE|ARCADE/.test(cur(g)?.label ?? '')
+/** NETPLAY on the main menu, then Cross : the ONLINE menu. */
+async function openOnlineMenu(ctx, tab, press) {
+	await menuTo(ctx, 'NETPLAY', press)
+	await press('cross')
+	return untilGame(tab, 'the ONLINE menu', ONLINE_ROWS, 8000)
+}
+const KEYS = { down: 'ArrowDown', up: 'ArrowUp', cross: 'c', triangle: 'z' }
+const keyboard = ctx => b => ctx.press(KEYS[b])
+const gamepad = ctx => b => ctx.pad(0).press(b)
+
+async function roomPadAlone(ctx) {
+	const { host } = await hostRoom(ctx)
+	try {
+		await ctx.pad(0).press('down') // the virtual pad becomes visible to the page : a second device here
+		await sleep(800)
+		const press = gamepad(ctx)
+		await openOnlineMenu(ctx, host, press)
+		// VS and BATTLE grey : the cursor reaches them, Cross does not take them
+		const taken = {}
+		for (const row of ['VS.', 'BATTLE']) {
+			await pick(host, press, row)
+			await sleep(1000)
+			const g = await game(host)
+			taken[row] = !!g.charSelect || cur(g)?.label !== row
+			if (taken[row]) for (let i = 0; i < 4 && !ONLINE_ROWS(await game(host)); i++) { await press('triangle'); await sleep(800) }
+		}
+		await shot(ctx, 'room-pad-alone-menu')
+		await pick(host, press, 'ARCADE')
+		await pick(host, press, 'CUP')
+		await pick(host, press, 'MEDIUM')
+		const c = (await untilGame(host, 'the Arcade select', g => !!g.charSelect, 30_000)).charSelect
+		await sleep(500)
+		await shot(ctx, 'room-pad-alone-select')
+		if (taken['VS.'] || taken.BATTLE) throw new Error(`alone with a pad, Cross took ${JSON.stringify(taken)} ; the Arcade select ${c.players}P`)
+		if (c.players !== 1) throw new Error(`the Arcade select has ${c.players} players, alone with a pad`)
+		return `alone with a pad : VS and BATTLE refuse Cross ; Arcade › Cup › Medium : ${c.players}P`
+	} finally {
+		await ctx.js('window.__ctrOnline.leave(); return true').catch(() => {})
+	}
+}
+
+async function battleThenArcade(ctx) {
+	const origin = new URL(ctx.args.url).origin
+	const { host, a } = await hostRoom(ctx)
+	const b = await openGuestPage(ctx, origin, { name: 'Bee' })
+	try {
+		await boot(b.guest, a.link)
+		await until(b.guest, 'Bee in the room', s => s.lobby.active && s.octr.CurrState === ST.GUEST_TRACK_WAIT && s.share?.state === 'connected', 90_000)
+		const press = keyboard(ctx)
+		await openOnlineMenu(ctx, host, press)
+		await pick(host, press, 'BATTLE')
+		const battle = await untilGame(host, 'the Battle select', g => !!g.charSelect, 30_000)
+		await sleep(800)
+		await press('triangle') // back to the ONLINE menu
+		await untilGame(host, 'the ONLINE menu again', ONLINE_ROWS, 15_000)
+		await sleep(500)
+		await pick(host, press, 'ARCADE')
+		await pick(host, press, 'CUP')
+		await pick(host, press, 'MEDIUM')
+		let g
+		try {
+			g = await untilGame(host, 'the Arcade select', g => !!g.charSelect, 20_000)
+		} catch (e) {
+			g = await game(host)
+			await shot(ctx, 'battle-then-arcade-stuck')
+			throw new Error(`${e.message} || mode ${g?.mode} menu ${JSON.stringify(g?.menu)} sub ${JSON.stringify(g?.sub)} screen ${g?.screen}`)
+		}
+		await sleep(500)
+		await shot(ctx, 'battle-then-arcade-select')
+		if (g.mode.includes('BATTLE_MODE') || !g.mode.includes('ARCADE_MODE')) throw new Error(`the Arcade select in mode ${g.mode}`)
+		return `Battle select (${battle.mode.join('|')}) → Triangle → ARCADE › CUP › MEDIUM : the select, ${g.charSelect.players}P, mode ${g.mode.join('|')}`
+	} finally {
+		await ctx.js('window.__ctrOnline.leave(); return true').catch(() => {})
+		await b.guestBrowser.close()
+	}
 }
 
 async function selectAlone(ctx) {

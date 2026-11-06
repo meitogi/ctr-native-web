@@ -14,6 +14,8 @@
 // saved relay and key, 0 when it has none (the game then says why, and offers the panel).
 // NativeWeb_RoomAlone() : a Netplay VS / BATTLE character select left with one human goes back a
 // menu (game/230/MM_Characters.c) ; the page says why in a toast.
+// NativeWeb_RoomGuestMask() : the slots a room's guests hold (bit n = slot n, the share pads of
+// platform/native_input.c) — a room's humans are the host and these, never a pad of the host's.
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/em_macros.h>
 // declared as the EM_JS import it is : the game's files see this before the EM_JS (unity build)
@@ -22,6 +24,7 @@ int NativeWeb_IntroSkip(void) EM_IMPORT(NativeWeb_IntroSkip);
 void NativeWeb_OpenMultiplayer(void) EM_IMPORT(NativeWeb_OpenMultiplayer);
 int NativeWeb_NetplayHost(void) EM_IMPORT(NativeWeb_NetplayHost);
 void NativeWeb_RoomAlone(void) EM_IMPORT(NativeWeb_RoomAlone);
+int NativeWeb_RoomGuestMask(void);
 #endif
 #else
 #define NativeWeb_IntroSkip() 0

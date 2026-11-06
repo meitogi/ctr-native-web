@@ -4,7 +4,7 @@
 //   ctrUI.settings            the settings store (settings.js) — name, volume, mappings…
 //   ctrUI.adopt(id, title, el)  put another module's panel in a Settings tab (web/online/page.js,
 //                             web/share/panel.js) ; returns { open(), close() }
-//   ctrUI.toast(title, detail)
+//   ctrUI.toast(title, detail, family, { sticky, action, ms })
 //   ctrUI.text                 the strings (lib/strings.js, EN / FR) — Share's join / leave toasts
 //   ctrUI.players              couch mode (lib/players.js) : slots as the game reports them, swap(a, b)
 //   ctrUI.lobby(on)            an Online room's guest in the lobby : the game gets no local input
@@ -149,10 +149,12 @@ export function forgetStoredDisc() {
 }
 
 let toastSeq = 0
-export function toast(title, detail = '', family = '', { sticky = false } = {}) {
+export function toast(title, detail = '', family = '', { sticky = false, action = null, ms = 4500 } = {}) {
   const id = ++toastSeq
-  ui.toasts = [...ui.toasts, { id, title, detail, family }]
-  if (!sticky) setTimeout(() => dismissToast(id), 4500)
+  // a toast with an action is a button : a click (or Enter) runs it and dismisses the toast
+  const run = action && (() => { dismissToast(id); action() })
+  ui.toasts = [...ui.toasts, { id, title, detail, family, action: run }]
+  if (!sticky) setTimeout(() => dismissToast(id), ms)
   return id
 }
 export function dismissToast(id) {

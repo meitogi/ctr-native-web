@@ -154,14 +154,19 @@ static void OnlineNoKey_Proc(struct RectMenu *menu)
 	menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
 }
 
-// The room's humans, one per machine : the host's pad and its guests' (P2-P4, plugged while
-// the host's menus run)
+// The room's humans, one per machine : the host and its guests (P2-P4, held while the host's
+// menus run). On the web, the guests' slots only : a second pad on the host's machine is no guest.
 static int OnlineRoom_Humans(void)
 {
 	int n = 1;
 
+#if defined(__EMSCRIPTEN__)
+	while ((n < 4) && (NativeWeb_RoomGuestMask() & (1 << n)))
+		n++;
+#else
 	while ((n < 4) && MainFrame_HaveAllPads(n + 1))
 		n++;
+#endif
 	return n;
 }
 
@@ -223,10 +228,11 @@ static void OnlineMenu_Proc(struct RectMenu *menu)
 		return;
 	}
 
-	// as the main menu's VS / BATTLE rows ; an ARCADE taken then backed out of
-	// leaves nothing behind
+	// as the main menu's VS / BATTLE rows ; an ARCADE or a BATTLE taken then backed out of
+	// (the character select's Triangle comes back here, not through the main menu) leaves
+	// nothing behind
 	GAME_TRACKER->gameMode2 &= ~(CUP_ANY_KIND);
-	GAME_TRACKER->gameMode1 &= ~ARCADE_MODE;
+	GAME_TRACKER->gameMode1 &= ~(ARCADE_MODE | BATTLE_MODE);
 	octrOnlineArcade = 0;
 	if (row == 2)
 	{

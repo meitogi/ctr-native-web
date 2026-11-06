@@ -268,10 +268,24 @@ EM_JS(int, NativeInput_WebReadRemotePads, (u8 *dst), {
 	return share ? share.readPads(HEAPU8, dst) : 0;
 });
 
+#ifdef USE_ONLINE
+// the last mask NativeInput_WebReadRemotePads returned : a Netplay room's guests (native_web_ui.h)
+global_variable s32 s_webRemotePadMask;
+
+int NativeWeb_RoomGuestMask(void)
+{
+	return s_webRemotePadMask;
+}
+#endif
+
 internal void NativeInput_ApplyRemotePads(void)
 {
 	u8 packets[(NATIVE_INPUT_MAX_CONTROLLERS - 1) * NATIVE_INPUT_PAD_PACKET_BYTES];
 	const s32 mask = NativeInput_WebReadRemotePads(packets);
+
+#ifdef USE_ONLINE
+	s_webRemotePadMask = mask;
+#endif
 
 	for (s32 slot = 1; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
 	{

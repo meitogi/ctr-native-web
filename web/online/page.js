@@ -110,8 +110,9 @@ const STRINGS = {
     roomOpen: 'Room open.',
     roomAlone: 'Alone in the room.',
     roomAloneDetail: 'VS and Battle need a second player : Arcade fills the race with bots.',
-    linkCopied: 'The link is copied : send it to the other players.',
-    copyFromSettings: 'Copy the link from Settings › Netplay and send it to the other players.',
+    roomOpenCopied: 'Room open — the link is copied.',
+    sendLink: 'Send it to the other players. Click here to copy it again ; it is also in Settings › Netplay.',
+    clickToCopy: 'Click here to copy the link ; it is also in Settings › Netplay.',
     roomClosed: 'The room is closed (the host left).',
     joiningRoom: 'Joining the new room…',
     hostLost: 'Connection to the host lost.',
@@ -204,8 +205,9 @@ const STRINGS = {
     hostLeft: 'L\'hôte a quitté la partie.',
     hostLeftSolo: 'L\'hôte est parti — tu finis cette course seul, l\'ordinateur conduit les autres karts.',
     roomOpen: 'Partie ouverte.',
-    linkCopied: 'Le lien est copié : envoie-le aux autres joueurs.',
-    copyFromSettings: 'Copie le lien depuis Réglages › Netplay et envoie-le aux autres joueurs.',
+    roomOpenCopied: 'Partie ouverte — le lien est copié.',
+    sendLink: 'Envoie-le aux autres joueurs. Clique ici pour le recopier ; il est aussi dans Réglages › Netplay.',
+    clickToCopy: 'Clique ici pour copier le lien ; il est aussi dans Réglages › Netplay.',
     roomClosed: 'La partie est fermée (l\'hôte est parti).',
     joiningRoom: 'Connexion à la nouvelle partie…',
     hostLost: 'Connexion à l\'hôte perdue.',
@@ -522,13 +524,16 @@ export function attach(Module) {
     render();
   }
 
+  /** The clipboard refused : the text in `field` selected for the player's Cmd-C, and a toast saying so. */
+  function selectForCopy(field) {
+    ui?.toast(T.copyFailed);
+    field.focus();
+    field.select();
+  }
+
   /** Copy : « Copied » on the button for 2 s ; refused, the text is selected for the player's Cmd-C. */
   function copyText(button, text, field) {
-    const failed = () => {
-      ui?.toast(T.copyFailed);
-      field.focus();
-      field.select();
-    };
+    const failed = () => selectForCopy(field);
     const write = navigator.clipboard?.writeText(text);
     if (!write) return failed();
     write.then(() => {
@@ -545,8 +550,23 @@ export function attach(Module) {
     render();
     host().finally(() => { hosting = false; render(); }).then(() => {
       if (!net.room || !linkText) return ui?.toast(error || T.errors.relay);
-      navigator.clipboard?.writeText(linkText).then(() => ui?.toast(T.roomOpen, T.linkCopied), () => ui?.toast(T.roomOpen, T.copyFromSettings));
+      // a pad press is no user gesture : the clipboard often refuses it, a click on the toast is one
+      const tell = (title, detail) => ui?.toast(title, detail, '', { action: copyLink, ms: 10_000 });
+      const write = navigator.clipboard?.writeText(linkText);
+      if (!write) return tell(T.roomOpen, T.clickToCopy);
+      write.then(() => tell(T.roomOpenCopied, T.sendLink), () => tell(T.roomOpen, T.clickToCopy));
     });
+  }
+
+  /** The « Room open » toast's click : the link copied ; refused, Settings › Netplay with the link selected. */
+  function copyLink() {
+    const refused = () => {
+      setOpen(true);
+      setTimeout(() => selectForCopy(linkBox), 300); // the panel's tab rendered first
+    };
+    const write = navigator.clipboard?.writeText(linkText);
+    if (!write) return refused();
+    write.then(() => ui?.toast(T.copied), refused);
   }
 
   // the host's pause for everyone (D12.9) ends here : a game frozen by it runs no netcode, so it
