@@ -12,7 +12,7 @@
 // ONLINE-ARCADE-LEAVE  the guest leaves mid-race : the host's AI drives its kart on (the same slot,
 //                      the player's name, never an empty SG_NAME), the host is told, the kart finishes.
 //                      Session 32 : then the host alone on the character select ; its way back,
-//                      Triangle out of it, then Triangle up to the main menu, still in the room.
+//                      Triangle out of it, then Triangle up to the main menu : the room left (32e).
 // ONLINE-ARCADE-CUP    session 32 : a whole Arcade Cup, the 4 races chained, the standings on both.
 //                      Session 32d : the host's Cross skips the standings after races 1-3 and the
 //                      final standings (D12.10), each wait timed.
@@ -113,8 +113,8 @@ async function backFromCharacters(ctx, host) {
 	await shot(ctx, 'leave-back-main')
 	const o = await online(host)
 	if (g.sub != null || g.menu?.label !== 'NETPLAY') throw new Error(`Triangle did not lead back to the main menu : ${steps.join(' → ')}`)
-	if (!o.lobby.active) throw new Error('the room closed on the way back')
-	return `character select → Triangle : ${steps.join(' → ')} (still in the room)`
+	if (o.role && o.role !== 'none') throw new Error(`still in the room on the main menu (${o.role})`)
+	return `character select → Triangle : ${steps.join(' → ')} (the room left)`
 }
 
 /** The guest's view of every remote kart over a whole race : bots and the host, by __ctr.net. */
@@ -352,7 +352,79 @@ async function netplayPause(ctx) {
 		const t2 = Date.now()
 		await untilGame(guest, 'the guest running after the host quit', s => s.screen !== 'paused', 10_000)
 		out.push(`the host quit while frozen : the guest ran on after ${Date.now() - t2} ms`)
+		// its main menu : out of the room, fresh menus (32e)
+		const left = await untilGame(host, 'the host on its main menu', s => !s.charSelect && !s.sub && s.menu?.input && !s.menu?.title, 20_000)
+		await sleep(1000)
+		const ho = await online(host)
+		if ((ho.role && ho.role !== 'none') || left.mode.join('|') !== 'MAIN_MENU') throw new Error(`the host after its QUIT : room ${ho.role}, mode ${left.mode.join('|')}`)
+		out.push(`then its main menu : the room left, mode ${left.mode.join('|')}`)
 		return out.join(' · ')
+	} finally {
+		await r.close()
+	}
+}
+
+// the user, 2026-11-06 : Arcade with a guest, the race, the guest's QUIT, Back, Back, NETPLAY again
+// on the guest's own game : the main menu as a fresh boot, nothing of the room kept
+async function quitBack(ctx) {
+	const r = await roomToRace(ctx, 'auto', { inject: [TOASTS], arcade: true })
+	const { guest } = r
+	const steps = []
+	const where = g => g?.charSelect ? `select ${g.charSelect.players}P locked ${g.charSelect.locked}` : `${g?.menu?.title || '(main)'} > ${g?.sub?.label ?? g?.menu?.label ?? '-'}`
+	const note = async label => {
+		const g = await game(guest)
+		const o = await online(guest).catch(() => ({}))
+		steps.push(`${label} : ${where(g)} [${g?.mode?.join('|')}] screen ${g?.screen} room ${o.role ?? '-'}`)
+		say(steps.at(-1))
+		await guestShot(ctx, guest, `quit-back-${label.replace(/\W+/g, '-')}`)
+		return g
+	}
+	try {
+		await untilGame(guest, 'the lights over', s => s.raceTime > 5000, 60_000)
+		await openPause(guest, 'guest')
+		await toRow(guest, 'QUIT')
+		await guest.press('c')
+		await untilGame(guest, 'the quit box', s => s.menu?.label === 'NO' || s.menu?.label === 'YES', 5000)
+		await guest.press('ArrowUp')
+		await sleep(400)
+		await guest.press('c')
+		await sleep(6000)
+		let g = await note('quit')
+		for (let i = 0; i < 4; i++) {
+			if (!g?.charSelect && !g?.sub && g?.menu?.input && g?.menu?.label) break
+			await guest.press('z')
+			await sleep(1500)
+			g = await note(`back ${i + 1}`)
+		}
+		await sleep(1000)
+		const out = await online(guest)
+		g = await game(guest)
+		if ((out.role && out.role !== 'none') || g.mode.join('|') !== 'MAIN_MENU') throw new Error(`on the main menu : room ${out.role}, mode ${g.mode.join('|')} || ${steps.join(' | ')}`)
+		for (let i = 0; i < 6 && (await game(guest))?.menu?.label !== 'NETPLAY'; i++) { await guest.press('ArrowDown'); await sleep(400) }
+		await guest.press('c')
+		g = await untilGame(guest, 'the ONLINE menu of a new room', s => !s.charSelect && /VS|BATTLE|ARCADE/.test(s.sub?.label ?? ''), 20_000)
+		await sleep(800)
+		g = await note('NETPLAY again')
+		if (g.sub.label !== 'VS.') throw new Error(`the ONLINE menu's cursor on ${g.sub.label}, not its first row`)
+		const row = async label => {
+			for (let i = 0; i < 6 && (await game(guest))?.sub?.label !== label; i++) { await guest.press('ArrowDown'); await sleep(400) }
+			await guest.press('c')
+			await sleep(800)
+		}
+		await row('ARCADE')
+		g = await note('race type')
+		if (g.sub?.label !== 'SINGLE') throw new Error(`the race type's cursor on ${g.sub?.label}, not its first row`)
+		await row('CUP')
+		await row('MEDIUM')
+		const c = (await untilGame(guest, 'the Arcade select', s => !!s.charSelect, 20_000)).charSelect
+		await sleep(800)
+		await note('the select')
+		if (c.players !== 1 || c.locked) throw new Error(`the select : ${JSON.stringify(c)} || ${steps.join(' | ')}`)
+		await guest.press('z')
+		await sleep(1500)
+		const back = await note('Triangle')
+		if (back.charSelect) throw new Error(`Triangle did not leave the select || ${steps.join(' | ')}`)
+		return steps.join(' | ')
 	} finally {
 		await r.close()
 	}
@@ -420,4 +492,6 @@ export default async ctx => {
 	// Session 32d : the Netplay pause, FINISH THE RACE, the host's skip (D12.9, D12.10)
 	await ctx.scenario('NETPLAY-PAUSE', () => netplayPause(ctx))
 	await ctx.scenario('NETPLAY-FINISH-HERE', () => finishHere(ctx))
+	// the user, 2026-11-06 : the guest's QUIT mid-race, Back to its main menu, NETPLAY : the ONLINE menu, nothing kept
+	await ctx.scenario('NETPLAY-QUIT-BACK', () => quitBack(ctx))
 }

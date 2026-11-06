@@ -187,6 +187,7 @@ int octrBootOnline = 1;
 int octrExternalLobby;
 int octrOnlineMenuPath;
 int octrSlotGone;
+int octrFreshMenu;
 int octrLobbyPhase;
 int octrLobbyCharacters[8];
 
@@ -1175,6 +1176,7 @@ int OnlinePause_Frame(void)
 		octrPausedHere = 0;
 		return 0;
 	}
+	octrFreshMenu = 1;
 	paused = octrRoomInfo[ONLINE_ROOM_PAUSED] && (sdata->Loading.stage == LOAD_IDLE);
 	if (paused && !octrPausedHere)
 	{

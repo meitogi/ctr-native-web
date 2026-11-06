@@ -333,6 +333,8 @@ export function attach(Module) {
     Module.ctrInput.openMultiplayer = () => setOpen(true);
     // a VS / BATTLE character select left with one human went back a menu (session 32e)
     Module.ctrInput.roomAlone = () => ui?.toast(T.roomAlone, T.roomAloneDetail);
+    // back on the main menu after a room (the pause menu's QUIT, Triangle up) : out of it (32e)
+    Module.ctrInput.leaveRoom = () => { if (net.room && !hosting) leave(); };
     Module.ctrInput.netplayHost = () => {
       // a room the game left on its own (the pause menu's QUIT mid-race) : closed, a new one
       if (net.room && !hosting && !lobby().active) leave();

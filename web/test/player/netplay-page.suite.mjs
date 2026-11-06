@@ -313,8 +313,13 @@ export default async ctx => {
 		return `a pad plugged : opened on ${first} ; Keyboard picked, reopened on ${again}, after a reload on ${reloaded}`
 	})
 
-	// the version : Settings › System and the title's corner, the build's git describe (--set version=…)
+	// the version : the boot screen, Settings › System and the title's corner, the build's git describe (--set version=…)
 	await ctx.scenario('VERSION', async () => {
+		const tab = tabOf(ctx)
+		await tab.navigate(`${new URL(ctx.args.url).origin}/index.html`)
+		let home = null
+		for (let i = 0; i < 60 && !home; i++) { home = await ctx.js("return document.getElementById('boot-version')?.textContent.trim()").catch(() => null); if (!home) await sleep(250) }
+		await shot(ctx, 'boot-version')
 		await bootWith(ctx, relay, rk)
 		await sleep(1500)
 		await shot(ctx, 'title-version')
@@ -325,8 +330,9 @@ export default async ctx => {
 		const text = await ctx.js("return document.getElementById('ctr-version')?.textContent.trim()")
 		await shot(ctx, 'settings-version')
 		await closePanel(ctx)
+		if (!home || home !== text) throw new Error(`the boot screen shows « ${home} », Settings « ${text} »`)
 		if (ctx.args.version && text !== `Version ${ctx.args.version}`) throw new Error(`Settings shows « ${text} », git describe ${ctx.args.version}`)
-		return `Settings › System « ${text} » ; the title's corner : see the shot`
+		return `the boot screen and Settings › System « ${text} » ; the title's corner : see the shot`
 	})
 
 	// a room link opened with the disc stored : no press, no intro, no title, the host's picture
@@ -336,6 +342,14 @@ export default async ctx => {
 	// the character select grows and shrinks with the room (a, b and a third browser : x with
 	// --set guest2Cdp=<host:port>, else a window of a)
 	await ctx.scenario('SELECT-GROW', () => selectGrow(ctx))
+	// Arcade, a guest comes and goes, Back to the main menu : NETPLAY opens the ONLINE menu again
+	await ctx.scenario('ARCADE-GUEST-BACK', () => arcadeGuestBack(ctx))
+	// NETPLAY, a guest in the lobby (it stays, or it leaves), Back : the main menu, NETPLAY again
+	await ctx.scenario('NETPLAY-GUEST-BACK', () => netplayGuestBack(ctx))
+	// the Arcade select with a guest still in it, Back, Back, NETPLAY : a fresh select again
+	await ctx.scenario('SELECT-GUEST-BACK', () => selectGuestBack(ctx))
+	// alone : the Arcade select, Back, ARCADE again : its race type, then a select unlocked (32e)
+	await ctx.scenario('ARCADE-BACK-AGAIN', () => arcadeBackAgain(ctx))
 	// VS left with one human : back a menu, its row grey, a toast
 	await ctx.scenario('SELECT-ALONE', () => selectAlone(ctx))
 	// the host alone with a pad plugged : the pad is this machine's, not a guest (32e follow-up)
@@ -491,6 +505,221 @@ async function battleThenArcade(ctx) {
 		await shot(ctx, 'battle-then-arcade-select')
 		if (g.mode.includes('BATTLE_MODE') || !g.mode.includes('ARCADE_MODE')) throw new Error(`the Arcade select in mode ${g.mode}`)
 		return `Battle select (${battle.mode.join('|')}) → Triangle → ARCADE › CUP › MEDIUM : the select, ${g.charSelect.players}P, mode ${g.mode.join('|')}`
+	} finally {
+		await ctx.js('window.__ctrOnline.leave(); return true').catch(() => {})
+		await b.guestBrowser.close()
+	}
+}
+
+// the user, 2026-11-06 : NETPLAY > ARCADE, a guest comes and goes, Back, Back, NETPLAY again
+// as the user plays : the room opened by NETPLAY, driven by a plugged pad
+async function arcadeGuestBack(ctx) {
+	const origin = new URL(ctx.args.url).origin
+	const host = await bootWith(ctx, ctx.args.relay, ctx.args.rk)
+	const b = await openGuestPage(ctx, origin, { name: 'Bee' })
+	const steps = []
+	const note = async label => {
+		const g = await game(host)
+		steps.push(`${label} : ${g?.charSelect ? `select ${g.charSelect.players}P locked ${g.charSelect.locked}` : `menu ${cur(g)?.label}`} (${g?.mode?.join('|')})`)
+		say(steps.at(-1))
+		await shot(ctx, `arcade-guest-back-${label.replace(/\W+/g, '-')}`)
+		return g
+	}
+	try {
+		await ctx.pad(0).press('down') // the virtual pad becomes visible to the page
+		await sleep(800)
+		const press = gamepad(ctx)
+		await openOnlineMenu(ctx, host, press)
+		const a = await until(host, 'the room NETPLAY opened', s => s.role === 'host' && !!s.link, 20_000)
+		await pick(host, press, 'ARCADE')
+		await pick(host, press, 'CUP')
+		await pick(host, press, 'MEDIUM')
+		await untilGame(host, 'the Arcade select', g => g.charSelect?.players === 1, 20_000)
+		await note('alone')
+		await boot(b.guest, a.link)
+		await untilGame(host, 'the select grown to 2', g => g.charSelect?.players === 2, 90_000)
+		await sleep(500)
+		await note('Bee came')
+		await b.guest.navigate(`${origin}/preload-flag.js`)
+		await untilGame(host, 'the select back to 1', g => g.charSelect?.players === 1, 30_000)
+		await sleep(500)
+		await note('Bee left')
+		await press('triangle')
+		await untilGame(host, 'the ONLINE menu', ONLINE_ROWS, 15_000)
+		await sleep(500)
+		await note('back 1')
+		await press('triangle')
+		await untilGame(host, 'the main menu', g => !g.charSelect && !g.sub && g.menu?.input, 15_000)
+		await sleep(500)
+		await note('back 2')
+		// up on the main menu : out of the room (the user, 32e), NETPLAY opens a new one
+		const out = await online(host)
+		if (out.role && out.role !== 'none') throw new Error(`still in the room on the main menu (${out.role}) || ${steps.join(' | ')}`)
+		await menuTo(ctx, 'NETPLAY', press)
+		await press('cross')
+		const g = await untilGame(host, 'the ONLINE menu of a new room', ONLINE_ROWS, 20_000)
+		await sleep(500)
+		await note('NETPLAY again')
+		const again = await online(host)
+		if (again.role !== 'host' || again.link === a.link) throw new Error(`NETPLAY again : ${again.role}, the same link ${again.link === a.link} || ${steps.join(' | ')}`)
+		if (cur(g)?.label !== 'VS.') throw new Error(`the ONLINE menu's cursor on ${cur(g)?.label}, not its first row`)
+		return steps.join(' | ')
+	} finally {
+		await ctx.js('window.__ctrOnline.leave(); return true').catch(() => {})
+		await b.guestBrowser.close()
+	}
+}
+
+async function netplayGuestBack(ctx) {
+	const origin = new URL(ctx.args.url).origin
+	const host = await bootWith(ctx, ctx.args.relay, ctx.args.rk)
+	const steps = []
+	const note = async label => {
+		const g = await game(host)
+		const o = await online(host)
+		steps.push(`${label} : ${g?.charSelect ? `select ${g.charSelect.players}P` : `menu ${cur(g)?.label}`} (${g?.mode?.join('|')}) room ${o.role}`)
+		say(steps.at(-1))
+		await shot(ctx, `netplay-guest-back-${label.replace(/\W+/g, '-')}`)
+		return g
+	}
+	await ctx.pad(0).press('down') // the virtual pad becomes visible to the page
+	await sleep(800)
+	const press = gamepad(ctx)
+	try {
+		for (const stays of [false, true]) {
+			const b = await openGuestPage(ctx, origin, { name: 'Bee' })
+			try {
+				await openOnlineMenu(ctx, host, press)
+				const a = await until(host, 'the room NETPLAY opened', s => s.role === 'host' && !!s.link, 20_000)
+				await sleep(500)
+				await boot(b.guest, a.link)
+				await until(b.guest, 'Bee in the room', s => s.lobby.active && s.share?.state === 'connected', 90_000)
+				await sleep(1000)
+				await note(`Bee came (${stays ? 'stays' : 'leaves'})`)
+				if (!stays) {
+					await b.guest.navigate(`${origin}/preload-flag.js`)
+					await sleep(3000)
+					await note('Bee left')
+				}
+				await press('triangle')
+				const g = await untilGame(host, 'the main menu after Back', g => !g.charSelect && !g.sub && g.menu?.input, 15_000)
+					.catch(async e => { await note('Back stuck'); throw new Error(`${e.message} || ${steps.join(' | ')}`) })
+				await sleep(1000)
+				await note('Back')
+				const out = await online(host)
+				if (out.role && out.role !== 'none') throw new Error(`still in the room on the main menu || ${steps.join(' | ')}`)
+				await press('cross')
+				await untilGame(host, 'the ONLINE menu again', ONLINE_ROWS, 20_000)
+					.catch(async e => { await note('NETPLAY stuck'); throw new Error(`${e.message} || ${steps.join(' | ')}`) })
+				await sleep(500)
+				await note('NETPLAY again')
+				await press('triangle')
+				await untilGame(host, 'the main menu', g => !g.charSelect && !g.sub && g.menu?.input, 15_000)
+					.catch(async e => { await note('Back 2 stuck'); throw new Error(`${e.message} || ${steps.join(' | ')}`) })
+				await sleep(1000)
+			} finally {
+				await b.guestBrowser.close()
+			}
+		}
+		return steps.join(' | ')
+	} finally {
+		await ctx.js('window.__ctrOnline.leave(); return true').catch(() => {})
+	}
+}
+
+async function arcadeBackAgain(ctx) {
+	const host = await bootWith(ctx, ctx.args.relay, ctx.args.rk)
+	const steps = []
+	const note = async label => {
+		const g = await game(host)
+		steps.push(`${label} : ${g?.charSelect ? `select ${g.charSelect.players}P locked ${g.charSelect.locked}` : `menu ${cur(g)?.label}`}`)
+		say(steps.at(-1))
+		await shot(ctx, `arcade-back-again-${label.replace(/\W+/g, '-')}`)
+		return g
+	}
+	const wait = (label, test, ms) => untilGame(host, label, test, ms)
+		.catch(async e => { await note(`${label} STUCK`); throw new Error(`${e.message} || ${steps.join(' | ')}`) })
+	try {
+		await ctx.pad(0).press('down') // the virtual pad becomes visible to the page
+		await sleep(800)
+		const press = gamepad(ctx)
+		await openOnlineMenu(ctx, host, press)
+		await until(host, 'the room NETPLAY opened', s => s.role === 'host' && !!s.link, 20_000)
+		for (const round of [1, 2, 3]) {
+			await pick(host, press, 'ARCADE')
+			await wait(`the race type ${round}`, g => /SINGLE|CUP/.test(cur(g)?.label ?? ''), 8000)
+			await pick(host, press, 'CUP')
+			await wait(`the difficulty ${round}`, g => /EASY|MEDIUM|HARD/.test(cur(g)?.label ?? ''), 8000)
+			await pick(host, press, 'MEDIUM')
+			const g = await wait(`the select ${round}`, g => !!g.charSelect, 20_000)
+			await sleep(800)
+			await note(`select ${round}`)
+			if (g.charSelect.players !== 1 || g.charSelect.locked) throw new Error(`select ${round} : ${g.charSelect.players}P locked ${g.charSelect.locked} || ${steps.join(' | ')}`)
+			await press('triangle')
+			await wait(`the ONLINE menu ${round}`, ONLINE_ROWS, 15_000)
+			await sleep(800)
+			await note(`back ${round}`)
+		}
+		return steps.join(' | ')
+	} finally {
+		await ctx.js('window.__ctrOnline.leave(); return true').catch(() => {})
+	}
+}
+
+async function selectGuestBack(ctx) {
+	const origin = new URL(ctx.args.url).origin
+	const host = await bootWith(ctx, ctx.args.relay, ctx.args.rk)
+	const b = await openGuestPage(ctx, origin, { name: 'Bee' })
+	const steps = []
+	const note = async label => {
+		const g = await game(host)
+		const o = await online(host)
+		steps.push(`${label} : ${g?.charSelect ? `select ${g.charSelect.players}P locked ${g.charSelect.locked}` : `menu ${cur(g)?.label}`} (${g?.mode?.join('|')}) room ${o.role}`)
+		say(steps.at(-1))
+		await shot(ctx, `select-guest-back-${label.replace(/\W+/g, '-')}`)
+		return g
+	}
+	const wait = (label, test, ms) => untilGame(host, label, test, ms)
+		.catch(async e => { await note(`${label} STUCK`); throw new Error(`${e.message} || ${steps.join(' | ')}`) })
+	try {
+		await ctx.pad(0).press('down') // the virtual pad becomes visible to the page
+		await sleep(800)
+		const press = gamepad(ctx)
+		await openOnlineMenu(ctx, host, press)
+		const a = await until(host, 'the room NETPLAY opened', s => s.role === 'host' && !!s.link, 20_000)
+		await pick(host, press, 'ARCADE')
+		await pick(host, press, 'CUP')
+		await pick(host, press, 'MEDIUM')
+		await wait('the Arcade select', g => g.charSelect?.players === 1, 20_000)
+		await boot(b.guest, a.link)
+		await wait('the select grown to 2', g => g.charSelect?.players === 2, 90_000)
+		await sleep(1000)
+		await note('Bee came')
+		await press('triangle')
+		await sleep(2000)
+		await note('back 1')
+		await press('triangle')
+		await sleep(2000)
+		await note('back 2')
+		await press('triangle')
+		await sleep(2000)
+		await note('back 3')
+		await wait('the main menu', g => !g.charSelect && !g.sub && g.menu?.input, 10_000)
+		await menuTo(ctx, 'NETPLAY', press)
+		await press('cross')
+		await sleep(2000)
+		const g = await note('NETPLAY again')
+		if (g?.charSelect || cur(g)?.label !== 'VS.') throw new Error(`NETPLAY again not on a fresh ONLINE menu || ${steps.join(' | ')}`)
+		await pick(host, press, 'ARCADE')
+		await pick(host, press, 'CUP')
+		await pick(host, press, 'MEDIUM')
+		const s = await wait('the Arcade select again', g => !!g.charSelect, 20_000)
+		await sleep(1000)
+		await note('select again')
+		if (s.charSelect.players !== 1 || s.charSelect.locked) throw new Error(`the select again ${s.charSelect.players}P locked ${s.charSelect.locked} || ${steps.join(' | ')}`)
+		await press('triangle')
+		await wait('out of the select', g => !g.charSelect, 10_000)
+		return steps.join(' | ')
 	} finally {
 		await ctx.js('window.__ctrOnline.leave(); return true').catch(() => {})
 		await b.guestBrowser.close()

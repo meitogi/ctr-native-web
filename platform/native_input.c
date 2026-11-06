@@ -364,6 +364,11 @@ EM_JS(void, NativeWeb_RoomAlone, (void), {
 	const input = Module.ctrInput;
 	if (input && input.roomAlone) input.roomAlone();
 });
+
+EM_JS(void, NativeWeb_LeaveRoom, (void), {
+	const input = Module.ctrInput;
+	if (input && input.leaveRoom) input.leaveRoom();
+});
 #endif
 
 EM_JS(int, NativeWeb_IntroSkip, (void), {

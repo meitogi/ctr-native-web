@@ -183,6 +183,48 @@ static void OnlineMenu_ToggleModeRows(void)
 	}
 }
 
+// The ONLINE menu and every box below it closed (32e) : the select's Triangle jumps back to the
+// ONLINE menu over them, and a box left drawing its next one or only its title opened that whole
+// chain again at the next ARCADE or VS, the difficulty frozen as a title.
+static void OnlineMenus_Fold(void)
+{
+	struct RectMenu *menus[] = {&onlineMenu, &onlineMenuRaceType, &MM_MENU_RACE_TYPE, &MM_MENU_DIFFICULTY,
+	                            &MM_MENU_PLAYERS_1P2P, &MM_MENU_PLAYERS_2P3P4P};
+
+	for (int i = 0; i < (int)(sizeof(menus) / sizeof(menus[0])); i++)
+		menus[i]->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+}
+
+// Back on the main menu after a room (the user, 32e) : the menus as at boot, the save and P1's
+// character kept. D230 is never reloaded here, so its cursors, the select's locks and the backups
+// outlive every room ; P2-P4 back on the boot's characters (a guest who joins later is moved off a
+// taken one by MM_Characters_PreventOverlap).
+static void OnlineMenus_Fresh(void)
+{
+	struct RectMenu *menus[] = {&onlineMenu, &onlineMenuRaceType, &onlineMenuNoKey, &MM_MENU_RACE_TYPE, &MM_MENU_DIFFICULTY,
+	                            &MM_MENU_PLAYERS_1P2P, &MM_MENU_PLAYERS_2P3P4P, &MM_MENU_CUP_SELECT, &MM_MENU_TRACK_SELECT};
+
+	GAME_TRACKER->gameMode1 &= ~(BATTLE_MODE | ADVENTURE_MODE | TIME_TRIAL | ADVENTURE_ARENA | ARCADE_MODE | ADVENTURE_CUP);
+	GAME_TRACKER->gameMode2 &= ~(CUP_ANY_KIND);
+	GAME_TRACKER->numLaps = MM_DEFAULT_LAP_COUNT;
+	GAME_TRACKER->numPlyrNextGame = 1;
+	GAME_TRACKER->cup.cupID = 0;
+	for (int i = 0; i < (int)(sizeof(menus) / sizeof(menus[0])); i++)
+		menus[i]->rowSelected = 0;
+	MM_TRACK_SEL_BACKUP = 0;
+	MM_CHARACTER_SELECT_FLAGS = 0;
+	MM_CHARACTER_SELECT_TRANSITION_STATE = ENTERING_MENU;
+	for (int p = 1; p < 4; p++)
+	{
+		GAME_CHARACTER_IDS[p] = p;
+		MM_CHARACTER_IDS_BACKUP[p] = p;
+	}
+	OnlineMenus_Fold();
+	octrOnlineArcade = 0;
+	octrSlotGone = 0;
+	onlineAutoOpen = 0;
+}
+
 // No players menu in a room (session 32b) : the room's humans, then the character select,
 // as MM_MenuProc_2p3p4p's exit
 static void OnlineMenu_ToCharacters(struct RectMenu *menu)
@@ -303,6 +345,7 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		if (onlineAutoOpen && ONLINE_ROOM && ((mainMenu->state & DRAW_NEXT_MENU_IN_HIERARCHY) == 0))
 		{
 			onlineAutoOpen = 0;
+			octrFreshMenu = 1;
 			mainMenu->ptrNextBox_InHierarchy = &onlineMenu;
 			mainMenu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
 		}
@@ -338,6 +381,14 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 			// ctr-native: one build — a room never starts the attract demo
 			octrOnlineMenuPath = 0;
 			octrOnlineArcade = 0;
+			// back here after a room (the pause menu's QUIT, Triangle up, the page's Leave) : out
+			// of it, the menus new ; a guest resting here in its room's lobby stays
+			if (octrFreshMenu && !onlineAutoOpen && (!ONLINE_ROOM || (octr->DriverID == 0)))
+			{
+				octrFreshMenu = 0;
+				NativeWeb_LeaveRoom();
+				OnlineMenus_Fresh();
+			}
 			if (ONLINE_ROOM)
 				GAME_TRACKER->demoCountdownTimer = TITLE_DEMO_IDLE_FRAMES;
 #endif
@@ -522,6 +573,7 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 			mainMenu->state |= DRAW_NEXT_MENU_IN_HIERARCHY;
 			return;
 		}
+		octrFreshMenu = 1;
 		mainMenu->ptrNextBox_InHierarchy = &onlineMenu;
 		mainMenu->state |= DRAW_NEXT_MENU_IN_HIERARCHY;
 		return;
@@ -997,7 +1049,7 @@ void MM_JumpTo_Title_Returning(void)
 		MM_MENU_MAIN.rowSelected = ONLINE_MAIN_ROW;
 		MM_MENU_MAIN.ptrNextBox_InHierarchy = &onlineMenu;
 		MM_MENU_MAIN.state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
-		onlineMenu.state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+		OnlineMenus_Fold();
 	}
 #endif
 }
