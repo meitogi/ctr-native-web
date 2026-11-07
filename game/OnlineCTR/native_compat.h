@@ -68,6 +68,7 @@ enum OnlineRoomInfo
 extern int octrRoomInfo[ONLINE_ROOM_INFO_LEN];
 extern int octrCupInterlude; // between two races of a Cup : the race level stays, its standings drawn
 int OnlineSlot_IsBot(int slot);   // a bot's kart, or one the AI took over : its name in the bots' colour
+int OnlineRoom_HostQuit(void);    // the host's QUIT YES in the room's race : 1 when the room's reset takes it over
 void OnlineRoom_EndOfRace(void);  // every frame of the end of race : the humans left ; a Cup counted (host), its standings
 int OnlineCup_Showing(void);      // the standings replace the results
 // Session 32d, the Netplay pause (D12.9) and the host's skip (D12.10)

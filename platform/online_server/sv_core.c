@@ -589,6 +589,33 @@ void SvCore_Receive(int peerId, const void *buf, int len)
 	}
 }
 
+static void ResetRoom(RoomInfo *ri, int r)
+{
+	SV_LOG("[Room %d] Room has been reset\n", r + 1);
+
+	for (int i = 0; i < MAX_CLIENTS; i++)
+	{
+		if (ri->peerInfos[i].peer == 0)
+			continue;
+
+		ri->peerInfos[i].boolLoadSelf = 0;
+		ri->peerInfos[i].boolRaceSelf = 0;
+		ri->peerInfos[i].boolEndSelf = 0;
+
+		// tell all clients to reset
+		WelcomeNewClient(ri, i);
+	}
+
+	ri->levelPlayed = 0;
+	ri->boolRoomLocked = 0;
+	ri->boolLoadAll = 0;
+	ri->boolRaceAll = 0;
+	ri->boolEndAll = 0;
+	ri->endTime = 0;
+
+	ForeachPeerLPL(SendRoomData); //race over, re-notify all clients
+}
+
 void SvCore_Tick(unsigned int nowMs)
 {
 	nowTick = nowMs;
@@ -652,31 +679,7 @@ void SvCore_Tick(unsigned int nowMs)
 		else
 		{
 			if ((nowTick - ri->endTime) >= ROOM_RESET_MS)
-			{
-				SV_LOG("[Room %d] Room has been reset\n", r + 1);
-
-				for (int i = 0; i < MAX_CLIENTS; i++)
-				{
-					if (ri->peerInfos[i].peer == 0)
-						continue;
-
-					ri->peerInfos[i].boolLoadSelf = 0;
-					ri->peerInfos[i].boolRaceSelf = 0;
-					ri->peerInfos[i].boolEndSelf = 0;
-
-					// tell all clients to reset
-					WelcomeNewClient(ri, i);
-				}
-
-				ri->levelPlayed = 0;
-				ri->boolRoomLocked = 0;
-				ri->boolLoadAll = 0;
-				ri->boolRaceAll = 0;
-				ri->boolEndAll = 0;
-				ri->endTime = 0;
-
-				ForeachPeerLPL(SendRoomData); //race over, re-notify all clients
-			}
+				ResetRoom(ri, r);
 		}
 	}
 }
@@ -691,5 +694,18 @@ void SvCore_SkipReset(void)
 			continue;
 		SV_LOG("[Room %d] Reset now (the host skipped the wait)\n", r + 1);
 		ri->endTime = nowTick - ROOM_RESET_MS;
+	}
+}
+
+void SvCore_ResetNow(void)
+{
+	for (int r = 0; r < NUM_ROOMS; r++)
+	{
+		RoomInfo *ri = &roomInfos[r];
+
+		if ((ri->clientCount == 0) || !ri->boolRoomLocked)
+			continue;
+		SV_LOG("[Room %d] Reset now (the host quit the race)\n", r + 1);
+		ResetRoom(ri, r);
 	}
 }

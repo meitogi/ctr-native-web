@@ -38,4 +38,8 @@ void SvCore_Tick(unsigned int nowMs);
 // process that runs the server, nothing on the wire.
 void SvCore_SkipReset(void);
 
+// The host's QUIT (the user, 32e) : a room whose race is locked, loading or running resets now,
+// every game back to its lobby (the host's character select). Local to the server's process.
+void SvCore_ResetNow(void);
+
 #endif

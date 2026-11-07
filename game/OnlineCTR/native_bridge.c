@@ -584,7 +584,9 @@ void OnlineExternal_State(void)
 			octrSkipReset = 0; // the reset came (D12.10)
 			if (octrRoomInfo[ONLINE_ROOM_CUP] && (octrRoomInfo[ONLINE_ROOM_CUP_RACES] >= 4))
 				octrRoomInfo[ONLINE_ROOM_CUP] = 0; // the Cup is over : its final standings have shown
-			if (octrRoomInfo[ONLINE_ROOM_CUP] && ((sdata->gGT->gameMode1 & MAIN_MENU) == 0) && (sdata->Loading.stage == LOAD_IDLE))
+			// a race the Cup counted : a reset before its count is the host's QUIT (32e), and a
+			// guest's copy of the room info may not say the Cup is over yet
+			if (OnlineCup_Showing() && ((sdata->gGT->gameMode1 & MAIN_MENU) == 0) && (sdata->Loading.stage == LOAD_IDLE))
 			{
 				// a Cup goes on (D12.1) : this level and its standings stay, the host
 				// locks the next track after a few seconds of them
@@ -1298,6 +1300,40 @@ void OnlineRoom_HostSkip(int y)
 void NativeOnlineGame_SlotGone(int slot)
 {
 	octrSlotGone = slot;
+}
+
+// ---- The host's QUIT (the user, 32e) ----
+// A host who quits ends the room's race for everyone : the server resets the room now (as 6 s
+// after a race), every game goes back as after one, the host to its character select with the
+// same players, mode and characters, its guests behind it ; a Cup starts again from its cup
+// select. A host who drops out is not this : its guests race on (D11.6).
+static int octrQuitReset;
+
+int OnlineRoom_HostQuit(void)
+{
+	if (!ONLINE_RACE || (octr->DriverID != 0))
+		return 0;
+	memset(octrRoomInfo, 0, ONLINE_ROOM_BOTS * sizeof(octrRoomInfo[0])); // the Cup is over
+	octrRoomInfo[ONLINE_ROOM_PAUSED] = 0;
+	if (octrPausedHere)
+	{
+		// frozen for everyone : running again until the reset's load
+		octrPausedHere = 0;
+		sdata->gGT->gameMode1 &= ~PAUSE_1;
+		MainFrame_TogglePauseAudio(0);
+	}
+	OnlinePause_Close();
+	octrQuitReset = 1;
+	NativeOnlineGame_Log("[OnlineCTR] The host quit : the room's race ends for everyone\n");
+	return 1;
+}
+
+int NativeOnlineGame_TakeQuitReset(void)
+{
+	int quit = octrQuitReset;
+
+	octrQuitReset = 0;
+	return quit;
 }
 
 // Asked each frame until the reset comes (LOBBY_ASSIGN_ROLE) : the server may not have seen the

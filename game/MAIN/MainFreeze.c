@@ -1370,6 +1370,11 @@ void MainFreeze_MenuPtrQuit(struct RectMenu *menu)
 	}
 	case 0:
 	{
+#ifdef USE_ONLINE
+		// ctr-native: the host's QUIT ends the room's race for everyone, back to its select
+		if (OnlineRoom_HostQuit())
+			break;
+#endif
 		// Erase ghost of previous race from RAM
 		GhostTape_Destroy();
 

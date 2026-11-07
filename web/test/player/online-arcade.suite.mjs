@@ -21,6 +21,8 @@
 //                      EVERYONE freezes both games (their clocks still for 3 s, then 30 s with the
 //                      link alive, « PAUSED BY THE HOST »), the guest's Start opens RESUME / QUIT
 //                      and unfreezes nothing, the host's RESUME FOR EVERYONE runs both again.
+//                      32e : the host's QUIT ends the race for everyone, its select back, the
+//                      guest in the room's lobby.
 // NETPLAY-FINISH-HERE  session 32d : the host finishes, the guest (the last human) picks FINISH THE
 //                      RACE : the full results on both in < 2 s, its time the bots' estimate ;
 //                      the camera of the finished host on the guest's kart (a shot) ; then the
@@ -336,7 +338,8 @@ async function netplayPause(ctx) {
 		const ran = await Promise.all([clockOver(host, 2000), clockOver(guest, 2000)])
 		if (ran.some(d => d < 1500)) throw new Error(`clocks after the resume : host +${ran[0]}, guest +${ran[1]} ms in 2 s`)
 		out.push(`30 s frozen, the link held · clocks +${ran.join(' / +')} ms in 2 s after`)
-		// 4. the host quits while everyone is frozen : the guest runs on (the review of 32d)
+		// 4. the host quits while everyone is frozen : the room's race ends for everyone, the host
+		//    back to its character select with the same players, the guest behind it (the user, 32e)
 		await sleep(800)
 		await openPause(host, 'host')
 		await toRow(host, 'PAUSE FOR EVERYONE')
@@ -350,14 +353,71 @@ async function netplayPause(ctx) {
 		if ((await game(host)).menu?.label !== 'YES') throw new Error(`the quit box's row : ${(await game(host)).menu?.label}`)
 		await host.press('c')
 		const t2 = Date.now()
-		await untilGame(guest, 'the guest running after the host quit', s => s.screen !== 'paused', 10_000)
-		out.push(`the host quit while frozen : the guest ran on after ${Date.now() - t2} ms`)
-		// its main menu : out of the room, fresh menus (32e)
-		const left = await untilGame(host, 'the host on its main menu', s => !s.charSelect && !s.sub && s.menu?.input && !s.menu?.title, 20_000)
+		await until(guest, 'the guest out of the race, in its room\'s lobby', s => s.role === 'guest' && s.octr.CurrState === ST.GUEST_TRACK_WAIT, 15_000)
+		out.push(`the host quit while frozen : the guest back in the lobby after ${Date.now() - t2} ms`)
+		await untilGame(host, 'the host on its character select', s => !!s.charSelect, 20_000)
 		await sleep(1000)
+		const now = await game(host)
 		const ho = await online(host)
-		if ((ho.role && ho.role !== 'none') || left.mode.join('|') !== 'MAIN_MENU') throw new Error(`the host after its QUIT : room ${ho.role}, mode ${left.mode.join('|')}`)
-		out.push(`then its main menu : the room left, mode ${left.mode.join('|')}`)
+		await shot(ctx, 'pause-host-quit-select')
+		if (ho.role !== 'host' || now.charSelect?.players !== 2 || now.charSelect.locked !== 0 || !now.mode.includes('ARCADE_MODE'))
+			throw new Error(`the host after its QUIT : room ${ho.role}, select ${JSON.stringify(now.charSelect)}, mode ${now.mode.join('|')}`)
+		out.push(`the host on its select in ${Date.now() - t2} ms : ${now.charSelect.players}P, nothing locked, characters ${now.charSelect.characters.join(',')}, ${now.mode.join('|')}, still hosting`)
+		return out.join(' · ')
+	} finally {
+		await r.close()
+	}
+}
+
+// The host's QUIT YES from its pause menu
+async function hostQuit(host) {
+	await openPause(host, 'host')
+	await toRow(host, 'QUIT')
+	await host.press('c')
+	await untilGame(host, 'the quit box', s => s.menu?.label === 'NO' || s.menu?.label === 'YES', 5000)
+	await host.press('ArrowUp')
+	await sleep(400)
+	if ((await game(host)).menu?.label !== 'YES') throw new Error(`the quit box's row : ${(await game(host)).menu?.label}`)
+	await host.press('c')
+}
+
+async function hostQuitCup(ctx) {
+	const r = await roomToRace(ctx, 'auto', { arcade: true, cup: true })
+	const { host, guest } = r
+	const out = []
+	try {
+		await untilGame(host, 'the lights over (host)', s => s.raceTime > 3000, 30_000)
+		const before = (await online(host)).roomInfo
+		await hostQuit(host)
+		const t0 = Date.now()
+		await until(guest, 'the guest out of the race, in its room\'s lobby', s => s.role === 'guest' && s.octr.CurrState === ST.GUEST_TRACK_WAIT, 15_000)
+		await untilGame(host, 'the host on its character select', s => !!s.charSelect, 20_000)
+		await sleep(1000)
+		const now = await game(host)
+		await shot(ctx, 'host-quit-cup-select')
+		if ((await online(host)).role !== 'host' || now.charSelect?.players !== 2 || now.charSelect.locked !== 0)
+			throw new Error(`the host after its QUIT : select ${JSON.stringify(now.charSelect)}`)
+		out.push(`the guest in the lobby and the host on its select ${Date.now() - t0} ms after the QUIT : ${now.charSelect.players}P, nothing locked, characters ${now.charSelect.characters.join(',')}, ${now.mode.join('|')}`)
+		// both lock : the cup select, not a race
+		for (let i = 0; i < 6 && !((await game(host))?.charSelect?.locked & 1); i++) { await host.press('c'); await sleep(800) }
+		// the guest's game reloads its title behind the host's picture first : its Cross waits for it
+		let tries = 0
+		for (let g; tries < 30 && (g = (await game(host))?.charSelect) && !(g.locked & 2); tries++) { await guest.press('c'); await sleep(800) }
+		out.push(`the guest locked after ${tries} presses (${JSON.stringify((await online(guest)).lobby)})`)
+		// the bridge names no cup select row (its label reads the language table) : the shot shows it
+		const cups = await untilGame(host, 'the cup select', s => !s.charSelect && s.menu?.input, 15_000)
+			.catch(async e => { const g = await game(host); await shot(ctx, 'host-quit-cup-not-cups'); throw new Error(`${e.message} : ${JSON.stringify({ sub: g?.sub, menu: g?.menu, mode: g?.mode })} || ${out.join(' · ')}`) })
+		await sleep(800)
+		await shot(ctx, 'host-quit-cup-cups')
+		out.push(`both locked : the cup select (menu state ${cups.menu.state}, shot host-quit-cup-cups)`)
+		if ((await online(host)).octr.CurrState !== ST.HOST_TRACK_PICK) throw new Error(`the cup select, the host in state ${(await online(host)).octr.CurrState}`)
+		// a cup : its first race for both
+		await host.press('c')
+		for (const tab of [host, guest]) await until(tab, 'the Cup\'s first race', s => s.octr.CurrState === ST.START_RACE, 180_000, 500)
+		const after = (await online(host)).roomInfo
+		const cup = i => `cup ${i.cup} #${i.cupID}, ${i.races} counted`
+		if (!before.cup || !after.cup || after.races !== 0) throw new Error(`the Cup before the QUIT : ${cup(before)} ; after : ${cup(after)}`)
+		out.push(`a cup picked : its first race on both (${cup(after)} ; before the QUIT ${cup(before)})`)
 		return out.join(' · ')
 	} finally {
 		await r.close()
@@ -491,6 +551,8 @@ export default async ctx => {
 	await ctx.scenario('ONLINE-ARCADE-CUP', () => cupOn(ctx, { arcade: true, skip: true }))
 	// Session 32d : the Netplay pause, FINISH THE RACE, the host's skip (D12.9, D12.10)
 	await ctx.scenario('NETPLAY-PAUSE', () => netplayPause(ctx))
+	// the user, 2026-11-06 : the host's QUIT in an Arcade Cup's first race : the select, then the cup select
+	await ctx.scenario('NETPLAY-HOST-QUIT-CUP', () => hostQuitCup(ctx))
 	await ctx.scenario('NETPLAY-FINISH-HERE', () => finishHere(ctx))
 	// the user, 2026-11-06 : the guest's QUIT mid-race, Back to its main menu, NETPLAY : the ONLINE menu, nothing kept
 	await ctx.scenario('NETPLAY-QUIT-BACK', () => quitBack(ctx))

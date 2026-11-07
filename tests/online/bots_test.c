@@ -309,7 +309,22 @@ int main(void)
 		Fail("room 5 holds the host and guest C only, unlocked");
 	}
 
+	// the host's QUIT (32e) : an open room is not reset ; a locked one, its race under way, resets now
+	SvCore_ResetNow();
+	if (rx[GUEST_C].newClient != 2)
+		Fail("the host's QUIT leaves an open room alone");
+	{
+		struct CG_MessageTrack mt = {0};
+		mt.type = CG_TRACK;
+		mt.trackID = 4;
+		mt.lapID = 1;
+		Send(HOST, &mt, sizeof(mt));
+	}
+	SvCore_ResetNow();
+	if (rx[GUEST_C].newClient != 3)
+		Fail("the host's QUIT resets a locked room at once (SG_NEWCLIENT to the guest)");
+
 	if (failures == 0)
-		printf("PASSED: bots as virtual clients, takeover, reset, the host's skip\n");
+		printf("PASSED: bots as virtual clients, takeover, reset, the host's skip, the host's quit\n");
 	return failures ? 1 : 0;
 }

@@ -75,6 +75,7 @@ int NativeOnlineGame_BotEndTime(int slot);         // that estimate, 0 : none (a
 int NativeOnlineGame_PrepareAI(void);              // the AI's difficulty for this race ; 0 : no AI here (Battle)
 int *NativeOnlineGame_RoomInfo(int **len);         // what the host tells its guests beside the wire (D12), *len its ints
 int NativeOnlineGame_TakeSkipReset(void);          // session 32d : 1 while the host's Cross asks the server's reset now
+int NativeOnlineGame_TakeQuitReset(void);          // 32e : 1 once after the host's QUIT, the room's race reset now
 void NativeOnlineGame_SlotGone(int slot);           // session 32e : a guest left lobby slot `slot`, the ones above moved down
 
 #endif
