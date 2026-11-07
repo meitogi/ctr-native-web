@@ -173,10 +173,11 @@ async function rejoin(ctx, mode) {
 		res.after = { path: g1.links[0] ? `${g1.links[0].backend}/${g1.links[0].path}` : null, selfId: g1.selfId, before }
 		say(`re-linked after ${res.relinkMs} ms : ${JSON.stringify(res.after)}`)
 		if (res.relinkMs == null) throw new Error(`the guest did not re-link : ${JSON.stringify({ error: g1.error, rejoin: g1.rejoin, lastError: g1.lastError })}`)
-		await until(r.guest, 'the guest waits for the race (the room refuses it)', s => s.waitingForRace, 60_000)
-		res.waitingStatus = await r.gjs("return document.getElementById('online-status')?.textContent ?? ''")
+		// 32f : the guest waits watching the host's race, its band up, its game refused by the locked room
+		const w = await until(r.guest, 'the guest watches, waiting for the race (the room refuses it)', s => !!s.watch?.band && s.octr?.CurrState === ST.PICK_ROOM, 60_000)
+		res.waiting = { band: w.watch.band, shown: w.watch.shown }
 		res.guestScreen = await r.gjs('return window.__ctr?.screen ?? null')
-		say(`the guest waits : ${res.waitingStatus.split('\n').join(' / ')} (screen ${res.guestScreen})`)
+		say(`the guest waits : ${JSON.stringify(res.waiting)} (screen ${res.guestScreen})`)
 		// the host alone in the race : to the finish line
 		res.host = await drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, Date.now() + 300_000)
 		say(`host race : ${JSON.stringify(res.host)}`)
@@ -192,8 +193,7 @@ async function rejoin(ctx, mode) {
 	file(ctx, `net-rejoin-${mode}.json`, res)
 	say(JSON.stringify(res))
 	if (res.lobby.guestSlot !== 1 || res.lobby.driverID !== 1) throw new Error(`the guest came back in another slot : ${JSON.stringify(res.lobby)}`)
-	if (!res.toasts.some(t => /racing|course/i.test(t))) throw new Error(`the guest was not told it waits for the race : ${JSON.stringify(res.toasts)}`)
-	if (!/racing|course/i.test(res.waitingStatus) || /host's menus|menus de l'hôte/i.test(res.waitingStatus)) throw new Error(`the waiting guest's status line : ${JSON.stringify(res.waitingStatus)}`)
+	if (!res.waiting?.band || res.waiting.band.cup) throw new Error(`the waiting guest's band : ${JSON.stringify(res.waiting)}`)
 	return JSON.stringify(res)
 }
 
@@ -277,6 +277,40 @@ async function hostLeaves(ctx, mode) {
 	return JSON.stringify({ toldAt: res.toldAt, closedAt: res.closedAt, results: res.results, toasts: res.guestToasts, game: res.guestGame })
 }
 
+/**
+ * 32f : a guest that lost its link and could not see the host on the meeting point (the relay's
+ * list missed it at that instant ; here the guest's copy of the list is emptied, then its links cut
+ * until its 5 s timeout) races on alone ; at its results, the host still there : back in the same
+ * room at the host's next lobby, never left in a closed room.
+ */
+async function lostSolo(ctx, mode) {
+	const r = { ctx, ...(await roomToRace(ctx, mode, { inject: [IMPAIR, TOASTS] })) }
+	const res = { mode }
+	try {
+		const room = (await online(r.guest)).room
+		await sleep(3000)
+		// the page's copy of the relay's list (web/net/signaling.js sig.peers), emptied in place
+		if (!(await r.gjs('const p = globalThis.Module?.ctrOnlineNet?.room?.signaling?.peers; if (p) p.length = 0; return !!p'))) throw new Error('no relay list on the guest page')
+		await impair(r.guest, { cut: true })
+		const told = await until(r.guest, 'the guest finishes alone', s => FINISH_ALONE.test(s.error ?? ''), 30_000)
+		res.solo = { active: told.lobby.active, ai: told.lobby.hostBots }
+		await impair(r.guest, { cut: false })
+		// both race to the finish : the guest alone in its game, the host with the guest's kart its AI's
+		const deadline = Date.now() + 300_000
+		const [h, g] = await Promise.all([drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, deadline), drive(r.gp, r.gjs, deadline)])
+		res.finished = { host: h.finished, guest: g.finished }
+		const back = await until(r.guest, 'the guest back in the room\'s next lobby', s => (s.octr?.CurrState === ST.GUEST_TRACK_WAIT && s.share?.state === 'connected') || ROOM_CLOSED.test(s.error ?? ''), 180_000)
+		res.back = { role: back.role, room: back.room, state: back.octr?.CurrState, driverID: back.octr?.DriverID, slot: back.share?.slot, error: back.error }
+		res.toasts = await toastsOf(r.guest)
+		await shot(ctx, `lost-solo-${mode}-lobby`)
+		if (ROOM_CLOSED.test(back.error ?? '') || back.room !== room || back.octr?.DriverID !== 1) throw new Error(`the guest after its solo race : ${JSON.stringify(res.back)} (room ${room})`)
+	} finally {
+		await r.close()
+	}
+	file(ctx, `net-lost-solo-${mode}.json`, res)
+	return JSON.stringify(res)
+}
+
 /** The run's proof folder : the newest one under --set proofs=<root>. */
 function runDir(ctx) {
 	const root = ctx.args.proofs
@@ -299,6 +333,8 @@ export default async ctx => {
 	await ctx.scenario('NET-REJOIN-P2P', () => rejoin(ctx, 'auto'))
 	await ctx.scenario('NET-REJOIN-WS', () => rejoin(ctx, 'ws'))
 	await ctx.scenario('NET-END-TIMEOUT', () => endTimeout(ctx, 'auto'))
+	// 32f : a guest racing alone because it could not see the host comes back once the host is seen
+	await ctx.scenario('NET-LOST-SOLO', () => lostSolo(ctx, 'auto'))
 }
 
 export { shot }

@@ -1403,7 +1403,9 @@ character select (session 32's after-race path), the Cup cleared.
 **D12.5 — Leavers.** A guest leaving mid-Cup : its kart finishes that race on the host's AI
 (D11.6, Arcade) ; at the next lock a bot fills its slot (VS : the slot stays empty). The table is
 by slot : the slot's points stay with it, the row shows the slot's current name. A player who
-joins between two races (the room is open during the reset) takes a free slot and its points.
+joins between two races (the room is open during the reset) takes a free slot and its points. Session 32f :
+a guest of the room who quit or lost its link mid-Cup is not let back in before the Cup ends — it
+watches (D12.12) ; the bot keeps its slot until the final standings (or the host's QUIT).
 The host leaving mid-Cup : every guest finishes that race alone (session 32), then the title, the
 room closed — the Cup ends with it.
 
@@ -1454,8 +1456,9 @@ while it is open (`OnlinePause_MaskPad` : pad 1 neutral while the karts update, 
 the menu). Its rows : RESUME ; FINISH THE RACE, only for the last human still racing (every other
 human's finish in the results), whose finish is faked where it stands at the bots' estimate
 (`EstimateEnd`, shared with `NativeOnlineGame_EndBots`) — every human done, the host ends its bots
-at once and the results come at once ; PAUSE FOR EVERYONE, the host only ; QUIT, retail's (YES
-leaves the room for the title, NO comes back to this menu). Triangle, Start and RESUME close it
+at once and the results come at once ; PAUSE FOR EVERYONE, the host only ; QUIT, retail's (YES :
+the host's ends the room's race for everyone, 32e ; a guest's leaves the race, the room kept, D12.12 ;
+NO comes back to this menu). Triangle, Start and RESUME close it
 (`OnlinePause_Frame`, called by `MainFrame_GameLogic` before retail's pause logic, owns Start
 while the menu is open or the room is frozen ; retail's pause cooldown only counts down under
 `PAUSE_1`, so it is reset there). PAUSE FOR EVERYONE sets `octrRoomInfo[ONLINE_ROOM_PAUSED]` on
@@ -1487,3 +1490,32 @@ shows its reason ; Back clears the link, leaves the room and shows the player's 
 stored disc the drop comes first, then the same screen. A pad press is no gesture for the
 browser's sound : a player on a pad alone gets a « Click for sound » toast that stays until the
 first click or key.
+
+**D12.12 — A guest's QUIT, a lost guest : back at the next lobby (session 32f, the user,
+2026-11-06).** A guest's pause menu QUIT › YES leaves the race, not the room :
+`OnlineRoom_GuestQuit` (`native_bridge.c`, from `MainFreeze_MenuPtrQuit`) tells the page
+(`NativeWeb_RoomQuit` → `Module.ctrInput.roomQuit`) and retail's quit runs on — this game back to its
+title, its link closed, the host's AI on its kart in Arcade (D11.6), VS's retail leave. The page keeps
+the room (`away`, `web/online/page.js`) : its link to the host comes back (`rejoin`, quiet), the host's
+picture shows over the game with a band — « The room is racing — you join at the next lobby » or, in a
+Cup, « Watching the Cup — you join after the final standings » — and Back (Escape, the Triangle key or
+pad button, a click) leaves the room for good, the player's own main menu as after 32e. The game is let
+in (`CTL.enter`) once the host's room info, sent to a guest page as soon as it listens, says no Cup
+(`letIn`, `web/online/rules.js`) : it retries the join every 2 s, the locked room refuses it, and the
+reset takes it — a race's end, the Cup's final standings, the host's QUIT. A guest that lost its link
+takes the same path : the host still on the meeting point, at once (its game leaves the race) ; the host
+not seen, after the race it finished alone (session 32) — the host there again, back in the room ; gone,
+« The room is closed » as before. (The host not seen while it is still there takes the relay's list
+missing it : a host that drops off the relay does not join it again today, so its room is closed to
+every new link.)
+
+While a guest watches, the host's capture keeps presenting frames during its race (`web/share/panel.js` ;
+the guest's page says so with a LOBBY `{watching}` on the Share link, our framing) ; its sound stays off
+as in any race. Nothing else moves : in a race a leaver's Share slot stays a hole (`compactNow`,
+`web/share/host.js`) — the guests above keep their slot and their pad's P-number, and the leaver coming
+back takes its own slot again ; a hole still free when the host's menus come back is filled then
+(`compactHoles`), the game told each slot (`CTL.slotGone`), and the character select moves the
+characters above it down even before it takes input (`OnlineCharacters_Follow`). The menus show the
+room's tag top right (`OnlineRoom_DrawTag`, the version's font and grey) : 4 characters of
+`23456789ABCDEFGHJKLMNPQRSTUVWXYZ` from the room id's FNV-1a hash (`roomTag`), the same on every page of
+the room — the id's own base64url would lose its case in the game's capitals.

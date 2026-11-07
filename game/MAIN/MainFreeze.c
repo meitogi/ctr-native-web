@@ -1374,6 +1374,7 @@ void MainFreeze_MenuPtrQuit(struct RectMenu *menu)
 		// ctr-native: the host's QUIT ends the room's race for everyone, back to its select
 		if (OnlineRoom_HostQuit())
 			break;
+		OnlineRoom_GuestQuit();
 #endif
 		// Erase ghost of previous race from RAM
 		GhostTape_Destroy();

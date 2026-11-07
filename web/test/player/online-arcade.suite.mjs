@@ -370,15 +370,16 @@ async function netplayPause(ctx) {
 }
 
 // The host's QUIT YES from its pause menu
-async function hostQuit(host) {
-	await openPause(host, 'host')
-	await toRow(host, 'QUIT')
-	await host.press('c')
-	await untilGame(host, 'the quit box', s => s.menu?.label === 'NO' || s.menu?.label === 'YES', 5000)
-	await host.press('ArrowUp')
+/** The pause menu's QUIT, then YES : the host's (32e) or a guest's (32f). */
+export async function quitRace(tab) {
+	await openPause(tab, tab.name)
+	await toRow(tab, 'QUIT')
+	await tab.press('c')
+	await untilGame(tab, 'the quit box', s => s.menu?.label === 'NO' || s.menu?.label === 'YES', 5000)
+	await tab.press('ArrowUp')
 	await sleep(400)
-	if ((await game(host)).menu?.label !== 'YES') throw new Error(`the quit box's row : ${(await game(host)).menu?.label}`)
-	await host.press('c')
+	if ((await game(tab)).menu?.label !== 'YES') throw new Error(`the quit box's row : ${(await game(tab)).menu?.label}`)
+	await tab.press('c')
 }
 
 async function hostQuitCup(ctx) {
@@ -388,7 +389,7 @@ async function hostQuitCup(ctx) {
 	try {
 		await untilGame(host, 'the lights over (host)', s => s.raceTime > 3000, 30_000)
 		const before = (await online(host)).roomInfo
-		await hostQuit(host)
+		await quitRace(host)
 		const t0 = Date.now()
 		await until(guest, 'the guest out of the race, in its room\'s lobby', s => s.role === 'guest' && s.octr.CurrState === ST.GUEST_TRACK_WAIT, 15_000)
 		await untilGame(host, 'the host on its character select', s => !!s.charSelect, 20_000)
@@ -441,25 +442,18 @@ async function quitBack(ctx) {
 	}
 	try {
 		await untilGame(guest, 'the lights over', s => s.raceTime > 5000, 60_000)
-		await openPause(guest, 'guest')
-		await toRow(guest, 'QUIT')
-		await guest.press('c')
-		await untilGame(guest, 'the quit box', s => s.menu?.label === 'NO' || s.menu?.label === 'YES', 5000)
-		await guest.press('ArrowUp')
-		await sleep(400)
-		await guest.press('c')
-		await sleep(6000)
+		const room = (await online(guest)).room
+		await quitRace(guest)
+		await sleep(3000)
 		let g = await note('quit')
-		for (let i = 0; i < 4; i++) {
-			if (!g?.charSelect && !g?.sub && g?.menu?.input && g?.menu?.label) break
-			await guest.press('z')
-			await sleep(1500)
-			g = await note(`back ${i + 1}`)
-		}
-		await sleep(1000)
+		// 32f : the QUIT keeps the room — the guest watches ; its Triangle leaves (Back)
+		await watching(guest, room, 'after the QUIT')
+		await guest.press('z')
+		await sleep(2000)
+		g = await note('Triangle')
 		const out = await online(guest)
 		g = await game(guest)
-		if ((out.role && out.role !== 'none') || g.mode.join('|') !== 'MAIN_MENU') throw new Error(`on the main menu : room ${out.role}, mode ${g.mode.join('|')} || ${steps.join(' | ')}`)
+		if ((out.role && out.role !== 'none') || out.watch?.band || g.mode.join('|') !== 'MAIN_MENU') throw new Error(`on the main menu : room ${out.role}, band ${JSON.stringify(out.watch?.band)}, mode ${g.mode.join('|')} || ${steps.join(' | ')}`)
 		for (let i = 0; i < 6 && (await game(guest))?.menu?.label !== 'NETPLAY'; i++) { await guest.press('ArrowDown'); await sleep(400) }
 		await guest.press('c')
 		g = await untilGame(guest, 'the ONLINE menu of a new room', s => !s.charSelect && /VS|BATTLE|ARCADE/.test(s.sub?.label ?? ''), 20_000)
@@ -486,6 +480,137 @@ async function quitBack(ctx) {
 		if (back.charSelect) throw new Error(`Triangle did not leave the select || ${steps.join(' | ')}`)
 		return steps.join(' | ')
 	} finally {
+		await r.close()
+	}
+}
+
+// ---- Session 32f : a guest's QUIT keeps it in the room (D12.12) ----
+// The guest's page while it waits for the next lobby (web/online/page.js state().watch) : the band,
+// the host's picture shown and its decoded frames
+const ST_ASSIGN_ROLE = 4 // game/OnlineCTR/global.h LOBBY_ASSIGN_ROLE
+const watchOf = async tab => (await online(tab))?.watch ?? null
+/** The guest still a guest of the same room, its band shown. */
+async function watching(guest, room, label) {
+	const s = await until(guest, `${label} : the guest watching, still in the room`, s => s.role === 'guest' && s.room === room && !!s.watch?.band, 20_000)
+		.catch(async e => { const o = await online(guest).catch(() => ({})); throw new Error(`${e.message} : role ${o.role}, room ${o.room} (was ${room}), watch ${JSON.stringify(o.watch)}, error ${o.error}`) })
+	return s.watch
+}
+/** The host's picture moves on the watching guest : its video decodes frames over 2 s. */
+async function pictureMoves(guest, label) {
+	// the stream starts on the link that just came back : up to 5 windows of 2 s
+	let frames = 0, b = null
+	for (let i = 0; i < 5; i++) {
+		const a = await watchOf(guest)
+		await sleep(2000)
+		b = await watchOf(guest)
+		frames = (b?.frames ?? 0) - (a?.frames ?? 0)
+		if (b?.shown && frames >= 20) return frames
+	}
+	throw new Error(`${label} : the host's picture on the guest : shown ${b?.shown}, ${frames} frames in 2 s`)
+}
+/** The race clock of the host over 3 s, unwatched then watched : the host is not slowed. */
+const pace = ms => `${(ms / 3000 * 100).toFixed(0)} %`
+
+async function guestQuit(ctx) {
+	const r = await roomToRace(ctx, 'auto', { inject: [TOASTS], arcade: true })
+	const { host, guest } = r
+	const out = []
+	try {
+		await untilGame(guest, 'the lights over', s => s.raceTime > 5000, 60_000)
+		const before = await online(host)
+		const room = (await online(guest)).room
+		const character = before.lobby.characters[1]
+		const unwatched = await clockOver(host, 3000)
+		await quitRace(guest)
+		const t0 = Date.now()
+		await watching(guest, room, 'after the QUIT')
+		out.push(`the guest watching ${Date.now() - t0} ms after its QUIT, in room ${room}`)
+		const taken = await until(host, 'the guest\'s kart to the host\'s AI', s => (s.lobby.hostBots & 2) !== 0, 10_000)
+		if (taken.octr.CurrState < ST.START_RACE) throw new Error(`the host's race : state ${taken.octr.CurrState}`)
+		const frames = await pictureMoves(guest, 'the host\'s race')
+		const watched = await clockOver(host, 3000)
+		await guestShot(ctx, guest, 'guest-quit-watching')
+		out.push(`the host's picture : ${frames} frames in 2 s ; the host's race clock over 3 s ${pace(unwatched)} unwatched, ${pace(watched)} watched ; its kart the AI's`)
+		if (watched < unwatched * 0.9) throw new Error(`the host slowed while watched : ${watched} ms of race in 3 s, ${unwatched} unwatched || ${out.join(' · ')}`)
+		const h = await drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, Date.now() + 300_000)
+		if (!h.finished) throw new Error('the host did not finish')
+		const g = await until(guest, 'the guest back in the room\'s next lobby', s => s.octr?.CurrState === ST.GUEST_TRACK_WAIT && s.share?.state === 'connected', 60_000)
+		const sel = await untilGame(host, 'the host\'s select with both players', s => s.charSelect?.players === 2, 30_000)
+			.catch(async e => { throw new Error(`${e.message} : ${JSON.stringify((await game(host))?.charSelect)} || ${out.join(' · ')}`) })
+		await sleep(1000)
+		await guestShot(ctx, guest, 'guest-quit-back')
+		const back = { driverID: g.octr.DriverID, slot: g.share.slot, room: g.room, character: sel.charSelect.characters[1] }
+		out.push(`back : ${JSON.stringify(back)} (its character before ${character})`)
+		if (back.driverID !== 1 || back.slot !== 1 || back.room !== room || back.character !== character) throw new Error(`the guest back : ${JSON.stringify(back)}, wanted DriverID 1, slot 1, room ${room}, character ${character} || ${out.join(' · ')}`)
+		return out.join(' · ')
+	} finally {
+		await r.close()
+	}
+}
+
+// the guest's state sampled through a Cup, beside the host's Cup flag : seated (CurrState >=
+// LOBBY_ASSIGN_ROLE, ST below) while the host's Cup still runs is a rejoin mid-Cup
+async function sampler(guest, host) {
+	const seen = []
+	let on = true
+	const loop = (async () => {
+		while (on) {
+			const [s, h] = await Promise.all([online(guest).catch(() => null), online(host).catch(() => null)])
+			if (s && h) seen.push({ t: Date.now(), state: s.octr?.CurrState ?? -1, cup: h.roomInfo?.cup ?? 0 })
+			await sleep(500)
+		}
+	})()
+	return { seen, stop: async () => { on = false; await loop } }
+}
+
+async function cupQuit(ctx, { hostQuitsIn = 0 } = {}) {
+	const r = await roomToRace(ctx, 'auto', { inject: [TOASTS], arcade: true, cup: true })
+	const { host, guest } = r
+	const out = []
+	let probe = null
+	try {
+		await untilGame(guest, 'the lights over', s => s.raceTime > 5000, 60_000)
+		const room = (await online(guest)).room
+		const character = (await online(host)).lobby.characters[1]
+		await quitRace(guest)
+		await watching(guest, room, 'after the QUIT')
+		await until(host, 'the guest\'s kart to the host\'s AI', s => (s.lobby.hostBots & 2) !== 0, 10_000)
+		probe = await sampler(guest, host)
+		for (let race = 1; race <= 4; race++) {
+			if (race === hostQuitsIn) {
+				await untilGame(host, `race ${race} : the lights over`, s => s.raceTime > 3000, 60_000)
+				await quitRace(host)
+				out.push(`the host's QUIT in race ${race}`)
+				break
+			}
+			if (race === 2) {
+				const frames = await pictureMoves(guest, 'race 2')
+				await guestShot(ctx, guest, 'cup-quit-watching')
+				const s = await online(host)
+				if (!(s.lobby.hostBots & 2)) throw new Error(`race 2 : slot 1 is not a bot (${s.lobby.hostBots.toString(2)}) || ${out.join(' · ')}`)
+				out.push(`race 2 : slot 1 a bot (${s.octr.names[1]}), the guest watching (${frames} frames in 2 s)`)
+			}
+			const h = await drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, Date.now() + 300_000)
+			if (!h.finished) throw new Error(`race ${race} : the host did not finish`)
+			await until(host, `race ${race} counted`, s => s.roomInfo?.races === race, 60_000)
+			await sleep(2000)
+			await host.press('c') // the host's Cross on the standings (D12.10)
+			if (race < 4) await until(host, `cup race ${race + 1}`, s => s.octr.CurrState === ST.START_RACE, 240_000, 500)
+		}
+		const sel = await untilGame(host, 'the host\'s select after the Cup, with both', s => s.charSelect?.players === 2, 90_000)
+			.catch(async e => { throw new Error(`${e.message} : ${JSON.stringify((await game(host))?.charSelect)} || ${out.join(' · ')}`) })
+		const g = await until(guest, 'the guest in the next lobby', s => s.octr?.CurrState === ST.GUEST_TRACK_WAIT && s.share?.state === 'connected', 60_000)
+		await probe.stop()
+		await guestShot(ctx, guest, 'cup-quit-back')
+		// seated while the host's Cup ran : a rejoin mid-Cup (the room opens between two races)
+		const early = probe.seen.filter(x => x.state >= ST_ASSIGN_ROLE && x.cup)
+		if (early.length) throw new Error(`the guest was seated during the Cup : ${JSON.stringify(early.slice(0, 3))} || ${out.join(' · ')}`)
+		const back = { driverID: g.octr.DriverID, slot: g.share.slot, room: g.room, character: sel.charSelect.characters[1] }
+		out.push(`never seated during the Cup (${probe.seen.length} samples) ; back : ${JSON.stringify(back)} (character before ${character})`)
+		if (back.driverID !== 1 || back.slot !== 1 || back.room !== room || back.character !== character) throw new Error(`the guest back : ${JSON.stringify(back)}, character before ${character} || ${out.join(' · ')}`)
+		return out.join(' · ')
+	} finally {
+		await probe?.stop()
 		await r.close()
 	}
 }
@@ -556,4 +681,8 @@ export default async ctx => {
 	await ctx.scenario('NETPLAY-FINISH-HERE', () => finishHere(ctx))
 	// the user, 2026-11-06 : the guest's QUIT mid-race, Back to its main menu, NETPLAY : the ONLINE menu, nothing kept
 	await ctx.scenario('NETPLAY-QUIT-BACK', () => quitBack(ctx))
+	// the user, 2026-11-06 (32f) : a guest's QUIT leaves the race, not the room ; it watches, then is back
+	await ctx.scenario('NETPLAY-GUEST-QUIT', () => guestQuit(ctx))
+	await ctx.scenario('NETPLAY-CUP-QUIT', () => cupQuit(ctx))
+	await ctx.scenario('NETPLAY-CUP-QUIT-HOSTQUIT', () => cupQuit(ctx, { hostQuitsIn: 2 }))
 }

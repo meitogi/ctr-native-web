@@ -65,3 +65,33 @@ export function createEndTimer() {
     },
   };
 }
+
+/**
+ * Session 32f : when a guest out of the room's race (its QUIT, a lost link) lets its game in
+ * again. The host's room info (D12.3) must be known — a Cup under way keeps it out until the Cup
+ * ends (the room opens between two Cup races, and a rejoin mid-Cup is not wanted) ; a host whose
+ * word never came (`waitedMs` past `patienceMs`) is taken as no Cup.
+ * @param {{room: object|null, linked: boolean, waitedMs: number, patienceMs?: number}} s
+ */
+export function letIn({ room, linked, waitedMs, patienceMs = 3000 }) {
+  if (!linked) return false;
+  if (!room) return waitedMs >= patienceMs;
+  return !room.cup;
+}
+
+// the tag's alphabet : no 0 / O, no 1 / I (the game's font draws letters in capitals only)
+const TAG_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+
+/**
+ * Session 32f : the room's id as 4 characters, drawn top right on the game's menus. The id is
+ * base64url, its case lost in the game's capitals : 20 bits of its FNV-1a hash instead, the same
+ * on every page of the room.
+ */
+export function roomTag(id) {
+  if (!id) return '';
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193) >>> 0;
+  let tag = '';
+  for (let k = 0; k < 4; k++, h >>>= 5) tag += TAG_ALPHABET[h & 31];
+  return tag;
+}

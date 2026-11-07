@@ -70,7 +70,8 @@ let audioOn = true;
 Module.ctrShare = {
   present(displayW, displayH, viewportW, viewportH) {
     const paused = racing();
-    if (!paused) capture?.present(displayW, displayH, viewportW, viewportH);
+    // a guest out of the race watches it (32f) : the picture goes on, the sound stays off
+    if (!paused || host?.watched()) capture?.present(displayW, displayH, viewportW, viewportH);
     if (capture && audioOn === paused) {
       audioOn = !paused;
       for (const t of capture.stream.getAudioTracks()) t.enabled = audioOn;
@@ -133,7 +134,7 @@ async function startOn(room, { relayGuests = false, by = 'share' } = {}) {
   room.on('warning', (w) => { error = `${w.code}: ${w.message}`; render(); });
   room.on('close', () => { error = 'relay: the relay closed the room'; render(); });
   host = createShareHost({ room, stream: capture.stream, maxBitrate: Number(bitrate.value), scale: capture.scale, slots, hostName: hostName(),
-    game: () => globalThis.__ctr ?? null, relayGuests, compact: by === 'online' });
+    game: () => globalThis.__ctr ?? null, relayGuests, compact: by === 'online', compactNow: () => !racing() });
   host.on('change', render);
   // the host is told who comes and goes, Settings open or not
   host.on('join', (g) => ui?.toast(ui.text.joined(nameOf(g.slot, g.name), g.slot + 1)));

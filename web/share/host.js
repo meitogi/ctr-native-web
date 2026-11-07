@@ -22,15 +22,20 @@ export const BITRATE = { min: 500_000, max: 6_000_000, default: 2_500_000 };
  *   a bot guest (BOT) is sent of its own kart ; null = nothing to send (release build)
  * @param {boolean} [o.compact] - a guest leaving moves the ones above it down a slot (a Netplay
  *   room, session 32e : P3 becomes P2 and is told so) ; plain Share keeps every slot
+ * @param {() => boolean} [o.compactNow] - with `compact` : false while a leaver's slot must stay a
+ *   hole (a Netplay room's race, session 32f : nobody moves, the leaver coming back takes it again) ;
+ *   `compactHoles()` fills them later
  * @param {boolean} [o.relayGuests] - keep a guest whose link is not WebRTC : its pad plays, it
  *   gets no stream (state 'nomedia') — an Online room's lobby (session 14), never plain Share
  * @returns {Emitter & {slots, guests: object, maxBitrate: number, hostName: string, setBitrate(bps: number): Promise<void>,
- *   setScale(scale: number): Promise<void>, setHostName(name: string): void, players(): {slot, name}[], frame(): void, close(): void}}
+ *   setScale(scale: number): Promise<void>, setHostName(name: string): void, players(): {slot, name}[], frame(): void,
+ *   compactHoles(): number[], watched(): boolean, close(): void}}
  *   `guests` : peerId → {slot, name (null until its HELLO), path, backend, state ('joining' |
- *   'streaming' | 'failed'), error?, senders?, bot?, link} ; `refusals` : the last 8 {peerId, code, path} ;
- *   events 'change', 'join' (guest : streaming), 'leave' (guest).
+ *   'streaming' | 'failed'), error?, senders?, bot?, watching?, link} ; `watching` : the guest's
+ *   page shows the host's picture while its game is out of the room's race (its LOBBY, 32f) ; `refusals` : the last 8 {peerId, code, path} ;
+ *   events 'change', 'listen' (guest : its first pad, WELCOME sent), 'join' (guest : streaming), 'leave' (guest).
  */
-export function createShareHost({ room, stream, maxBitrate = BITRATE.default, scale = 1, slots = createSlots(), hostName = '', game = () => null, relayGuests = false, compact = false }) {
+export function createShareHost({ room, stream, maxBitrate = BITRATE.default, scale = 1, slots = createSlots(), hostName = '', game = () => null, relayGuests = false, compact = false, compactNow = () => true }) {
   const host = new Emitter();
   host.slots = slots;
   host.guests = Object.create(null);
@@ -96,9 +101,14 @@ export function createShareHost({ room, stream, maxBitrate = BITRATE.default, sc
         guest.bot = { levelID: null };
         change();
       }
+      else if (bytes[0] === TAG.lobby && host.guests[link.peerId] === guest) {
+        guest.watching = !!decodeControl(bytes)?.body?.watching;
+        change();
+      }
     });
     whenListening(link, () => {
       guest.listening = true;
+      host.emit('listen', guest);
       link.send(encodeControl(TAG.welcome, { slot, host: nameOf(0, host.hostName) }), { reliable: true });
       link.send(encodeControl(TAG.players, playersBody()), { reliable: true });
       if (!media) {
@@ -129,16 +139,35 @@ export function createShareHost({ room, stream, maxBitrate = BITRATE.default, sc
     slots.release(link.peerId);
     delete host.guests[link.peerId];
     host.emit('leave', guest);
-    if (compact) {
-      for (const { peerId, to } of slots.compact()) {
-        const moved = host.guests[peerId];
-        if (!moved) continue;
-        moved.slot = to;
-        if (moved.listening) moved.link.send(encodeControl(TAG.welcome, { slot: to, host: nameOf(0, host.hostName) }), { reliable: true });
-      }
-    }
+    if (compact && compactNow()) moveDown();
     change();
   });
+
+  // the guests above a free slot one slot down, each told its new one
+  const moveDown = () => {
+    for (const { peerId, to } of slots.compact()) {
+      const moved = host.guests[peerId];
+      if (!moved) continue;
+      moved.slot = to;
+      if (moved.listening) moved.link.send(encodeControl(TAG.welcome, { slot: to, host: nameOf(0, host.hostName) }), { reliable: true });
+    }
+  };
+  /** The holes a race left (`compactNow` false), filled now : the freed slots, highest first. */
+  host.compactHoles = () => {
+    const holes = [];
+    let top = 0;
+    for (let s = 1; s < 4; s++) if (slots.get(s)) top = s;
+    for (let s = top - 1; s >= 1; s--) if (!slots.get(s)) holes.push(s);
+    if (!holes.length) return holes;
+    moveDown();
+    change();
+    return holes;
+  };
+  /** A guest's page shows the host's picture outside the room's race (32f) : keep it coming. */
+  host.watched = () => {
+    for (const id in host.guests) if (host.guests[id].watching && host.guests[id].state === 'streaming') return true;
+    return false;
+  };
 
   const retune = async () => {
     const jobs = [];

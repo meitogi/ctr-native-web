@@ -24,6 +24,9 @@ export const ui = $state({
   lobbyGuest: false,
   // a room link opened at boot (session 32e) : null, or { state: 'joining' | 'racing' | 'failed', reason }
   joining: null,
+  // a Netplay guest out of the room's race (its QUIT, a lost link ; web/online/page.js, session
+  // 32f) : null, or { cup } — the band over the host's picture until the room takes it again
+  waiting: null,
   // Share's guest page : the connection as web/share/guest-page.js reports it (guest.js)
   guest: null,
   // panels other modules hand over (web/online/page.js, web/share/panel.js) : { id, title, el }

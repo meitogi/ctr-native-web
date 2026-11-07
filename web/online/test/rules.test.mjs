@@ -2,7 +2,7 @@
 // end-of-race timeout (web/online/rules.js).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { REJOIN_DELAYS_MS, createEndTimer, rejoinLoop } from '../rules.js';
+import { REJOIN_DELAYS_MS, createEndTimer, letIn, rejoinLoop, roomTag } from '../rules.js';
 
 const noSleep = { waits: [], sleep(ms) { this.waits.push(ms); return Promise.resolve(); } };
 const sleeper = () => { const s = { waits: [] }; s.sleep = (ms) => { s.waits.push(ms); return Promise.resolve(); }; return s; };
@@ -71,4 +71,26 @@ test('end timer : off sends nothing ; a new race starts over', () => {
   assert.equal(t.tick({ race: true, finished: 0, endAfterMs: 10_000, now: 200_000 }), null);
   assert.deepEqual(t.tick({ race: true, finished: 1, endAfterMs: 10_000, now: 201_000 }), { notice: 10_000 });
   assert.deepEqual(t.tick({ race: true, finished: 1, endAfterMs: 10_000, now: 211_000 }), { end: true });
+});
+
+test('32f letIn : the game back in the room only once linked, never while the host\'s Cup runs', () => {
+  assert.equal(letIn({ room: { cup: 0 }, linked: false, waitedMs: 9000 }), false, 'no link to the host yet');
+  assert.equal(letIn({ room: { cup: 0, races: 0 }, linked: true, waitedMs: 0 }), true, 'a single race : at once');
+  assert.equal(letIn({ room: { cup: 1, races: 2 }, linked: true, waitedMs: 60_000 }), false, 'a Cup under way');
+  assert.equal(letIn({ room: { cup: 1, races: 4 }, linked: true, waitedMs: 60_000 }), false, 'the final standings : until the reset clears the Cup');
+  assert.equal(letIn({ room: null, linked: true, waitedMs: 1000 }), false, 'the host\'s word not here yet');
+  assert.equal(letIn({ room: null, linked: true, waitedMs: 3000 }), true, 'no word at all : no Cup');
+});
+
+test('32f roomTag : 4 characters the game\'s capitals draw unambiguously, stable per id', () => {
+  const ids = ['q3Zc9xK-_aB', 'Q3ZC9XK-_AB', 'AAAAAAAAAAA', 'AAAAAAAAAAB'];
+  const tags = ids.map(roomTag);
+  for (const t of tags) assert.match(t, /^[2-9A-HJ-NP-Z]{4}$/);
+  assert.equal(roomTag(ids[0]), tags[0], 'the same id, the same tag');
+  assert.equal(new Set(tags).size, 4, `ids differing only by case or one character : ${tags}`);
+  assert.equal(roomTag(''), '');
+  // 2000 random ids : the 20 bits spread (a collision or two at most)
+  const seen = new Set();
+  for (let i = 0; i < 2000; i++) seen.add(roomTag(Math.random().toString(36).slice(2, 13)));
+  assert.ok(seen.size >= 1995, `${seen.size} distinct tags of 2000`);
 });

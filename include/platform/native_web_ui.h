@@ -16,6 +16,10 @@
 // menu (game/230/MM_Characters.c) ; the page says why in a toast.
 // NativeWeb_LeaveRoom() : back on the main menu after a Netplay room (game/230/MM_MenuFlow.c) — the
 // page leaves its room, if it still has one, as its Leave button does.
+// NativeWeb_RoomQuit() : a guest's QUIT in a Netplay race (game/MAIN/MainFreeze.c, session 32f) —
+// the page keeps the room : the player watches the host's race and comes back at the next lobby.
+// NativeWeb_RoomTag(buf, size) : the page's room, as the 4 characters drawn top right in the menus
+// (game/OnlineCTR/thread.c, session 32f) ; 0 with no room.
 // NativeWeb_RoomGuestMask() : the slots a room's guests hold (bit n = slot n, the share pads of
 // platform/native_input.c) — a room's humans are the host and these, never a pad of the host's.
 #if defined(__EMSCRIPTEN__)
@@ -27,6 +31,8 @@ void NativeWeb_OpenMultiplayer(void) EM_IMPORT(NativeWeb_OpenMultiplayer);
 int NativeWeb_NetplayHost(void) EM_IMPORT(NativeWeb_NetplayHost);
 void NativeWeb_RoomAlone(void) EM_IMPORT(NativeWeb_RoomAlone);
 void NativeWeb_LeaveRoom(void) EM_IMPORT(NativeWeb_LeaveRoom);
+void NativeWeb_RoomQuit(void) EM_IMPORT(NativeWeb_RoomQuit);
+int NativeWeb_RoomTag(char *buf, int size) EM_IMPORT(NativeWeb_RoomTag);
 int NativeWeb_RoomGuestMask(void);
 #endif
 #else
@@ -35,6 +41,8 @@ int NativeWeb_RoomGuestMask(void);
 #define NativeWeb_NetplayHost() 0
 #define NativeWeb_RoomAlone() ((void)0)
 #define NativeWeb_LeaveRoom() ((void)0)
+#define NativeWeb_RoomQuit() ((void)0)
+#define NativeWeb_RoomTag(buf, size) 0
 #endif
 
 #endif

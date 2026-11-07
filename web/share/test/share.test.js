@@ -271,3 +271,37 @@ test('no BOT, no kart : an ordinary guest gets no KART / TRACK, and a release ho
   assert.deepEqual(controls(b.p.log, 'host').filter((m) => m.tag >= TAG.bot).map((m) => m.tag), []);
   assert.equal(b.guest.game, null, 'the bot falls back to Cross held');
 });
+
+test('32f : a Netplay race keeps a leaver\'s slot a hole — nobody moves, the leaver coming back takes it ; the menus fill it', async () => {
+  const room = hostRoom();
+  let racing = true;
+  const host = createShareHost({ room, stream: fakeStream(), compact: true, compactNow: () => !racing });
+  await joined(room, 'a');
+  const b = await joined(room, 'b');
+  const c = await joined(room, 'c');
+  b.p.host.close();
+  await tick(20);
+  assert.equal(c.guest.slot, 3, 'mid-race : c stays P4, no new WELCOME');
+  const b2 = await joined(room, 'b2'); // b's page back on a fresh link
+  assert.equal(b2.guest.slot, 2, 'its slot again');
+  b2.p.host.close();
+  await tick(20);
+  racing = false;
+  assert.deepEqual(host.compactHoles(), [2], 'the menus : the hole left');
+  await tick(20);
+  assert.equal(c.guest.slot, 2, 'c moved down then, told so');
+  assert.deepEqual(host.compactHoles(), [], 'nothing more');
+});
+
+test('32f : a guest\'s page says it watches (LOBBY {watching}) ; the host keeps its picture coming while one does', async () => {
+  const room = hostRoom();
+  const host = createShareHost({ room, stream: fakeStream() });
+  const a = await joined(room, 'a');
+  assert.equal(host.watched(), false);
+  a.guest.link.send(encodeControl(TAG.lobby, { watching: true }), { reliable: true });
+  await tick(20);
+  assert.equal(host.watched(), true);
+  a.guest.link.send(encodeControl(TAG.lobby, { watching: false }), { reliable: true });
+  await tick(20);
+  assert.equal(host.watched(), false);
+});

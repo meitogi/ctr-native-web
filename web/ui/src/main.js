@@ -170,6 +170,13 @@ export function joinBack() {
 // page.js : the joining screen's state ; nothing once it is gone (a room joined later from the
 // panel has no boot screen)
 const joining = (j) => { if (ui.joining) ui.joining = j }
+// page.js : the watching band (32f) ; its Back leaves the room
+const waiting = (w) => { if (JSON.stringify(ui.waiting) !== JSON.stringify(w)) ui.waiting = w }
+/** The watching band's Back (Escape, Triangle, a click) : out of the room, the player's own main menu. */
+export function waitBack() {
+  ui.waiting = null
+  globalThis.ctrUI.onWaitBack?.()
+}
 
 // Adopted panels live in a hidden parking spot while their tab is not shown, so their elements
 // stay in the document (scripts and suites reach them by id).
@@ -187,7 +194,7 @@ function adopt(id, title, el) {
 // An Online room's guest in the lobby (web/online/page.js) : the game ignores the local devices
 // and the page sends them to the host as a Share guest does — with the player's own mapping.
 const lobby = (on) => { ui.lobbyGuest = !!on }
-globalThis.ctrUI = { settings, adopt, toast, dismissToast, handleFile, players, text: T, lobby, joining, guestInput: () => guestInput(settings.get()) }
+globalThis.ctrUI = { settings, adopt, toast, dismissToast, handleFile, players, text: T, lobby, joining, waiting, guestInput: () => guestInput(settings.get()) }
 
 // Test-only hook (session 3) : the agent browser runs on another machine than the files, so CDP's
 // DOM.setFileInputFiles cannot point at them ; suites fetch a same-origin fixture into the same
@@ -200,7 +207,7 @@ globalThis.__ctrTestHandleFileFromUrl = async (url) => {
 
 if (__CTR_DEV__) import('./dev/index.js').then((dev) => dev.install({ toast }))
 
-mount(App, { target: document.getElementById('ctr-ui'), props: { input, handleFile, forgetStoredDisc, startGame, joinBack } })
+mount(App, { target: document.getElementById('ctr-ui'), props: { input, handleFile, forgetStoredDisc, startGame, joinBack, waitBack } })
 
 ;(async () => {
   if (globalThis.__CTR_WEB_PRELOAD) {

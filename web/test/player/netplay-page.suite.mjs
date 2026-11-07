@@ -12,7 +12,8 @@
 //             --set relay=ws://localhost:8788 --set rk=<key> [--set tag=before]
 // Not a node --test file.
 
-import { ST, boot, game, guestShot, online, openGuestPage, shot, until, untilGame } from './online.suite.mjs'
+import { ST, boot, drive, game, guestShot, online, openGuestPage, shot, until, untilGame } from './online.suite.mjs'
+import { quitRace } from './online-arcade.suite.mjs'
 import { menuTo, say } from './ctr.mjs'
 
 export const meta = { url: 'http://localhost:8093/index.html', login: false, player: { gamepad: true, pressFrames: 8 } }
@@ -358,6 +359,9 @@ export default async ctx => {
 	await ctx.scenario('BATTLE-THEN-ARCADE', () => battleThenArcade(ctx))
 	// NETPLAY's « Room open » toast is a button : a click copies the link (32e follow-up)
 	await ctx.scenario('TOAST-COPY', () => toastCopy(ctx))
+	// 32f : a guest's QUIT moves nobody else
+	await ctx.scenario('QUIT-OTHERS', () => quitOthers(ctx))
+	await ctx.scenario('QUIT-LEAVE-OTHERS', () => quitOthers(ctx, { leave: true }))
 }
 
 // the clipboard stubbed : every write kept in __clip, accepted or refused
@@ -751,6 +755,94 @@ async function selectAlone(ctx) {
 }
 
 const sel = async host => (await game(host))?.charSelect ?? null
+
+// 32f, item 4 : Bee (P2) quits a 3-player VS race ; Ex (P3) races on undisturbed — its seat, its
+// Share slot, no new WELCOME — and at the next select Ex is still P3 with its character, Bee P2
+// with its own
+// leave : Bee then leaves for good (its band's Back) — its slot a hole until the menus, then Ex
+// moves down to P2 with its own character (the select shifts it before it takes input)
+async function quitOthers(ctx, { leave = false } = {}) {
+	const origin = new URL(ctx.args.url).origin
+	const { host, a } = await hostRoom(ctx)
+	const b = await openGuestPage(ctx, origin, { name: 'Bee' })
+	let x = null
+	const rows = []
+	try {
+		await boot(b.guest, a.link)
+		await until(b.guest, 'Bee in the room', s => s.lobby.active && s.octr.CurrState === ST.GUEST_TRACK_WAIT && s.share?.state === 'connected', 90_000)
+		x = await openGuestPage(ctx, origin, { name: 'Ex', cdp: ctx.args.guest2Cdp ?? null })
+		await boot(x.guest, a.link)
+		await until(x.guest, 'Ex in the room', s => s.lobby.active && s.octr.CurrState === ST.GUEST_TRACK_WAIT && s.share?.state === 'connected', 90_000)
+		await ctx.js("const e = document.getElementById('online-end-after'); e.value = '15'; e.dispatchEvent(new Event('change')); return true")
+		// NETPLAY > VS > SINGLE RACE : the select with the room's 3 ; P2 and P3 move off P1's character, all lock
+		await menuTo(ctx, 'NETPLAY', dir => ctx.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
+		for (const key of ['c', 'c', 'c']) { await ctx.press(key); await ctx.frames(15) }
+		await untilGame(host, 'the select with 3', g => g.charSelect?.players === 3, 60_000)
+		await b.guest.press('ArrowRight'); await x.guest.press('ArrowLeft'); await sleep(800)
+		// the characters as the select last showed them : all locked, it moves on to the tracks
+		let locked = await sel(host)
+		for (let i = 0; i < 8 && locked && locked.locked !== 7; i++) {
+			const l = locked.locked
+			if (!(l & 2)) await b.guest.press('c')
+			if (!(l & 4)) await x.guest.press('c')
+			await sleep(800)
+			const now = await sel(host)
+			if (now && !(now.locked & 1) && (now.locked & 6) === 6) await ctx.press('c') // P1 last : the others' locks are in
+			await sleep(800)
+			const next = await sel(host)
+			if (!next) break
+			locked = next
+		}
+		if (!locked || locked.players !== 3) throw new Error(`the select before the race : ${JSON.stringify(locked)}`)
+		// the track select (the bridge reads no RectMenu there) : its first track, Cross until it is sent
+		await untilGame(host, 'the track select', g => !g.charSelect, 20_000)
+		for (let i = 0; i < 16 && (await online(host)).octr.CurrState === ST.HOST_TRACK_PICK; i++) {
+			if (!(await game(host))?.charSelect) await ctx.press('c')
+			await sleep(700)
+		}
+		for (const t of [host, b.guest, x.guest]) await until(t, `${t.name} racing`, s => s.octr.CurrState === ST.START_RACE, 180_000, 500)
+		await untilGame(b.guest, 'the lights over', g => g.raceTime > 5000, 60_000)
+		const ex0 = await online(x.guest)
+		const room = (await online(b.guest)).room
+		rows.push(`racing : Ex DriverID ${ex0.octr.DriverID}, slot ${ex0.share.slot} ; characters ${JSON.stringify(locked.characters)}`)
+		// Ex's view sampled through the race : its seat and its Share slot
+		const exSeen = []
+		let on = true
+		const loop = (async () => { while (on) { const s = await online(x.guest).catch(() => null); if (s) exSeen.push({ d: s.octr?.DriverID, slot: s.share?.slot, st: s.octr?.CurrState }); await sleep(500) } })()
+		await quitRace(b.guest)
+		if (leave) {
+			await until(b.guest, 'Bee watching', s => !!s.watch?.band, 20_000)
+			// the band itself on screen (the page shows it at its next tick)
+			for (let i = 0; i < 20 && !(await b.guest.js("return !!document.getElementById('ctr-waiting')")); i++) await sleep(250)
+			await b.guest.press('Escape')
+			await until(b.guest, 'Bee out of the room', s => s.role === 'none', 10_000)
+		}
+		const hostDrive = await drive({ hold: ctx.hold, release: ctx.release, press: ctx.press }, ctx.js, Date.now() + 300_000)
+		if (!hostDrive.finished) throw new Error('the host did not finish')
+		const want = leave ? 2 : 3
+		const back = await untilGame(host, `the next select with ${want}`, g => g.charSelect?.players === want, 120_000)
+			.catch(async e => { throw new Error(`${e.message} : ${JSON.stringify(await sel(host))} || ${rows.join(' | ')}`) })
+		on = false
+		await loop
+		await sleep(1000)
+		await shot(ctx, 'quit-others-select')
+		// read again once on screen : the select's first frame moves the characters (the slot word)
+		back.charSelect = (await game(host)).charSelect ?? back.charSelect
+		const bee = await online(b.guest), ex = await online(x.guest)
+		const moved = exSeen.filter(e => e.st >= ST.START_RACE && (e.d !== ex0.octr.DriverID || e.slot !== ex0.share.slot))
+		rows.push(`next select : ${JSON.stringify(back.charSelect.characters)} ; Bee slot ${bee.share?.slot} room ${bee.room === room}, Ex slot ${ex.share?.slot}`)
+		if (moved.length) throw new Error(`Ex moved mid-race : ${JSON.stringify(moved.slice(0, 3))} || ${rows.join(' | ')}`)
+		if (leave) {
+			// Ex now P2 with its own character
+			if (ex.share?.slot !== 1 || back.charSelect.characters[1] !== locked.characters[2]) throw new Error(`the next select without Bee : ${rows.join(' | ')}`)
+		} else if (ex.share?.slot !== 2 || bee.share?.slot !== 1 || back.charSelect.characters[1] !== locked.characters[1] || back.charSelect.characters[2] !== locked.characters[2]) throw new Error(`the next select : ${rows.join(' | ')}`)
+		return rows.join(' | ')
+	} finally {
+		await ctx.js('window.__ctrOnline.leave(); return true').catch(() => {})
+		await b.guestBrowser.close()
+		await x?.guestBrowser.close()
+	}
+}
 
 async function selectGrow(ctx) {
 	const origin = new URL(ctx.args.url).origin

@@ -858,7 +858,11 @@ static void OnlineCharacters_Follow(void)
 
 	if ((sdata->Loading.stage != LOAD_IDLE) || (MM_CHARACTER_SELECT_MENU_STATE != IN_MENU))
 	{
-		// a word from before this screen took input (a guest who left the menus) : not for it
+		// a word from before this screen took input (a guest who left the menus, or one gone for
+		// good after a race, its slot freed then, 32f) : the players above it keep their character
+		if ((octrSlotGone > 0) && (octrSlotGone < MM_CHARACTER_SELECT_MAX_PLAYERS))
+			for (p = octrSlotGone; p < MM_CHARACTER_SELECT_MAX_PLAYERS - 1; p++)
+				GAME_CHARACTER_IDS[p] = GAME_CHARACTER_IDS[p + 1];
 		octrSlotGone = 0;
 		settling = 0;
 		return;

@@ -7,6 +7,7 @@
 #include <stdio.h>
 
 #include "../../platform/native_online_game.h"
+#include <platform/native_web_ui.h>
 
 // octr lived at PS1 address 0x8000C000
 struct OnlineCTR octr_storage;
@@ -1326,6 +1327,30 @@ int OnlineRoom_HostQuit(void)
 	octrQuitReset = 1;
 	NativeOnlineGame_Log("[OnlineCTR] The host quit : the room's race ends for everyone\n");
 	return 1;
+}
+
+// The page's room, top right on the menus (the user, 32f) : its tag in the font and grey of the
+// title's version (MM_MenuFlow.c), never in a race (the HUD's clock is there)
+void OnlineRoom_DrawTag(void)
+{
+	char tag[8], line[16];
+
+	if (!NativeWeb_RoomTag(tag, sizeof(tag)))
+		return;
+	snprintf(line, sizeof(line), "ROOM %s", tag);
+	DecalFont_DrawLine(line, 0x1f6, 0x0c, FONT_SMALL, JUSTIFY_RIGHT | GRAY);
+}
+
+// ---- A guest's QUIT (the user, 32f) ----
+// It leaves the race, not the room : retail's quit runs (this game to its title, the host's AI on
+// its kart in Arcade), and the page keeps the room, shows the host's race and lets the game in again
+// at the next lobby (D12.12)
+void OnlineRoom_GuestQuit(void)
+{
+	if (!ONLINE_RACE || (octr->DriverID <= 0))
+		return;
+	NativeOnlineGame_Log("[OnlineCTR] A guest's QUIT : out of the race, the room kept\n");
+	NativeWeb_RoomQuit();
 }
 
 int NativeOnlineGame_TakeQuitReset(void)

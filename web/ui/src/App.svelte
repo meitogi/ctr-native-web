@@ -26,7 +26,7 @@
   import { ui } from './state.svelte.js'
   import { settings } from './store.js'
 
-  let { input, handleFile, forgetStoredDisc, startGame, joinBack } = $props()
+  let { input, handleFile, forgetStoredDisc, startGame, joinBack, waitBack } = $props()
 
   const running = $derived(ui.phase === 'running' || ui.phase === 'starting')
   let layout = $state(null)
@@ -138,6 +138,13 @@
   }
   // the ready screen : the PSX buttons that start the game, as indices into a mapping
   const START_BUTTONS = [BUTTONS.indexOf('cross'), BUTTONS.indexOf('start')]
+  // the joining card and the watching band (32f) : Triangle is their Back, as on every screen
+  const TRIANGLE = BUTTONS.indexOf('triangle')
+  const triangleKey = (e) => {
+    const sc = scancodeOf(e.code)
+    return sc >= 0 && claimed(settings.get()).some((m) => m[TRIANGLE] === sc)
+  }
+  const back = () => (ui.joining ? joinBack : ui.waiting ? waitBack : null)
   function startKey(e) {
     if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') return true
     const sc = scancodeOf(e.code)
@@ -168,11 +175,11 @@
       e.stopImmediatePropagation()
       return
     }
-    if (e.code === 'Escape' && ui.joining) {
-      // the joining screen's way back (session 32e)
+    if ((e.code === 'Escape' || (!e.repeat && !ui.settingsOpen && !typing() && triangleKey(e))) && back()) {
+      // the joining screen's way back (session 32e), the watching band's (32f)
       e.preventDefault()
       e.stopImmediatePropagation()
-      joinBack()
+      back()()
       return
     }
     if (e.code === 'Escape' && running) {
@@ -209,6 +216,7 @@
     }
     input.press() // « Skip intro »
     if (button === 16 && running) { setOpen(!ui.settingsOpen); return }
+    if (!ui.settingsOpen && !ui.confirm && back() && settings.get().gamepad[TRIANGLE] === STANDARD_TO_SDL[button]) { back()(); return }
     if (ui.listening?.device === 'gamepad') {
       bindPadButton(button, ui, settings)
       return
@@ -263,6 +271,13 @@
   <Boot {handleFile} {startGame} {joinBack} {layout} />
 </div>
 
+{#if running && ui.waiting && !ui.joining}
+  <div id="ctr-waiting" role="status" aria-live="polite">
+    <span>{ui.waiting.cup ? T.watchCup : T.watchRace}</span>
+    <button type="button" class="btn" onclick={waitBack}>{T.waitBack} <Glyph kind="psx" value="triangle" size={20} /> / Esc</button>
+  </div>
+{/if}
+
 {#if running}
   <Hud onsettings={() => setOpen(!ui.settingsOpen)} />
   {#if ui.settingsOpen}
@@ -298,6 +313,10 @@
 
 <style>
   #boot.hidden { display: none; }
+  #ctr-waiting { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 18px;
+    max-width: calc(100vw - 32px); box-sizing: border-box; padding: 12px 14px 12px 22px; border-radius: 18px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--ink); font-size: 17px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); }
+  #ctr-waiting span { flex: 1; }
   #ctr-drop-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; pointer-events: none;
     background: rgba(8, 10, 16, 0.55); backdrop-filter: blur(10px); animation: fade 140ms ease-out; }
   @keyframes fade { from { opacity: 0; } }

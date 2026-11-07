@@ -369,6 +369,22 @@ EM_JS(void, NativeWeb_LeaveRoom, (void), {
 	const input = Module.ctrInput;
 	if (input && input.leaveRoom) input.leaveRoom();
 });
+
+EM_JS(void, NativeWeb_RoomQuit, (void), {
+	const input = Module.ctrInput;
+	if (input && input.roomQuit) input.roomQuit();
+});
+
+EM_JS(int, NativeWeb_RoomTag, (char *buf, int size), {
+	const input = Module.ctrInput;
+	const tag = input && input.roomTag ? input.roomTag() : '';
+	if (!tag) return 0;
+	// ASCII : a byte per character, then the terminator
+	const n = Math.min(tag.length, size - 1);
+	for (let i = 0; i < n; i++) HEAPU8[buf + i] = tag.charCodeAt(i) & 0x7f;
+	HEAPU8[buf + n] = 0;
+	return 1;
+});
 #endif
 
 EM_JS(int, NativeWeb_IntroSkip, (void), {

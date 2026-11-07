@@ -30,7 +30,7 @@ import { probeRelay } from '../net/signaling.js';
 import { createShareGuest } from '../share/guest.js';
 import { TAG, encodeControl, nameOf, pickPad } from '../share/protocol.js';
 import { createOnlineNet } from './net.js';
-import { END_AFTER_CHOICES, END_AFTER_DEFAULT, createEndTimer, rejoinLoop } from './rules.js';
+import { END_AFTER_CHOICES, END_AFTER_DEFAULT, createEndTimer, letIn, rejoinLoop, roomTag } from './rules.js';
 
 /** enum OnlineLobbyPhase (game/OnlineCTR/native_compat.h) */
 export const PHASE = { none: 0, menus: 1, starting: 2, race: 3 };
@@ -333,8 +333,17 @@ export function attach(Module) {
     Module.ctrInput.openMultiplayer = () => setOpen(true);
     // a VS / BATTLE character select left with one human went back a menu (session 32e)
     Module.ctrInput.roomAlone = () => ui?.toast(T.roomAlone, T.roomAloneDetail);
-    // back on the main menu after a room (the pause menu's QUIT, Triangle up) : out of it (32e)
-    Module.ctrInput.leaveRoom = () => { if (net.room && !hosting) leave(); };
+    // back on the main menu after a room (Triangle up, a host's QUIT before a room's race) : out
+    // of it (32e) ; a guest's QUIT keeps it (32f) : that guest watches, then comes back
+    Module.ctrInput.leaveRoom = () => { if (net.room && !hosting && !away) leave(); };
+    // a guest's QUIT mid-race (game/MAIN/MainFreeze.c, 32f) : out of the race, not of the room
+    Module.ctrInput.roomQuit = () => {
+      if (net.role !== 'guest' || !net.room || away) return;
+      goAway('quit');
+      rejoin({ quiet: true });
+    };
+    // the room, top right on the game's menus (32f)
+    Module.ctrInput.roomTag = () => roomTag(link?.room ?? '');
     Module.ctrInput.netplayHost = () => {
       // a room the game left on its own (the pause menu's QUIT mid-race) : closed, a new one
       if (net.room && !hosting && !lobby().active) leave();
@@ -348,6 +357,8 @@ export function attach(Module) {
   }
   // the boot screen's « Joining the room… » (a room link at boot, session 32e) : its Back
   if (ui) ui.onJoinBack = () => { asGuest = false; leave(); };
+  // the watching band's Back (32f) : out of the room for good, the player's own main menu
+  if (ui) ui.onWaitBack = () => leave();
   // keys typed in the panel are not the game's
   panel.addEventListener('keydown', (e) => e.stopPropagation());
   panel.addEventListener('keyup', (e) => e.stopPropagation());
@@ -518,6 +529,12 @@ export function attach(Module) {
       // a guest leaving : the ones above it moved down a slot (web/share/slots.js compact), and the
       // character select moves their picks with them (session 32e)
       shareHost?.on('leave', (g) => { if (lobby().phase === PHASE.menus) Module.ctrOnlineControl?.(CTL.slotGone, g.slot); });
+      // a guest's page that (re)connects gets the room info at once : a Cup under way keeps a
+      // guest coming back out until it ends (32f)
+      shareHost?.on('listen', (g) => {
+        const info = Module.ctrOnlineRoom?.();
+        if (info) g.link.send(encodeControl(TAG.lobby, { phase: lobby().phase, room: info }), { reliable: true });
+      });
       Module.ctrOnlineControl?.(CTL.enter);
     } catch (e) {
       link = null;
@@ -586,6 +603,10 @@ export function attach(Module) {
     rejoinTry = 0;
     toldWaiting = false;
     solo = false;
+    away = null;
+    ui?.waiting?.(null);
+    slotsGone.length = 0;
+    hostPhase = PHASE.none;
     Module.ctrOnlineControl?.(CTL.leave);
     globalThis.ctrShareApi?.stopOn({ keepRoom: true });
     shareHost = null;
@@ -627,7 +648,8 @@ export function attach(Module) {
       net.guest(room);
       net.preconnect();
       setLobbyGuest(true); // before the game's ENTER is processed, the keys are the host's
-      Module.ctrOnlineControl?.(CTL.enter);
+      // a guest out of the race (32f) : its game comes in later, once the host's word allows it
+      if (!away) Module.ctrOnlineControl?.(CTL.enter);
       lobbyGuestOn(room).catch(fail).finally(render);
     } catch (e) {
       fail(e);
@@ -651,9 +673,29 @@ export function attach(Module) {
   let joinGen = 0; // guest()'s room opening, superseded by a leave or a newer join
   let rejoinTry = 0; // the attempt in flight, for the status line (0 : none)
   // Mid-race the game does not leave : it finishes the race alone (session 32, the bridge's
-  // GoSolo), its room still active until the results have shown, then lobbyTick closes the page's
-  // room. A host still there (we lost it) : the game leaves the race now and rejoins, as before.
+  // GoSolo), its room still active until the results have shown ; then (32f) the page looks for
+  // the host again : still there, the guest comes back at its next lobby ; gone, the room closes.
+  // A host still there (we lost it) : the game leaves the race now and rejoins, as before.
   let solo = false;
+  // Session 32f : a guest out of the room's race — its QUIT ('quit'), its link lost ('lost') —
+  // keeps the room : its link back (rejoin), the host's picture and the band meanwhile, its game
+  // let in (CTL.enter) once the host's room info says no Cup (rules.js letIn) ; back in the room
+  // at the next lobby. Back on the band leaves for good.
+  let away = null;
+  let entered = false; // its game told to come in
+  let hostRoom = null; // the host's latest room info (D12.3), whatever our game's state
+  let linkedAt = null; // when the link to the host came back
+  let watchSent = null; // the share guest last told whether we watch, and what
+  const goAway = (why) => {
+    // our game's copy of the room info, while it holds a Cup (a guest never let in early by it ;
+    // the host's word replaces it once the link is back)
+    const mine = Module.ctrOnlineRoom?.();
+    away = why;
+    entered = false;
+    hostRoom = mine?.cup ? mine : null;
+    linkedAt = null;
+    ui?.waiting?.({ cup: !!hostRoom?.cup });
+  };
   const hostLeft = (why, detail = T.backToSolo) => {
     ui?.toast(why, detail);
     leave();
@@ -675,12 +717,15 @@ export function attach(Module) {
       if (!hostThere) return hostLeft(T.hostLeft);
       Module.ctrOnlineControl?.(CTL.leave); // a race this game was finishing alone
       ui?.toast(T.hostLost, T.reconnecting);
+      goAway(away ?? 'lost'); // its game out again, not let in yet
       rejoin();
     }, 1000); // the meeting point's peer list catches up with a host that just left
   };
-  async function rejoin() {
+  // `quiet` : no « lost » line nor « reconnected » toast (the player's own QUIT) ; `gone` : what
+  // to say when the host is not on the meeting point any more
+  async function rejoin({ quiet = false, gone = [T.hostLeft] } = {}) {
     const token = ++rejoinToken;
-    error = `${T.hostLost} ${T.reconnecting}`;
+    if (!quiet) error = `${T.hostLost} ${T.reconnecting}`;
     render();
     const result = await rejoinLoop({
       cancelled: () => token !== rejoinToken,
@@ -702,8 +747,9 @@ export function attach(Module) {
     rejoinTry = 0;
     if (result === 'ok') {
       error = '';
-      ui?.toast(T.reconnected);
-    } else hostLeft(result === 'gone' ? T.hostLeft : T.noReconnect);
+      if (!quiet) ui?.toast(T.reconnected);
+    } else if (result === 'gone') hostLeft(...gone);
+    else hostLeft(T.noReconnect);
     render();
   }
 
@@ -728,6 +774,7 @@ export function attach(Module) {
     g.on('change', () => {
       const body = g.lobby;
       // the host's word beside the wire (D12) : the Cup's table, its AI's karts — into our game
+      if (body && body !== seen && body.room) hostRoom = body.room;
       if (body && body !== seen && body.room && lobby().active) Module.ctrOnlineRoomSet?.(body.room);
       if (body && body.phase === PHASE.starting && Number.isInteger(body.character)) Module.ctrOnlineControl?.(CTL.character, body.character);
       if (body && body !== seen && body.phase === PHASE.race && lobby().phase === PHASE.race) {
@@ -750,7 +797,8 @@ export function attach(Module) {
   const inHostMenus = () => lobby().phase === PHASE.menus && joined();
   const setLobbyGuest = (on) => {
     ui?.lobby?.(on);
-    lobbyVideo.classList.toggle('hidden', !(on && joined() && shareGuest?.media && lobbyStream.getVideoTracks().some((t) => t.readyState === 'live')));
+    // in the host's menus, or watching its race out of the room (32f)
+    lobbyVideo.classList.toggle('hidden', !(on && (joined() || away) && shareGuest?.media && lobbyStream.getVideoTracks().some((t) => t.readyState === 'live')));
   };
   // guest : the game asked the room and was refused because it is racing
   const refused = () => {
@@ -777,6 +825,8 @@ export function attach(Module) {
     return (pausedSince ?? now) - pausedMs;
   };
   let sentRoom = null; // host : the room info last sent to the guests (D12)
+  let hostPhase = PHASE.none; // host : the lobby's phase at the last tick
+  const slotsGone = []; // host : freed slots to tell the game, one a tick (32f)
   let knownBots = 0; // host : the bots' slots at the race's start, then the takeovers told
   // to every guest of the lobby share that listens : our framing (Share's LOBBY message), not the game's
   const toGuests = (body) => {
@@ -845,6 +895,11 @@ export function attach(Module) {
         }
       }
       if (l.phase !== PHASE.starting) startSent = false;
+      // the menus back after a race : a leaver's slot kept as a hole meanwhile (32f, nobody moved
+      // mid-race) and still free is filled now, the game told each one (its characters move down)
+      if (l.active && l.phase === PHASE.menus && hostPhase !== PHASE.menus) slotsGone.push(...shareHost.compactHoles());
+      if (l.active && l.phase === PHASE.menus && slotsGone.length) Module.ctrOnlineControl?.(CTL.slotGone, slotsGone.shift());
+      hostPhase = l.active ? l.phase : PHASE.none;
     }
     if (net.role === 'guest' && solo) {
       // the race finished alone : its 11b timeout counts from this player's own finish, then the title
@@ -852,15 +907,18 @@ export function attach(Module) {
       const step = endTimer.tick({ race: l.active && l.phase === PHASE.race, finished, endAfterMs: Number(endAfter.value) * 1000, now: raceNow() });
       if (step?.end) Module.ctrOnlineControl?.(CTL.endBots);
       if (!l.active) {
+        // its results shown : the host still there, back in the room at its next lobby (32f)
         solo = false;
-        hostLeft(T.roomClosed, '');
+        goAway('lost');
+        rejoin({ quiet: true, gone: [T.roomClosed, ''] });
       }
     } else if (net.role === 'guest') {
       // our game ignores the local devices from the room's join to its race load (and again on
       // the title reloaded after a race) ; the pad goes to the host only while its menus run
-      setLobbyGuest(l.active && l.phase !== PHASE.race);
+      if (away) awayTick();
+      setLobbyGuest((l.active && l.phase !== PHASE.race) || !!away);
       if (l.active && inHostMenus() && shareGuest?.state === 'connected') sendPad();
-      if (refused() && !toldWaiting) {
+      if (!away && refused() && !toldWaiting) {
         ui?.toast(T.roomRacing, T.nextLobby);
         toldWaiting = true;
         ui?.joining?.({ state: 'racing' });
@@ -870,6 +928,37 @@ export function attach(Module) {
       if (l.active && inHostMenus() && (!lobbyVideo.classList.contains('hidden') || (shareGuest?.state === 'connected' && !shareGuest.media))) ui?.joining?.(null);
       else if (net.lastError && !net.hostLink && !net.pending) ui?.joining?.({ state: 'failed', reason: explain(net.lastError) });
     }
+  }
+  // 32f : a guest out of the race, every lobby tick — the host told we watch, our game let in
+  // once the host's word allows it, the band until the room takes it again
+  function awayTick() {
+    const linked = !!net.hostLink && shareGuest?.state === 'connected';
+    if (linked && linkedAt === null) linkedAt = Date.now();
+    if (!linked) linkedAt = null;
+    if (joined()) {
+      away = null;
+      entered = false;
+      ui?.waiting?.(null);
+      tellWatching(false);
+      return;
+    }
+    tellWatching(linked);
+    // our game out again after it was let in (a leave from the lost link's late close) : again
+    // (the enter is a latch, one sent twice before the game's next frame is harmless)
+    if (entered && !lobby().active) entered = false;
+    if (!entered && letIn({ room: hostRoom, linked, waitedMs: linkedAt === null ? 0 : Date.now() - linkedAt })) {
+      entered = true;
+      Module.ctrOnlineControl?.(CTL.enter);
+    }
+    ui?.waiting?.({ cup: !!hostRoom?.cup });
+  }
+  // the host keeps its picture coming while one of its guests watches (web/share/panel.js)
+  function tellWatching(on) {
+    if (!shareGuest || shareGuest.state !== 'connected') return;
+    const key = `${on}`;
+    if (watchSent?.guest === shareGuest && watchSent.key === key) return;
+    watchSent = { guest: shareGuest, key };
+    shareGuest.link.send(encodeControl(TAG.lobby, { watching: on }), { reliable: true });
   }
   setInterval(lobbyTick, 100);
   // our keys and pad to the host while in its lobby (~60 a second, latest wins there)
@@ -1004,6 +1093,7 @@ export function attach(Module) {
         roomInfo: Module.ctrOnlineRoom?.() ?? null,
         rejoin: rejoinTry,
         waitingForRace: waitingForRace(),
+        watch: { away, entered, band: away && !joined() ? { cup: !!hostRoom?.cup } : null, shown: !lobbyVideo.classList.contains('hidden'), frames: lobbyVideo.getVideoPlaybackQuality?.().totalVideoFrames ?? 0, hostRoom },
         share: net.role === 'host'
           ? { guests: shareHost ? Object.values(shareHost.guests).map((g) => ({ slot: g.slot, name: g.name, state: g.state, path: g.path, bot: !!g.bot })) : [] }
           : shareGuest ? { state: shareGuest.state, media: shareGuest.media, slot: shareGuest.slot, list: shareGuest.list, lobby: shareGuest.lobby, video: [lobbyVideo.videoWidth, lobbyVideo.videoHeight] } : null,
