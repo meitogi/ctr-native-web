@@ -1,11 +1,11 @@
-// Who may come into a Netplay room. A room's code is short (web/net/code.js), so knowing it only
-// lets a guest knock : the host says yes or no in its game (game/230/MM_MenuFlow.c, « BEE WANTS
-// IN »). A guest who has the room link shows its pass and comes straight in ; one the host already
+// Who may come into a room that has a code, Netplay or Share (28b). A room's code is short
+// (./code.js), so knowing it only lets a guest knock : the host says yes or no in its game
+// (game/230/MM_MenuFlow.c, « BEE WANTS IN »). A guest who has the room link shows its pass and comes straight in ; one the host already
 // accepted comes back (a lost link, its QUIT) without being asked again.
 //
 // Both sides wrap their room : the host's modules (the game's server, the lobby share) only ever
 // see a link once its guest is in ; a guest's connect() only resolves once it is.
-import { fail } from '../net/transport.js';
+import { fail } from './transport.js';
 
 /** First byte of the three messages, beside Share's (0x01, 0x10–0x19) and the game's (0x20). */
 export const ADMIT = { ask: 0x30, yes: 0x31, no: 0x32, wait: 0x33 };

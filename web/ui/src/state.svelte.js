@@ -22,8 +22,12 @@ export const ui = $state({
   // an Online room's guest in the lobby (web/online/page.js) : the local keys and pads go to the
   // host, not to this game
   lobbyGuest: false,
-  // a room link opened at boot (session 32e) : null, or { state: 'joining' | 'racing' | 'failed', reason }
+  // a room link opened at boot (session 32e), or a Netplay code typed on the home page (28b) :
+  // null, or { state: 'joining' | 'waiting' (the host's yes) | 'racing' | 'failed', reason }
   joining: null,
+  // « or join a room » on the home page (28b, Join.svelte) : null, or { ids, at, said, phase :
+  // 'dials' | 'looking' | 'nokey' | 'disc' (a Netplay room and no disc : the drop zone, saying why) }
+  join: null,
   // a Netplay guest out of the room's race (its QUIT, a lost link ; web/online/page.js, session
   // 32f) : null, or { cup } — the band over the host's picture until the room takes it again
   waiting: null,

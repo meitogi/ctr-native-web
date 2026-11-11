@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { Emitter } from '../../net/events.js';
-import { ADMIT, gateGuest, gateHost } from '../admit.js';
+import { ADMIT, gateGuest, gateHost } from '../../net/admit.js';
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
 

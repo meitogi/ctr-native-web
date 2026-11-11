@@ -38,12 +38,12 @@ const TOASTS = `(() => {
 	}).observe(document, { childList: true, subtree: true })
 })()`
 
-const tabOf = ctx => ({ name: 'host', js: ctx.js, press: ctx.press, frames: ctx.frames, navigate: url => ctx.conn.send('Page.navigate', { url }, ctx.sid) })
-const needRelay = ctx => { if (!ctx.args.relay || !ctx.args.rk) ctx.skip('no keyed relay : --set relay=ws://localhost:8788 --set rk=<key>') }
+export const tabOf = ctx => ({ name: 'host', js: ctx.js, press: ctx.press, frames: ctx.frames, navigate: url => ctx.conn.send('Page.navigate', { url }, ctx.sid) })
+export const needRelay = ctx => { if (!ctx.args.relay || !ctx.args.rk) ctx.skip('no keyed relay : --set relay=ws://localhost:8788 --set rk=<key>') }
 const panelOpen = tab => tab.js("return !!(document.getElementById('online')?.checkVisibility?.() || document.getElementById('ctr-settings')?.checkVisibility?.())")
 
 /** The page booted to its main menu with this relay and key in Settings (as typed once, kept by the browser). */
-async function bootWith(tab, origin, { relay, rk, name, path = 'auto' }) {
+export async function bootWith(tab, origin, { relay, rk, name, path = 'auto' }) {
 	await boot(tab, `${origin}/index.html`)
 	await tab.js(`localStorage.setItem('ctr-online.relay', ${JSON.stringify(relay)}); localStorage.setItem('ctr-online.rk', ${JSON.stringify(rk)})
 		localStorage.setItem('ctr-online.points', 'relay'); localStorage.setItem('ctr-online.name', ${JSON.stringify(name)})
@@ -52,7 +52,7 @@ async function bootWith(tab, origin, { relay, rk, name, path = 'auto' }) {
 }
 
 /** A press that must change something : pressed again while `done` is not seen (a press landing as a menu opens is lost). */
-async function pressUntil(tab, key, label, done, tries = 6) {
+export async function pressUntil(tab, key, label, done, tries = 6) {
 	for (let i = 0; i < tries; i++) {
 		await tab.press(key)
 		for (let w = 0; w < 8; w++) {
@@ -66,7 +66,7 @@ async function pressUntil(tab, key, label, done, tries = 6) {
 }
 
 /** Main menu → NETPLAY's own menu. */
-async function toNetplay(tab) {
+export async function toNetplay(tab) {
 	await menuTo(tab, 'NETPLAY', dir => tab.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
 	return pressUntil(tab, CROSS, 'the NETPLAY menu', s => s.sub?.title === 'NETPLAY')
 }
@@ -87,7 +87,7 @@ async function row(tab, label) {
 }
 
 /** NETPLAY > `mode` picked with no room : this player hosts it. Resolves on the mode's first screen. */
-async function hostBy(tab, mode) {
+export async function hostBy(tab, mode) {
 	await row(tab, mode)
 	await tab.press(CROSS)
 	const o = await until(tab, `the room ${mode} opened`, s => s.role === 'host' && s.lobby.active && !!s.code, 30_000)
@@ -97,7 +97,7 @@ async function hostBy(tab, mode) {
 }
 
 /** VS alone to its character select : the retail race type's SINGLE RACE. */
-async function vsSelect(tab) {
+export async function vsSelect(tab) {
 	const { o } = await hostBy(tab, 'VS.')
 	await pressUntil(tab, CROSS, 'the character select', s => !!s.charSelect)
 	await sleep(1500)
@@ -130,7 +130,7 @@ async function dial(tab, code) {
 	return s
 }
 
-const codeOf = o => [...o.code].map(d => Number.parseInt(d, 16))
+export const codeOf = o => [...o.code].map(d => Number.parseInt(d, 16))
 
 /** NETPLAY > JOIN, the dials on `code`, Start. */
 async function joinBy(tab, code) {

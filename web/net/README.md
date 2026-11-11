@@ -70,9 +70,10 @@ How a room uses the list :
 | File | Role |
 |---|---|
 | `link.js` | room link format, the backend list |
-| `code.js` | a room's code — a few of the game's characters — and the room id and secret derived from it |
+| `code.js` | a room's code — a few of the game's characters — and the room id and secret derived from it ; a code no other host holds (`openFreeRoom`) ; the room's kind, Netplay or Share, as the host's name on the relay (`ROOM_KIND`, `roomKind`) |
+| `admit.js` | the door of a room that has a code : a guest who typed it knocks and the host answers, the link's pass goes straight in |
 | `crypto.js` | HKDF from the secret → AES-GCM key (sealing) + HMAC key (identity proof, MQTT topic) ; the sealed envelope (sender, recipient and a counter bound in : no forgery, redirection or replay) |
-| `signaling.js` | the signaling backend contract (header comment) and backend `relay`, `ctr-relay` ; offer, answer and game data through it are sealed |
+| `signaling.js` | the signaling backend contract (header comment) and backend `relay`, `ctr-relay` ; offer, answer and game data through it are sealed ; `lookRoom` : who is in a room, without staying in it |
 | `signaling-mqtt.js` | backend `mqtt` : public MQTT brokers, a minimal MQTT-over-WebSocket client |
 | `signaling-paste.js` | backend `paste` : the two blobs |
 | `webrtc.js` | non-trickle offer and answer, channels `ctl` (reliable) and `game` (unordered, `maxRetransmits: 0`), public STUN only, DTLS fingerprints, path labels |

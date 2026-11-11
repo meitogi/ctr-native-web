@@ -7,12 +7,21 @@
 // update (platform/native_renderer.c, platform/native_input.c) ; both only touch JS state.
 // window.__ctrShare.state() / .stats() are for the player suites.
 //
+// The room has a code (session 28b), as a Netplay room's : a few of the game's characters, said
+// aloud, typed on the home page by a guest with no disc. A guest who came by code knocks and the
+// host answers in its game ; the link carries a pass and goes straight in (web/net/admit.js). The
+// page says the code once, in a toast ; the game shows it after that (`door()`, read by
+// web/online/page.js for the game's hooks). A build without Netplay has no such screens in its
+// game : its room has no code, and the link alone joins.
+//
 // An Online room (web/online/page.js, session 14) shares its lobby the same way, on its own room :
 // `globalThis.ctrShareApi.startOn(room)` / `stopOn()`. While that room's race runs (the game's
 // lobby phase, Module.ctrOnlineLobby), no frame is captured, the audio track is muted and the
 // guests' pads are not read : the race's pads come from OnlineCTR.
+import { gateHost } from '../net/admit.js';
+import { CODE_MAX, CODE_MIN, ROOM_KIND, codeNames, codeRoom, openFreeRoom, parseCode, randomCode } from '../net/code.js';
 import { formatRoomLink, newRoom } from '../net/link.js';
-import { openRoom } from '../net/room.js';
+import { openRoom, peersOf } from '../net/room.js';
 import { createCapture } from './capture.js';
 import { BITRATE, createShareHost } from './host.js';
 import { nameOf } from './protocol.js';
@@ -55,6 +64,14 @@ let capture = null;
 let host = null;
 let linkText = '';
 let error = '';
+let gate = null; // the room's door, while the panel's own Share is on
+let code = ''; // its code (one hex digit per character), '' with none
+// the characters of a new room's code : the site's setting, shared with Netplay
+let codeLength = CODE_MIN;
+fetch(new URL('../online/config.json', import.meta.url)).then((r) => r.json()).then((config) => {
+  const n = Number(config?.codeLength);
+  if (Number.isInteger(n)) codeLength = Math.min(CODE_MAX, Math.max(CODE_MIN, n));
+}).catch(() => { /* no file (a build without Netplay) : the shortest code */ });
 // slot → {buttons, at} : when the game first read a new button word (input-latency probe)
 const seen = [null, null, null, null];
 
@@ -150,6 +167,8 @@ function stopOn({ keepRoom = false } = {}) {
   host = null;
   capture = null;
   linkText = '';
+  gate = null;
+  code = '';
   owner = 'share';
   render();
 }
@@ -161,19 +180,37 @@ async function start() {
   save('relay', relay.value.trim());
   save('rk', rk.value.trim());
   try {
-    const link = newRoom({ relay: relay.value.trim(), rk: rk.value.trim() });
+    const where = { relay: relay.value.trim(), rk: rk.value.trim() };
+    let link;
+    // the relay's signaling name, in clear, says the room's kind (the home page reads it before
+    // asking for a disc) — the player's name goes end to end (WELCOME)
+    const open = () => openRoom({ link, role: 'host', name: ROOM_KIND.share });
+    // a code needs the game's own screens to answer the door (the Netplay build's) and a relay
+    const room = where.relay && typeof Module.ctrInput?.shareHost === 'function'
+      ? await openFreeRoom({
+        length: codeLength,
+        async open(length) {
+          link = await codeRoom(randomCode(length), where);
+          const opened = await open();
+          return { room: opened, taken: (await peersOf(opened)).some((p) => p.kind === 'host' && p.id !== opened.selfId) };
+        },
+      })
+      : await (link = newRoom(where), open());
     // the guest page, without this page's query : a relay key there only travels after #
     const base = new URL('share/guest.html', location.href);
     linkText = formatRoomLink(base.href, link);
-    // 'host' : the relay's signaling name, in clear — the player's name goes end to end (WELCOME)
-    const room = await openRoom({ link, role: 'host', name: 'host' });
-    await startOn(room);
+    code = link.code;
+    gate = gateHost(room, { pass: link.pass, onChange: render });
+    await startOn(gate);
+    tellCode();
   } catch (e) {
     error = `${e.code ? `${e.code}: ` : ''}${e.message ?? e}`;
     capture?.stop();
     capture = null;
     host = null;
     linkText = '';
+    gate = null;
+    code = '';
   }
   render();
 }
@@ -182,8 +219,24 @@ function stop() {
   stopOn();
 }
 
+const names = () => (code ? codeNames(parseCode(code)) : '');
+/** The link to the clipboard ; a toast says how it went (a pad press is no gesture : a click is). */
+function copyLink(said) {
+  const offer = () => ui?.toast(names() || ui.text.shareOn, ui.text.shareClickCopy, '', { action: () => copyLink(ui.text.shareCopied), ms: 10_000 });
+  const write = navigator.clipboard?.writeText(linkText);
+  if (!write) return offer();
+  write.then(() => ui?.toast(said, names(), '', { action: () => copyLink(ui.text.shareCopied), ms: 10_000 }), offer);
+}
+/** Share started : the one thing the page says of the code — the game shows it from here on. */
+const tellCode = () => { if (linkText) copyLink(ui?.text.shareOnCopied); };
+
+/** The panel's own room, for the game's screens (its tag, INVITE, the door) : null without a code. */
+const door = () => (host && owner === 'share' && code && gate
+  ? { code, asking: () => gate.asking(), answer: (yes) => gate.answer(yes), invite: () => copyLink(ui?.text.shareCopied) }
+  : null);
+
 // start / link : the page's home hosts Share without this panel's button (ui/src/lib/home.js)
-globalThis.ctrShareApi = { slots, startOn, stopOn, host: () => host, guests, start, link: () => linkText };
+globalThis.ctrShareApi = { slots, startOn, stopOn, host: () => host, guests, start, link: () => linkText, door };
 
 ui?.settings.subscribe((s) => { if (host && s.name !== host.hostName) host.setHostName(s.name); });
 
@@ -260,6 +313,8 @@ window.__ctrShare = {
     return {
       sharing: !!host,
       link: linkText,
+      code,
+      asking: gate?.asking()?.name ?? null,
       maxBitrate: host?.maxBitrate ?? Number(bitrate.value),
       capture: capture && { frames: capture.frames, scale: capture.scale, display: capture.display, audio: capture.audio,
         canvas: [Module.canvas.width, Module.canvas.height] },

@@ -1,6 +1,8 @@
 // The guest page of Share mode : the host's game as a video, our pad back. No disc, no game
 // code : web/net/ for the link, guest.js for the protocol. Opened from the host's link
-// (share/guest.html#room=…&key=…&relay=…&rk=…).
+// (share/guest.html#room=…&key=…&relay=…&rk=…), or from the home page's room code (session 28b) :
+// the same link with the code and no pass — the host is asked, in its game, and this page says
+// so ; refused, or the host gone, it goes back to the home page's dials with the reason.
 //
 // The page's interface is the site's (web/ui src/guest.js, loaded first : globalThis.ctrUI) — the
 // speaker and its volume drive the <video>, Settings holds the player name (sent to the host),
@@ -10,6 +12,8 @@
 // ?bot (web/share/bot.sh) : a scripted guest, « Bot » — the keyboard only, the default keys, and a
 // debug host's state of our own kart (BOT / KART / TRACK) for the bot to steer by.
 // window.__ctrShareGuest.state() / .stats() / rec*() are for the player suites.
+import { gateGuest } from '../net/admit.js';
+import { b64u, randomBytes } from '../net/crypto.js';
 import { parseRoomLink } from '../net/link.js';
 import { openRoom } from '../net/room.js';
 import { createShareGuest } from './guest.js';
@@ -28,6 +32,8 @@ let playout = null;
 let crop = false;
 let sound = false;
 let nolink = false;
+let byCode = ''; // the code this guest typed on the home page ('' : it came by the link)
+let asked = false; // the host has our knock and has not answered
 let lastButtons = 0xffff;
 let lastChange = null; // {buttons, at} : when we first sent a new button word
 const delays = []; // expectedDisplayTime − captureTime of the last frames (ms)
@@ -40,7 +46,9 @@ function render() {
   const g = guest;
   const v = crop && g?.slot ? viewOf(g.slot, g.players) : null;
   video.style.objectViewBox = v && v.w < 1 ? `inset(${v.y * 100}% ${(1 - v.x - v.w) * 100}% ${(1 - v.y - v.h) * 100}% ${v.x * 100}%)` : '';
-  const state = nolink ? 'nolink' : g?.state ?? 'connecting';
+  const state = nolink ? 'nolink' : asked && g?.state === 'connecting' ? 'waiting' : g?.state ?? 'connecting';
+  // a code's guest the room did not take (the host's no, the host gone, no direct path) : the dials
+  if (byCode && (state === 'refused' || state === 'closed')) return backHome(SAID_OF[g.code] ?? SAID_OF.closed);
   const fields = { state, code: g?.code ?? null, message: g?.message ?? '', slot: g?.slot ?? 0, players: g?.players ?? 0, list: g?.list ?? [],
     host: g?.host ?? null, path: g?.path ?? null, stream: stream.getTracks().length > 0, sound, crop };
   if (ui) return ui.guest.set(fields);
@@ -58,7 +66,7 @@ function unlock() {
   render();
 }
 function toggleCrop() { crop = !crop; render(); }
-ui?.guest.bind({ unlock, crop: toggleCrop });
+ui?.guest.bind({ unlock, crop: toggleCrop, back: () => backHome(0) });
 if (!ui) document.addEventListener('click', unlock);
 
 // the speaker / volume of the site (settings) : the <video> plays muted until a click
@@ -117,6 +125,26 @@ function frameLoop(_, meta) {
 if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(frameLoop);
 
 // ---- the room ----
+// what the home page's dials say of a room that did not take us (web/ui src/lib/join.js SAID)
+const SAID_OF = { refused: 15, full: 14, closed: 16, absent: 16, 'online-mode': 17, 'relay-key': 11, 'room-full': 14, relay: 12, 'relay-silent': 12 };
+let leaving = false;
+/** Back on the home page's dials, kept, with what went wrong (0 : the player's own Back). */
+function backHome(status) {
+  if (leaving) return;
+  leaving = true;
+  guest?.close?.();
+  location.replace(`${new URL('../index.html', location.href).href}#join=${byCode}${status ? `&said=${status}` : ''}`);
+}
+// this browser, for a host's « already let in » (the Netplay page's own key : one identity)
+function me() {
+  const KEY = 'ctr-online.me';
+  try {
+    let id = localStorage.getItem(KEY);
+    if (!id) localStorage.setItem(KEY, id = b64u.encode(randomBytes(12)));
+    return id;
+  } catch { return b64u.encode(randomBytes(12)); }
+}
+
 async function main() {
   let link;
   try {
@@ -130,13 +158,16 @@ async function main() {
   const mode = new URLSearchParams(location.search).get('mode') === 'ws' ? 'ws' : 'auto';
   // 'guest' : the relay's signaling name, in clear — never the player's name (that one goes end
   // to end in Share's HELLO)
+  byCode = link.code && !link.pass ? link.code : '';
   const room = await openRoom({ link, role: 'guest', mode, name: 'guest' }).catch((e) => {
     guest = { state: 'closed', code: e.code ?? 'error', message: `${e.code ?? 'error'} : ${e.message}` };
     render();
     return null;
   });
   if (!room) return;
-  guest = createShareGuest(room, {
+  // the host's door (web/net/admit.js) : the link's pass goes straight in, a typed code waits
+  const door = gateGuest(room, { pass: link.pass, me: me(), name: bot ? 'Bot' : settings()?.name ?? '', onWait: () => { asked = true; render(); } });
+  guest = createShareGuest(door, {
     name: bot ? 'Bot' : settings()?.name ?? '',
     bot,
     onTrack(e) {

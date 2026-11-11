@@ -8,8 +8,10 @@
 //   ctrUI.text            the strings (EN / FR)
 //   ctrUI.guestInput()    the player's mapping as web/share/protocol.js reads it (lib/guest-input.js)
 //   ctrUI.guest.set(fields)   the connection : {state, code, message, slot, players, list, host,
-//                         path, stream (tracks arrived), sound (unmuted by a click), crop}
-//   ctrUI.guest.bind({unlock, crop})   what the screens' buttons do
+//                         path, stream (tracks arrived), sound (unmuted by a click), crop} ; state
+//                         'waiting' : the host was asked to let us in (session 28b)
+//   ctrUI.guest.bind({unlock, crop, back})   what the screens' buttons do (back : a code's guest
+//                         waiting at the host's door gives up, to the home page's dials)
 //   ctrUI.guest.blocked() true while Settings holds the keys : the pad sent is neutral
 import { mount } from 'svelte'
 import GuestApp from './GuestApp.svelte'
@@ -31,7 +33,7 @@ function toast(title, detail = '', family = '') {
 
 let mapped = null
 let mappedFrom = null
-const actions = { unlock: () => {}, crop: () => {} }
+const actions = { unlock: () => {}, crop: () => {}, back: () => {} }
 
 ui.guest = { state: 'connecting', code: null, message: '', slot: 0, players: 0, list: [], host: null, path: null, stream: false, sound: false, crop: false }
 

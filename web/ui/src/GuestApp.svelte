@@ -32,6 +32,7 @@
 
   // what covers the video : null while the game plays
   const screen = $derived.by(() => {
+    if (g?.state === 'waiting') return { kind: 'wait', text: T.guestWaitingHost, back: true }
     if (!g || g.state === 'idle' || g.state === 'connecting') return { kind: 'wait', text: T.guestConnecting }
     if (g.state === 'nolink') return { kind: 'error', text: T.guestNoLink }
     if (g.state === 'refused') return { kind: 'error', text: g.code === 'online-mode' ? T.guestOnline : g.code === 'full' ? T.guestFull : g.message }
@@ -53,7 +54,9 @@
     if (e.type !== 'keydown') return
     if (e.code === 'Escape') {
       e.preventDefault()
-      if (ui.listening) ui.listening = null
+      // waiting at the host's door (a code typed on the home page) : Escape is its Back
+      if (screen?.back && !ui.settingsOpen) actions.back()
+      else if (ui.listening) ui.listening = null
       else setOpen(!ui.settingsOpen)
     }
   }
@@ -65,6 +68,7 @@
     const stopPads = watchPads((index, button) => {
       if (ui.listening?.device === 'gamepad') bindPadButton(button, ui, settings)
       else if (button === 16) setOpen(!ui.settingsOpen)
+      else if (button === 3 && screen?.back && !ui.settingsOpen) actions.back() // Triangle : the wait's Back
     })
     return () => {
       window.removeEventListener('keydown', onKey, { capture: true })
@@ -105,6 +109,7 @@
       {/if}
       <p id="overlay-text">{screen.text}</p>
       {#if screen.detail}<small>{screen.detail}</small>{/if}
+      {#if screen.back}<button id="overlay-back" type="button" class="back" onclick={() => actions.back()}>{T.guestBack} · Esc</button>{/if}
     </div>
   </div>
 {/if}
@@ -118,6 +123,7 @@
   .card p { margin: 0; font: 400 24px/1.25 var(--display); }
   .card.error p { font: 600 16px/1.5 var(--text); color: var(--danger); }
   .card small { color: var(--ink-dim); }
+  .back { margin-top: 8px; padding: 9px 20px; border-radius: 12px; border: 1px solid var(--line-strong); background: none; color: var(--ink); font-weight: 700; cursor: pointer; }
   .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--line-strong); border-top-color: var(--accent-2); animation: spin 0.9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .status { position: fixed; left: 14px; bottom: 14px; z-index: 30; padding: 8px 14px; border-radius: 999px; background: rgba(20, 22, 30, 0.6); border: 1px solid rgba(255, 255, 255, 0.14); backdrop-filter: blur(12px); font-weight: 600; font-size: 13px; }

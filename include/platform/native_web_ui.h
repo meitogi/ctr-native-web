@@ -27,6 +27,8 @@
 // the page keeps the room : the player watches the host's race and comes back at the next lobby.
 // NativeWeb_RoomTag(buf, size) : the page's room, as the 4 characters drawn top right in the menus
 // (game/OnlineCTR/thread.c, session 32f) ; 0 with no room.
+// NativeWeb_ShareHost() : 1 while this page hosts a Share room under a code (web/share/panel.js,
+// session 28b) — the menus show its tag, INVITE and its door as a Netplay room's.
 // NativeWeb_RoomGuestMask() : the slots a room's guests hold (bit n = slot n, the share pads of
 // platform/native_input.c) — a room's humans are the host and these, never a pad of the host's.
 #if defined(__EMSCRIPTEN__)
@@ -46,6 +48,7 @@ int NativeWeb_AskName(char *buf, int size);
 void NativeWeb_LeaveRoom(void) EM_IMPORT(NativeWeb_LeaveRoom);
 void NativeWeb_RoomQuit(void) EM_IMPORT(NativeWeb_RoomQuit);
 int NativeWeb_RoomTag(char *buf, int size) EM_IMPORT(NativeWeb_RoomTag);
+int NativeWeb_ShareHost(void) EM_IMPORT(NativeWeb_ShareHost);
 int NativeWeb_RoomGuestMask(void);
 #endif
 #else
@@ -62,6 +65,7 @@ int NativeWeb_RoomGuestMask(void);
 #define NativeWeb_LeaveRoom() ((void)0)
 #define NativeWeb_RoomQuit() ((void)0)
 #define NativeWeb_RoomTag(buf, size) 0
+#define NativeWeb_ShareHost() 0
 #endif
 
 #endif

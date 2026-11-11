@@ -148,12 +148,13 @@ EM_JS(void, WebDebugBridge_PushPathJS, (int levelID, const s16 *frames, int coun
 //   netplay      NETPLAY's screens over the menus (session 28) : screen ('none' | 'opening' | 'join' |
 //                'joining' | 'invite' | 'ask'), the JOIN dials (character ids) and the one in hand,
 //                `said` the JOIN screen's red line (enum NetplayStatus, 0 none), `waiting` while a
-//                VS / BATTLE select holds its only player's lock
+//                VS / BATTLE select holds its only player's lock, `doorLine` while a race shows « ...
+//                WANTS IN » (28b), `share` while the screens are a Share room's
 EM_JS(void, WebDebugBridge_PushNetplayJS, (const s32 *n), {
 	const c = globalThis.__ctr;
 	if (!c) return;
-	const v = HEAP32.subarray(n >> 2, (n >> 2) + 10);
-	c.netplay = { screen: (['none', 'opening', 'join', 'joining', 'invite', 'ask'])[v[0]], dials: Array.from(v.subarray(4, 4 + v[1])), at: v[2], said: v[3], waiting: !!v[9] };
+	const v = HEAP32.subarray(n >> 2, (n >> 2) + 12);
+	c.netplay = { screen: (['none', 'opening', 'join', 'joining', 'invite', 'ask'])[v[0]], dials: Array.from(v.subarray(4, 4 + v[1])), at: v[2], said: v[3], waiting: !!v[9], doorLine: !!v[10], share: !!v[11] };
 });
 #endif
 
@@ -847,7 +848,7 @@ internal void WebDebugBridge_Publish(void)
 #ifdef USE_ONLINE
 	{
 		// NETPLAY's own screens (game/230/MM_MenuFlow.c, session 28)
-		s32 netplay[10];
+		s32 netplay[12];
 
 		OnlineNetplay_Debug(netplay);
 		WebDebugBridge_PushNetplayJS(netplay);

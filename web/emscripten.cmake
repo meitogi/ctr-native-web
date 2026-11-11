@@ -103,6 +103,10 @@ add_custom_command(
             "${CTR_WEB_NODE}" node_modules/vite/bin/vite.js build --logLevel warn
     WORKING_DIRECTORY "${CTR_WEB_UI_DIR}"
     DEPENDS ${CTR_WEB_UI_SOURCES} "${CTR_WEB_UI_DIR}/vite.config.js" "${CMAKE_SOURCE_DIR}/web/disc.js"
+            # the home page's room code (src/lib/join.js) bundles these
+            "${CMAKE_SOURCE_DIR}/web/net/code.js" "${CMAKE_SOURCE_DIR}/web/net/link.js"
+            "${CMAKE_SOURCE_DIR}/web/net/signaling.js" "${CMAKE_SOURCE_DIR}/web/net/crypto.js"
+            "${CMAKE_SOURCE_DIR}/web/net/events.js"
             "${CTR_WEB_UI_DIR}/node_modules/.package-lock.json"
     COMMENT "web/ui : vite build"
 )

@@ -76,3 +76,50 @@ export async function roomFromCode(ids) {
 export async function codeRoom(ids, { relay, rk = '' }) {
   return { ...(await roomFromCode(ids)), relay, rk, signaling: ['relay'], mqtt: [], code: codeText(ids), pass: b64u.encode(randomBytes(16)) };
 }
+
+/**
+ * What a host says of its room on the relay, as its signaling name (session 28b) : the home page
+ * reads it before asking for a disc — a Netplay room needs one, a Share room does not. The relay
+ * hands the name back in its peer list and is not changed. Longer than a player's name can be
+ * (9 characters), so no player's name reads as one.
+ */
+export const ROOM_KIND = { netplay: 'ctr-room:netplay', share: 'ctr-room:share' };
+
+/**
+ * The kind of the room a relay's peer list shows : 'share', 'netplay' — also what a host from
+ * before the kinds is, its name being its player's —, or null with nobody hosting.
+ * @param {{name?: string, kind?: string}[]} peers
+ * @returns {'share' | 'netplay' | null}
+ */
+export function roomKind(peers) {
+  const host = peers.find((p) => p.kind === 'host');
+  if (!host) return null;
+  return host.name === ROOM_KIND.share ? 'share' : 'netplay';
+}
+
+/** A host's code grows by one character after this many codes drawn in a row were already taken. */
+export const CODE_TAKEN_BEFORE_LONGER = 3;
+
+/**
+ * A room under a code no other host holds (session 28). The relay keeps no table : a host joins
+ * the room its code names and reads who is there ; someone hosting already, it leaves and draws
+ * again. `CODE_TAKEN_BEFORE_LONGER` taken in a row : the relay is crowded at that length, the
+ * code gets one more character (3, then 4, then 5).
+ * @param {object} o
+ * @param {number} o.length - characters of the first code drawn
+ * @param {number} [o.max=5]
+ * @param {(length: number) => Promise<{room: {close(): void}, taken: boolean}>} o.open - a room
+ *   opened under a fresh code of that length, and whether another host was in it
+ * @returns {Promise<object>} the room kept
+ */
+export async function openFreeRoom({ length, max = 5, open }) {
+  for (let taken = 0; ; ) {
+    const { room, taken: held } = await open(length);
+    if (!held) return room;
+    room.close();
+    if (++taken >= CODE_TAKEN_BEFORE_LONGER && length < max) {
+      length++;
+      taken = 0;
+    }
+  }
+}

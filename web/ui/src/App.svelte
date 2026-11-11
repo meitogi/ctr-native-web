@@ -26,7 +26,7 @@
   import { ui } from './state.svelte.js'
   import { settings } from './store.js'
 
-  let { input, handleFile, forgetStoredDisc, startGame, joinBack, waitBack } = $props()
+  let { input, handleFile, forgetStoredDisc, startGame, joinBack, waitBack, join } = $props()
 
   const running = $derived(ui.phase === 'running' || ui.phase === 'starting')
   let layout = $state(null)
@@ -145,6 +145,32 @@
     return sc >= 0 && claimed(settings.get()).some((m) => m[TRIANGLE] === sc)
   }
   const back = () => (ui.joining ? joinBack : ui.waiting ? waitBack : null)
+  // « or join a room » (28b) : while the home page shows the room code, the keys and the pad are
+  // the dials' — the game's own menu keys (the player's mapping) and the arrows, Enter, Escape
+  const SQUARE = BUTTONS.indexOf('square')
+  const DIAL_KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'start', NumpadEnter: 'start', Backspace: 'square', Delete: 'square' }
+  const DIAL_BUTTONS = ['up', 'down', 'left', 'right', 'cross', 'square', 'start']
+  const joinBackOut = () => (ui.join.phase === 'dials' ? join.close() : join.toDials())
+  /** The dial press a mapped value stands for (`mapping` : the player's keyboard or gamepad row). */
+  const dialPress = (mapping, value) => DIAL_BUTTONS.find((b) => mapping[BUTTONS.indexOf(b)] === value)
+  function joinKey(e) {
+    if (e.type !== 'keydown' || e.metaKey || e.ctrlKey || e.altKey) return
+    if (e.code === 'Escape' || (!typing() && triangleKey(e))) { e.preventDefault(); joinBackOut(); return }
+    if (ui.join.phase !== 'dials' || typing()) return
+    const sc = scancodeOf(e.code)
+    const key = DIAL_KEYS[e.code] ?? (sc >= 0 ? claimed(settings.get()).map((m) => dialPress(m, sc)).find(Boolean) : null)
+    // Enter or Space on a button (Back, Join, an arrow) is that button's
+    if (!key || (onAControl() && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space'))) return
+    e.preventDefault()
+    join.press(key)
+  }
+  function joinPad(button) {
+    const gamepad = settings.get().gamepad
+    const sdl = STANDARD_TO_SDL[button]
+    if (gamepad[TRIANGLE] === sdl) return joinBackOut()
+    const key = dialPress(gamepad, sdl)
+    if (key) join.press(key)
+  }
   function startKey(e) {
     if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') return true
     const sc = scancodeOf(e.code)
@@ -154,6 +180,7 @@
     // the Bot switch's keys (src/dev/keys.js, debug builds) : for the game and the pad, never for
     // this page's own shortcuts — only « Skip intro » counts them
     if (e.ctrBot) { if (e.type === 'keydown') input.onKey(e); return }
+    if (ui.join && !running && !ui.progress) { joinKey(e); return }
     if (ui.phase === 'ready' && e.type === 'keydown' && !e.repeat && !ui.confirm && !onAControl() && !e.metaKey && !e.ctrlKey && !e.altKey && startKey(e)) {
       e.preventDefault()
       startGame()
@@ -209,6 +236,9 @@
   }
   function onPadDown(index, button) {
     if (!soundHint && globalThis.ctrAudio?.context?.state === 'suspended') soundHint = ctrToast(T.clickForSound, '', '', { sticky: true })
+    if (ui.join && !running && !ui.progress) { joinPad(button); return }
+    // the home page's « or join a room » : Square (Cross plays)
+    if ((ui.phase === 'ready' || ui.phase === 'boot') && !ui.confirm && !ui.progress && settings.get().gamepad[SQUARE] === STANDARD_TO_SDL[button]) { join.open(); return }
     if (ui.phase === 'ready' && !ui.confirm) {
       const gamepad = settings.get().gamepad
       if (START_BUTTONS.some((b) => gamepad[b] === STANDARD_TO_SDL[button])) startGame()
@@ -268,7 +298,7 @@
 </script>
 
 <div id="boot" class:hidden={running && !ui.progress && !ui.joining}>
-  <Boot {handleFile} {startGame} {joinBack} {layout} />
+  <Boot {handleFile} {startGame} {joinBack} {join} {layout} />
 </div>
 
 {#if running && ui.waiting && !ui.joining}

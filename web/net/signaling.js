@@ -165,3 +165,36 @@ export function probeRelay(url, rk, { timeoutMs = CONNECT_TIMEOUT_MS, WebSocketI
     ws.addEventListener('close', (event) => done(CLOSE_CODES[event.code] === 'relay-key' ? 'key' : 'unreachable'));
   });
 }
+
+/**
+ * Who is in a room, without staying in it (session 28b : the home page, before any disc) : a
+ * hello as a guest, the relay's answer, then closes. A full room refuses the hello itself.
+ * @param {string} url - ws:// or wss://
+ * @param {string} rk - the relay access key
+ * @param {string} room - the room id
+ * @returns {Promise<{id: string, name: string, kind: string}[]>} the peers there, this look aside ;
+ *   rejects with `code` : 'relay' (nothing there), 'relay-silent', 'relay-key', 'room-full'
+ */
+export function lookRoom(url, rk, room, { timeoutMs = CONNECT_TIMEOUT_MS, WebSocketImpl = globalThis.WebSocket } = {}) {
+  return new Promise((resolve, reject) => {
+    const id = crypto.randomUUID();
+    let ws;
+    let settled = false;
+    try { ws = new WebSocketImpl(url); } catch (e) { return reject(fail('relay', `invalid relay URL : ${e.message}`)); }
+    const done = (settle, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      settle(value);
+      if (ws.readyState <= 1) ws.close();
+    };
+    const timer = setTimeout(() => done(reject, Object.assign(fail('relay-silent', `no answer from the relay in ${timeoutMs / 1000} s`), { url })), timeoutMs);
+    ws.addEventListener('open', () => ws.send(JSON.stringify({ type: 'hello', id, name: '', kind: 'guest', room, key: rk || undefined })));
+    ws.addEventListener('message', (event) => {
+      let msg;
+      try { msg = JSON.parse(event.data); } catch { return; }
+      if (msg.type === 'welcome') done(resolve, (msg.peers ?? []).filter((p) => p.id !== id));
+    });
+    ws.addEventListener('close', (event) => done(reject, fail(CLOSE_CODES[event.code] ?? 'relay', `relay closed (${event.code})`)));
+  });
+}

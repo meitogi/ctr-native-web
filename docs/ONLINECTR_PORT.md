@@ -1557,9 +1557,9 @@ game. The link carries the code (`c=`) beside the room and the secret it gives, 
 key : a click is still enough.
 
 **D13.4 — The host's door.** So few codes can be tried one by one by whoever may use the relay.
-Knowing the code therefore only lets a guest knock (`web/online/admit.js`) : the host's game shows
-« BEE WANTS IN », ACCEPT / REFUSE, on its menus (in a race the page toasts it, the box comes with
-the menus). The link carries a random pass (`t=`), not derivable from the code : its guest comes
+Knowing the code therefore only lets a guest knock (`web/net/admit.js`) : the host's game shows
+« BEE WANTS IN », ACCEPT / REFUSE, on its menus (in a race the game draws one line, the box comes
+with the menus : D14.5). The link carries a random pass (`t=`), not derivable from the code : its guest comes
 straight in. A guest let in once comes back without being asked (its QUIT, a lost link : D12.12).
 Until it is let in a guest gets nothing of the room — the host's server and lobby share only ever
 see its link then. Not covered : someone holding the relay key who guesses the code can still read
@@ -1586,3 +1586,56 @@ link's relay and key are kept when Settings has no key yet (never over one alrea
 These screens are drawn by `OnlineNetplay_Frame`, called once a frame from `MainFrame_RenderFrame`
 after the pad was read : a screen that is up takes P1's presses, and the menu under it is neither
 run nor drawn that frame. Each has its way back.
+
+## D14 — A room's code on the home page, Netplay and Share (session 28b)
+
+Settled with the user on drawings first (2026-11-11). The page offers one thing before the game
+starts — joining a room by its code ; everything else of a room is in the game.
+
+**D14.1 — « or join a room ».** The index page is the disc's : « Drop your disc image », or « Game
+ready » with a stored disc. Under either card a small link turns the page into the room code's
+dials (`web/ui/src/Join.svelte`), with a Back. They are the game's JOIN (D13.6), rule for rule
+(`web/ui/src/lib/join.js` `press`) : Up / Down turn a dial, Left / Right change dial, Right past
+the last adds one up to five, Square takes it away, Start — or Cross on the last dial — joins,
+Triangle or Escape goes back. The keyboard's arrows, Enter and the player's own menu keys, a
+pad (Square opens the dials from the home page, Cross still plays), and the mouse (each dial's
+arrows, « + », the buttons) all drive them. The code is kept from one visit to the next.
+
+**D14.2 — Pictures with no disc.** The page has no game data when it shows the dials, and none is
+ever hosted : each of the 15 characters is an original pictogram (`web/ui/src/lib/pictos.js`), a
+flat generic animal per name — nothing of a character's design is taken. The names under them are
+the game's, as plain text : they are what is said aloud, and what the game's own dials show. In the
+game the dials keep the game's icons.
+
+**D14.3 — The room's kind, before any disc.** A Netplay room needs the player's own game, a Share
+room does not : the page must know which before it asks for a disc, and before it knocks. A host's
+hello to the relay carries its room's kind as its signaling `name` (`ROOM_KIND`, `web/net/code.js` :
+`ctr-room:netplay`, `ctr-room:share` — longer than a player's name can be) ; the relay hands names
+back in its peer list, as it always did, and is not changed. The page derives the room from the
+code, says hello without staying (`lookRoom`, `web/net/signaling.js`) and reads the host's name
+(`roomKind`). A host from before the kinds sent its player's name there : it reads as Netplay,
+which is what its room is. No page sends a player's name to the relay any more.
+
+**D14.4 — By its kind.** A Share room : the page goes to the guest page with the room's link, the
+code in it and no pass — the guest knocks (D14.5), then sees the host's screen ; refused, or the
+host gone, it comes back to the dials with the reason. A Netplay room, the disc stored : the game
+boots behind the joining card and the Netplay page joins the code as the game's JOIN does (`#c=`,
+read once by `web/online/page.js`) ; the card says « Waiting for the host » until its yes. A
+Netplay room and no disc : the drop zone comes back saying why — « This room plays Netplay : each
+player runs their own game » — and the dropped disc boots into the room ; the host is only asked
+once the game is there. What fails is a red line on the dials, kept, in the game's words : NO SUCH
+ROOM, ROOM FULL, RELAY OFFLINE, THE HOST SAID NO (and THE HOST LEFT, NO DIRECT CONNECTION for
+Share). With no relay key in the browser, or a refused one, the page says so and takes the relay
+and its key there (the Netplay settings only exist once the game runs) ; they are kept where
+Settings › Netplay reads them. A room link still joins as before : no dials, no host's yes.
+
+**D14.5 — A Share room has a code and a door.** Hosting Share opens the room under a code as a
+Netplay mode does (`codeRoom`, `openFreeRoom` — now in `web/net/code.js`, with the door in
+`web/net/admit.js` : Share has them in a build without Netplay too) ; its link carries the code
+and a pass. The page says the code once, in the toast of Share starting. From there it is the
+game's : while this page hosts a Share room (`NativeWeb_ShareHost`) the menus show the room's tag,
+Select opens INVITE (« HOME PAGE - JOIN A ROOM ») and a guest who typed the code is asked for with
+the same box as a Netplay room's. Off the menus — a race, its results — the box does not come :
+one line in the game's font says « BEE WANTS IN » (`OnlineDoor_DrawLine`), and the box is there
+with the next menu. A Netplay host's mid-race page toast became the same line. A build without
+Netplay has none of these screens in its game : its Share room has no code, the link alone joins.

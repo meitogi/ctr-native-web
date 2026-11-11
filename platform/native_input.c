@@ -427,6 +427,11 @@ EM_JS(void, NativeWeb_AskAnswer, (int yes), {
 	const input = Module.ctrInput;
 	if (input && input.askAnswer) input.askAnswer(yes);
 });
+
+EM_JS(int, NativeWeb_ShareHost, (void), {
+	const input = Module.ctrInput;
+	return input && input.shareHost ? input.shareHost() : 0;
+});
 #endif
 
 EM_JS(int, NativeWeb_IntroSkip, (void), {

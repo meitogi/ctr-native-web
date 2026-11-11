@@ -6,15 +6,20 @@
   // With a stored disc (phase 'ready'), #press-start : the disc, and the real button that starts
   // the game — the connected pad's Cross in its family's look, the keyboard's Start key.
   // #boot-version : the build's version (preload-flag.js), bottom right as on the game's title.
+  // #or-join, under either card : « or join a room » — the page becomes the room code's dials
+  // (Join.svelte, session 28b) ; a Netplay room found with no disc brings the drop zone back,
+  // saying why (#join-netplay).
   import Glyph from './Glyph.svelte'
+  import Join from './Join.svelte'
   import Logo from './Logo.svelte'
+  import Picto from './Picto.svelte'
   import { codeOf } from './lib/keys.js'
   import { BUTTONS } from './lib/mappings.js'
   import { T } from './lib/strings.js'
   import { ui } from './state.svelte.js'
   import { live } from './store.js'
 
-  let { handleFile, startGame, joinBack, layout = null } = $props()
+  let { handleFile, startGame, joinBack, join, layout = null } = $props()
   let input = $state()
 
   const mb = (n) => Math.round(n / (1024 * 1024))
@@ -27,8 +32,9 @@
 <div class="screen">
   <div class="glow"></div>
   <div class="col">
-    <Logo width={440} />
-    <p class="lead">{T.bootLead}</p>
+    <!-- the dials are tall : the wordmark steps back for them -->
+    <Logo width={ui.join && !ui.progress && !ui.joining ? 240 : 440} />
+    {#if !ui.join}<p class="lead">{T.bootLead}</p>{/if}
 
     {#if ui.progress}
       <section class="card prep" aria-live="polite">
@@ -46,11 +52,14 @@
         <svg class="disc" class:spin={ui.joining.state === 'joining'} viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
           <circle cx="32" cy="32" r="27" /><circle cx="32" cy="32" r="7" /><path d="M32 13a19 19 0 0 1 19 19" stroke-linecap="round" opacity=".6" />
         </svg>
-        <div class="disp big">{ui.joining.state === 'failed' ? T.joinFailed : T.joinTitle}</div>
+        <div class="disp big">{ui.joining.state === 'failed' ? T.joinFailed : ui.joining.state === 'waiting' ? T.joinWaitingHost : T.joinTitle}</div>
+        {#if ui.joining.state === 'waiting'}<div class="dim">{T.joinWaitingHelp}</div>{/if}
         {#if ui.joining.state === 'racing'}<div class="dim">{T.joinRacing}</div>{/if}
         {#if ui.joining.state === 'failed'}<div class="error" id="joining-reason">{ui.joining.reason}</div>{/if}
         <button id="join-back" type="button" class="primary" onclick={joinBack}>{T.joinBack}</button>
       </section>
+    {:else if ui.join && ui.join.phase !== 'disc'}
+      <Join actions={join} />
     {:else if ui.phase === 'ready'}
       <section id="press-start" class="card ready">
         <svg class="disc spin" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
@@ -66,9 +75,17 @@
         </p>
         <button id="start-game" type="button" class="primary" onclick={startGame}>{T.play}</button>
       </section>
+      <button id="or-join" type="button" class="link or-join" onclick={() => join.open()}>{T.orJoin}</button>
       <p class="dim small other">{T.otherDisc} <button id="pick-disc" type="button" class="link" onclick={() => input.click()}>{T.chooseFile}</button></p>
       <input id="disc-input" type="file" accept=".bin,.zip,application/zip" hidden bind:this={input} onchange={pick} />
     {:else}
+      {#if ui.join}
+        <div id="join-netplay" class="why" aria-live="polite">
+          <div class="code">{#each ui.join.ids as id}<Picto {id} size={36} />{/each}</div>
+          <div class="disp">{T.joinNetplayTitle}</div>
+          <div class="dim">{T.joinNetplayWhy}</div>
+        </div>
+      {/if}
       <section id="drop-zone" class="card drop" class:busy={ui.phase === 'checking' || ui.phase === 'starting'}>
         <svg class="disc" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
           <circle cx="32" cy="32" r="27" /><circle cx="32" cy="32" r="7" /><path d="M32 13a19 19 0 0 1 19 19" stroke-linecap="round" opacity=".6" />
@@ -78,6 +95,11 @@
         <button id="pick-disc" type="button" class="primary" onclick={() => input.click()}>{T.browse}</button>
         <input id="disc-input" type="file" accept=".bin,.zip,application/zip" hidden bind:this={input} onchange={pick} />
       </section>
+      {#if ui.join}
+        <button id="join-back" type="button" class="link or-join" onclick={join.toDials}>{T.joinBack} <Glyph kind="psx" value="triangle" size={18} /></button>
+      {:else if ui.phase === 'boot'}
+        <button id="or-join" type="button" class="link or-join" onclick={() => join.open()}>{T.orJoin}</button>
+      {/if}
       <ul class="needs">
         {#each T.needs as line}<li>{line}</li>{/each}
       </ul>
@@ -106,6 +128,9 @@
   .press { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; margin: 22px 0 4px; font-size: 18px; animation: pulse 1.6s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: 0.55; } }
   .other { margin: 16px 0 0; }
+  .or-join { margin-top: 16px; display: inline-flex; align-items: center; gap: 6px; font-size: 15px; }
+  .why { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 16px; }
+  .why .code { display: flex; gap: 6px; margin-bottom: 6px; }
   .link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
   .disc { width: 60px; height: 60px; color: var(--warm); margin-bottom: 8px; }
   .disp { font-family: var(--display); font-size: 22px; letter-spacing: 0.01em; }

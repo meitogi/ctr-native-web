@@ -16,6 +16,13 @@ relay URL and key (remembered ; `?relay=&rk=` in the page URL prefill them), **S
 guest link**, the video bitrate per guest (0.5–6 Mbit/s, default 2.5). The guest link is
 `…/share/guest.html#room=…&key=…&relay=…&rk=…` : everything after `#`, never sent to a server.
 
+**The room has a code** (the Netplay build) : a few of the game's characters, as a Netplay room's.
+The page says it once, in the toast of Share starting ; in the game the menus show it top right and
+the pad's Select (the Space key) opens INVITE. A guest types it on the home page — « or join a
+room », before any disc — and knocks : the host's game asks « … WANTS IN », ACCEPT / REFUSE, on its
+menus (one line in a race, the box with the next menu). The link carries a pass and goes straight
+in. In a build without Netplay the room has no code : the link alone joins.
+
 On the guest page — the site's interface (`web/ui`, `src/guest.js`, built into `ui/` beside
 `share/`) : click once for sound, then the speaker (mute, volume) and the gear. Settings ›
 **Players** : the player name (sent to the host, shown to everyone), **Who plays** on this page

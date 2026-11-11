@@ -3,6 +3,7 @@
 //   node --test web/share/test/*.test.js
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { gateGuest, gateHost } from '../../net/admit.js';
 import { createShareGuest } from '../guest.js';
 import { BITRATE, createShareHost } from '../host.js';
 import { BTN, ONLINE_MODE, PAD_ID, TAG, decodeControl, encodeControl, padFromKeys } from '../protocol.js';
@@ -304,4 +305,56 @@ test('32f : a guest\'s page says it watches (LOBBY {watching}) ; the host keeps 
   a.guest.link.send(encodeControl(TAG.lobby, { watching: false }), { reliable: true });
   await tick(20);
   assert.equal(host.watched(), false);
+});
+
+// ---- session 28b : a Share room has a door (web/net/admit.js), as a Netplay room's ----
+const gated = (id, { pass, name = 'Bee', onWait } = {}) => {
+  const p = pair(id);
+  const guest = createShareGuest(gateGuest(guestRoom({ link: p.guest }), { pass, me: `me-${id}`, name, onWait }), { name });
+  return { p, guest };
+};
+
+test('28b : a guest who typed the code waits at the door — no slot, no stream — until the host says yes', async () => {
+  const room = hostRoom();
+  const door = gateHost(room, { pass: 'the-links-pass' });
+  const host = createShareHost({ room: door, stream: fakeStream() });
+  let waited = 0;
+  const { p, guest } = gated('g1', { onWait: () => waited++ });
+  room.add(p.host);
+  const connecting = guest.connect();
+  await tick(20);
+  assert.equal(guest.state, 'connecting');
+  assert.equal(waited, 1);
+  assert.deepEqual(door.asking(), { name: 'Bee' });
+  assert.deepEqual(Object.keys(host.guests), [], 'the host\'s Share has not seen this guest yet');
+  door.answer(true);
+  await connecting;
+  await tick(20);
+  assert.equal(guest.state, 'connected');
+  assert.equal(guest.slot, 1);
+  assert.equal(host.guests.g1.state, 'streaming');
+  assert.equal(door.asking(), null);
+});
+
+test('28b : the host\'s no closes the guest as refused ; the link\'s pass comes straight in, never asked', async () => {
+  const room = hostRoom();
+  const door = gateHost(room, { pass: 'the-links-pass' });
+  const host = createShareHost({ room: door, stream: fakeStream() });
+  const knock = gated('g1');
+  room.add(knock.p.host);
+  const connecting = knock.guest.connect();
+  await tick(20);
+  door.answer(false);
+  await connecting;
+  assert.deepEqual([knock.guest.state, knock.guest.code], ['closed', 'refused']);
+  assert.deepEqual(Object.keys(host.guests), []);
+
+  let asked = 0;
+  const byLink = gated('g2', { pass: 'the-links-pass', onWait: () => asked++ });
+  room.add(byLink.p.host);
+  await byLink.guest.connect();
+  await tick(20);
+  assert.equal(byLink.guest.state, 'connected');
+  assert.equal(asked, 0);
+  assert.equal(door.asking(), null);
 });

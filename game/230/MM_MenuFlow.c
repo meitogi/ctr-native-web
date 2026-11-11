@@ -617,6 +617,8 @@ static void NetplayOpening_Frame(int tap)
 static void NetplayInvite_Frame(int tap)
 {
 	s8 code[NETPLAY_CODE_MAX];
+	// a Share room's guest has no game : its code is typed on the page (28b)
+	const char *where = ONLINE_ROOM ? "NETPLAY - JOIN" : "HOME PAGE - JOIN A ROOM";
 	int count = Netplay_RoomCode(code);
 
 	if (!count || (tap & (BTN_TRIANGLE | BTN_CIRCLE | BTN_CROSS_one | BTN_SQUARE_one | BTN_SELECT | BTN_START)))
@@ -628,7 +630,7 @@ static void NetplayInvite_Frame(int tap)
 	DecalFont_DrawLine("INVITE", 0x100, 0x1c, FONT_BIG, NETPLAY_CENTER | ORANGE);
 	DecalFont_DrawLine("ROOM CODE", 0x100, 0x34, FONT_SMALL, NETPLAY_CENTER | WHITE);
 	Netplay_DrawCode(code, count, 0x48, -1);
-	DecalFont_DrawLine("NETPLAY - JOIN", 0x100, 0x8c, FONT_SMALL, NETPLAY_CENTER | WHITE);
+	DecalFont_DrawLine((char *)where, 0x100, 0x8c, FONT_SMALL, NETPLAY_CENTER | WHITE);
 	DecalFont_DrawLine("TRIANGLE - BACK", 0x100, 0xae, FONT_SMALL, NETPLAY_CENTER | GRAY);
 	Netplay_DrawPanel(0x20, 0x12, 0x1c0, 0xaa, 3);
 }
@@ -674,7 +676,9 @@ int OnlineNetplay_Frame(void)
 {
 	char name[20];
 	int tap = sdata->buttonTapPerPlayer[0];
-	int host = ONLINE_ROOM && (octr->DriverID == 0) && (NativeWeb_NetplayStatus() == NETPLAY_IN_ROOM);
+	// a Share room under a code (28b) : the same tag, INVITE and door, on the game's own menus
+	int share = !ONLINE_ROOM && NativeWeb_ShareHost();
+	int host = share || (ONLINE_ROOM && (octr->DriverID == 0) && (NativeWeb_NetplayStatus() == NETPLAY_IN_ROOM));
 
 	if (netplayScreen == NETPLAY_SCREEN_NONE)
 	{
@@ -694,6 +698,9 @@ int OnlineNetplay_Frame(void)
 		}
 		else
 		{
+			// a Netplay room's tag is its lobby's (game/OnlineCTR/thread.c) ; Share has no lobby
+			if (share)
+				OnlineRoom_DrawCodeTag();
 			// bottom left ; not over the track and cup selects' lists
 			if ((sdata->ptrActiveMenu != &MM_MENU_TRACK_SELECT) && (sdata->ptrActiveMenu != &MM_MENU_CUP_SELECT))
 				DecalFont_DrawLine("SELECT - INVITE", 0x14, 0xcc, FONT_SMALL, GRAY);
@@ -731,6 +738,24 @@ int OnlineNetplay_Frame(void)
 	return 1;
 }
 
+// Off the menus (a race, its results) the door's box does not come : one line says a guest
+// waits, and the box is there with the next menu (the user, session 28b). Called once a frame
+// from MainFrame_RenderFrame, for a Netplay host as for a Share one.
+static int doorLine; // for the debug bridge : the line is on screen
+void OnlineDoor_DrawLine(void)
+{
+	char name[20], line[40];
+
+	doorLine = NativeWeb_AskName(name, sizeof(name));
+	if (!doorLine)
+		return;
+	for (char *c = name; *c; c++)
+		if ((*c >= 'a') && (*c <= 'z'))
+			*c -= 'a' - 'A';
+	snprintf(line, sizeof(line), "%s WANTS IN", name);
+	DecalFont_DrawLine(line, 0x100, 0x2c, FONT_SMALL, NETPLAY_CENTER | ORANGE);
+}
+
 // for the debug bridge (platform/web_debug_bridge.c, debug web builds) : what these screens show
 void OnlineNetplay_Debug(s32 *out)
 {
@@ -740,6 +765,8 @@ void OnlineNetplay_Debug(s32 *out)
 	out[3] = joinSaid;
 	for (int i = 0; i < NETPLAY_CODE_MAX; i++)
 		out[4 + i] = joinDial[i];
+	out[10] = doorLine && ((GAME_TRACKER->gameMode1 & MAIN_MENU) == 0);
+	out[11] = ONLINE_ROOM ? 0 : NativeWeb_ShareHost();
 	out[9] = (sdata->ptrActiveMenu == &MM_MENU_CHARACTER_SELECT) && (MM_CHARACTER_SELECT_MENU_STATE == IN_MENU) && OnlineRoom_NeedsPlayer() &&
 	         ((MM_CHARACTER_SELECT_FLAGS & 1) != 0);
 }

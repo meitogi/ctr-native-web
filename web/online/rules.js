@@ -96,29 +96,5 @@ export function roomTag(id) {
   return tag;
 }
 
-/** A host's code grows by one character after this many codes drawn in a row were already taken. */
-export const CODE_TAKEN_BEFORE_LONGER = 3;
-
-/**
- * A room under a code no other host holds (session 28). The relay keeps no table : a host joins
- * the room its code names and reads who is there ; someone hosting already, it leaves and draws
- * again. `CODE_TAKEN_BEFORE_LONGER` taken in a row : the relay is crowded at that length, the
- * code gets one more character (3, then 4, then 5 — web/net/code.js).
- * @param {object} o
- * @param {number} o.length - characters of the first code drawn
- * @param {number} [o.max=5]
- * @param {(length: number) => Promise<{room: {close(): void}, taken: boolean}>} o.open - a room
- *   opened under a fresh code of that length, and whether another host was in it
- * @returns {Promise<object>} the room kept
- */
-export async function openFreeRoom({ length, max = 5, open }) {
-  for (let taken = 0; ; ) {
-    const { room, taken: held } = await open(length);
-    if (!held) return room;
-    room.close();
-    if (++taken >= CODE_TAKEN_BEFORE_LONGER && length < max) {
-      length++;
-      taken = 0;
-    }
-  }
-}
+// the free-code rule lives with the code (web/net/code.js) : Share uses it too, in builds without Netplay
+export { CODE_TAKEN_BEFORE_LONGER, openFreeRoom } from '../net/code.js';

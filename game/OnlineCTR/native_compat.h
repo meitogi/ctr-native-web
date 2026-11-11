@@ -74,6 +74,7 @@ void OnlineRoom_DrawTag(void);    // the page's room tag, top right on the menus
 void OnlineRoom_DrawCodeTag(void); // the same for a room with a code : its characters (game/230/MM_MenuFlow.c, 28)
 void OnlineNetplay_Debug(s32 *out); // what they show, for the debug bridge
 int OnlineNetplay_Frame(void);    // NETPLAY's screens over the menus : the room opening, JOIN, INVITE, the door (28)
+void OnlineDoor_DrawLine(void);   // off the menus : the one line saying a guest waits at the door (28b)
 void OnlineRoom_EndOfRace(void);  // every frame of the end of race : the humans left ; a Cup counted (host), its standings
 int OnlineCup_Showing(void);      // the standings replace the results
 // Session 32d, the Netplay pause (D12.9) and the host's skip (D12.10)

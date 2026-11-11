@@ -32,6 +32,28 @@ function waitForPeer(sig, match, ms) {
 }
 
 /**
+ * Who the relay says is in `room`, once the list holds this page itself (its own hello answered) :
+ * how a host sees another host under its code, and a guest that nobody hosts. Empty on a backend
+ * that is not the relay.
+ * @param {object} room - an open room
+ * @returns {Promise<{id: string, name: string, kind: string}[]>}
+ */
+export function peersOf(room) {
+  return new Promise((resolve) => {
+    const sig = room.signaling;
+    const there = () => sig.peers.some((p) => p.id === room.selfId);
+    if (room.backend !== 'relay' || there()) return resolve(room.backend === 'relay' ? sig.peers : []);
+    const timer = setTimeout(() => { off(); resolve(sig.peers); }, 2000);
+    const off = sig.on('peers', () => {
+      if (!there()) return;
+      clearTimeout(timer);
+      off();
+      resolve(sig.peers);
+    });
+  });
+}
+
+/**
  * Joins a room.
  * @param {object} options
  * @param {string | {room: string, key: string, relay?: string, rk?: string, signaling?: string[], mqtt?: string[]}} options.link -
