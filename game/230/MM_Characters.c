@@ -881,18 +881,6 @@ static void OnlineCharacters_Follow(void)
 	}
 	settling = 0;
 
-	// VS and BATTLE need a second human : back to the menu before, its row grey (D12.7)
-	if ((now < 2) && !octrOnlineArcade)
-	{
-		octrSlotGone = 0;
-		MM_CHARACTER_SELECT_FLAGS = 0;
-		MM_CHARACTER_SELECT_EXITS_FORWARD = 0;
-		MM_CHARACTER_SELECT_MENU_STATE = EXITING_MENU;
-		OtherFX_Play(2, 1);
-		NativeWeb_RoomAlone();
-		return;
-	}
-
 	flags = MM_CHARACTER_SELECT_FLAGS;
 	gone = octrSlotGone;
 	octrSlotGone = 0;
@@ -933,8 +921,9 @@ static void OnlineCharacters_Follow(void)
 		meta->currX = meta->currY = 0;
 	MM_Characters_PreventOverlap();
 
-	// everyone left had locked : on to the track (or cup) select
-	if ((now < was) && (MM_CHARACTER_SELECT_FLAGS == (u16)((1u << now) - 1)))
+	// everyone left had locked : on to the track (or cup) select — but for a VS or BATTLE left
+	// with one human, who waits here for a second (session 28)
+	if ((now < was) && (MM_CHARACTER_SELECT_FLAGS == (u16)((1u << now) - 1)) && !OnlineRoom_NeedsPlayer())
 	{
 		MM_CHARACTER_SELECT_EXITS_FORWARD = 1;
 		MM_CHARACTER_SELECT_MENU_STATE = EXITING_MENU;
@@ -1328,6 +1317,14 @@ dontDrawSelectCharacter:
 					OtherFX_Play(1, 1);
 
 					// if all players have selected their characters
+#ifdef USE_ONLINE
+					// ctr-native: a Netplay VS or BATTLE does not start alone (session 28) : the
+					// lock holds and the select waits for a second player (WAITING FOR PLAYER 2)
+					if (OnlineRoom_NeedsPlayer())
+					{
+					}
+					else
+#endif
 					if ((u32)(int)(s16)MM_CHARACTER_SELECT_FLAGS == selectedPlayerMask)
 					{
 						// exit toward cup or track selection

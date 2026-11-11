@@ -70,6 +70,7 @@ How a room uses the list :
 | File | Role |
 |---|---|
 | `link.js` | room link format, the backend list |
+| `code.js` | a room's code — a few of the game's characters — and the room id and secret derived from it |
 | `crypto.js` | HKDF from the secret → AES-GCM key (sealing) + HMAC key (identity proof, MQTT topic) ; the sealed envelope (sender, recipient and a counter bound in : no forgery, redirection or replay) |
 | `signaling.js` | the signaling backend contract (header comment) and backend `relay`, `ctr-relay` ; offer, answer and game data through it are sealed |
 | `signaling-mqtt.js` | backend `mqtt` : public MQTT brokers, a minimal MQTT-over-WebSocket client |

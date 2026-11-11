@@ -360,11 +360,6 @@ EM_JS(int, NativeWeb_NetplayHost, (void), {
 	return input && input.netplayHost ? input.netplayHost() : 0;
 });
 
-EM_JS(void, NativeWeb_RoomAlone, (void), {
-	const input = Module.ctrInput;
-	if (input && input.roomAlone) input.roomAlone();
-});
-
 EM_JS(void, NativeWeb_LeaveRoom, (void), {
 	const input = Module.ctrInput;
 	if (input && input.leaveRoom) input.leaveRoom();
@@ -384,6 +379,53 @@ EM_JS(int, NativeWeb_RoomTag, (char *buf, int size), {
 	for (let i = 0; i < n; i++) HEAPU8[buf + i] = tag.charCodeAt(i) & 0x7f;
 	HEAPU8[buf + n] = 0;
 	return 1;
+});
+
+// The page's strings for the game : ASCII, a byte per character, then the terminator ; the
+// number of characters written.
+EM_JS(int, NativeWeb_PageText, (int which, char *buf, int size), {
+	const input = Module.ctrInput;
+	const read = input && [input.roomCode, input.askName][which];
+	const text = read ? read() : '';
+	const n = Math.min(text.length, size - 1);
+	for (let i = 0; i < n; i++) HEAPU8[buf + i] = text.charCodeAt(i) & 0x7f;
+	HEAPU8[buf + n] = 0;
+	return n;
+});
+
+int NativeWeb_RoomCode(char *buf, int size)
+{
+	return NativeWeb_PageText(0, buf, size);
+}
+
+int NativeWeb_AskName(char *buf, int size)
+{
+	return NativeWeb_PageText(1, buf, size);
+}
+
+EM_JS(int, NativeWeb_NetplayStatus, (void), {
+	const input = Module.ctrInput;
+	return input && input.netplayStatus ? input.netplayStatus() : 0;
+});
+
+EM_JS(int, NativeWeb_NetplayJoin, (const char *code), {
+	const input = Module.ctrInput;
+	return input && input.netplayJoin ? input.netplayJoin(UTF8ToString(code)) : 0;
+});
+
+EM_JS(void, NativeWeb_NetplayCancel, (void), {
+	const input = Module.ctrInput;
+	if (input && input.netplayCancel) input.netplayCancel();
+});
+
+EM_JS(void, NativeWeb_Invite, (void), {
+	const input = Module.ctrInput;
+	if (input && input.invite) input.invite();
+});
+
+EM_JS(void, NativeWeb_AskAnswer, (int yes), {
+	const input = Module.ctrInput;
+	if (input && input.askAnswer) input.askAnswer(yes);
 });
 #endif
 

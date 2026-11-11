@@ -1218,7 +1218,7 @@ void NativeOnline_Frame(void)
 	octr->windowsClientSync++;
 
 	// should rename to room selection
-	if (octr->CurrState >= LAUNCH_PICK_ROOM)
+	if (octr->CurrState >= LAUNCH_PICK_ROOM && !NativeOnlineGame_SelectIsInvite())
 		DisconSELECT();
 
 	//send data

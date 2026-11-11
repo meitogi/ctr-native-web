@@ -72,7 +72,13 @@ addToLibrary({
       };
     };
     if (!Module.ctrOnlineNet && typeof document !== 'undefined') {
-      import('./online/page.js').then((page) => page.attach(Module), (e) => err(`[OnlineCTR] web/online/page.js: ${e}`));
+      // the module's fetch can fail on a poor link with nothing asked of the server : without it
+      // the game runs with no Netplay at all, so it is asked for again under another address
+      const load = (attempt) => import(`./online/page.js${attempt ? `?retry=${attempt}` : ''}`).then((page) => page.attach(Module), (e) => {
+        err(`[OnlineCTR] web/online/page.js: ${e}`);
+        if (attempt < 2) setTimeout(() => load(attempt + 1), 1000);
+      });
+      load(0);
     }
   },
 

@@ -144,6 +144,19 @@ EM_JS(void, WebDebugBridge_PushPathJS, (int levelID, const s16 *frames, int coun
 	globalThis.__ctrTrack = { levelID, path };
 });
 
+#ifdef USE_ONLINE
+//   netplay      NETPLAY's screens over the menus (session 28) : screen ('none' | 'opening' | 'join' |
+//                'joining' | 'invite' | 'ask'), the JOIN dials (character ids) and the one in hand,
+//                `said` the JOIN screen's red line (enum NetplayStatus, 0 none), `waiting` while a
+//                VS / BATTLE select holds its only player's lock
+EM_JS(void, WebDebugBridge_PushNetplayJS, (const s32 *n), {
+	const c = globalThis.__ctr;
+	if (!c) return;
+	const v = HEAP32.subarray(n >> 2, (n >> 2) + 10);
+	c.netplay = { screen: (['none', 'opening', 'join', 'joining', 'invite', 'ask'])[v[0]], dials: Array.from(v.subarray(4, 4 + v[1])), at: v[2], said: v[3], waiting: !!v[9] };
+});
+#endif
+
 // Runs right after WebDebugBridge_PushJS, on the object it just wrote.
 EM_JS(void, WebDebugBridge_PushMoreJS,
       (int hasSub, const char *subTitle, int subRow, const char *subLabel, int subState, int players, const s32 *karts, int charSelect,
@@ -830,6 +843,16 @@ internal void WebDebugBridge_Publish(void)
 		                          charSelect,
 		                          WebDebugBridge_PoolFree(&gGT->JitPools.thread), WebDebugBridge_PoolFree(&gGT->JitPools.smallStack));
 	}
+
+#ifdef USE_ONLINE
+	{
+		// NETPLAY's own screens (game/230/MM_MenuFlow.c, session 28)
+		s32 netplay[10];
+
+		OnlineNetplay_Debug(netplay);
+		WebDebugBridge_PushNetplayJS(netplay);
+	}
+#endif
 
 	if (gGT->backBuffer != NULL)
 	{

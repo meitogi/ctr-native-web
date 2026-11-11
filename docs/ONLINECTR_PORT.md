@@ -1135,6 +1135,9 @@ defaults. The relay URL and key come from the page's settings (the first link
 received, or the site's defaults). Joining by code : a field on the boot
 screen and in the panel ; a guest without game data lands in Share.
 
+Superseded for Netplay rooms by D13 (session 28) : the code is a few of the
+game's characters, picked on dials in the game.
+
 ## Session 11 findings
 
 Hardening of our own Online mode (session 11 ; smoothing, rejoin and the end-of-race
@@ -1519,3 +1522,67 @@ characters above it down even before it takes input (`OnlineCharacters_Follow`).
 room's tag top right (`OnlineRoom_DrawTag`, the version's font and grey) : 4 characters of
 `23456789ABCDEFGHJKLMNPQRSTUVWXYZ` from the room id's FNV-1a hash (`roomTag`), the same on every page of
 the room — the id's own base64url would lose its case in the game's capitals.
+
+
+## D13 — Netplay rooms from the game (session 28)
+
+Settled with the user on drawings first (2026-11-11). The room link of D10's time stays ; the game
+gains everything a pad needs to host, invite and join.
+
+**D13.1 — A mode hosts the room.** NETPLAY opens its menu with no room : VS, BATTLE, ARCADE, JOIN.
+A mode picked with no room asks the page for one (`NativeWeb_NetplayHost`) and waits under
+« OPENING ROOM... » (`NetplayOpening_Frame`, `game/230/MM_MenuFlow.c`) until this game is its
+room's host in its lobby (`LOBBY_HOST_TRACK_PICK` : the states before it reset the menu path) ; the
+mode's own screens follow. Triangle back to the NETPLAY menu keeps the room, so another mode is
+the same room ; the main menu's top level closes it (32e). What the page says of the room is one
+number (`NativeWeb_NetplayStatus`, `NP` in `web/online/page.js`) : on its way, waiting for the
+host's yes, there, or why not — no key, key refused, relay silent, no such room, full, refused. A
+room that cannot open is said in a box under the NETPLAY menu : NO RELAY KEY and KEY REFUSED offer
+OPEN SETTINGS, RELAY OFFLINE offers TRY AGAIN.
+
+**D13.2 — VS and BATTLE open alone, and wait at the lock.** No row is grey any more. Alone, the
+character select takes the player's lock and stays (`OnlineRoom_NeedsPlayer`) : a banner says
+WAITING FOR PLAYER 2 ; a guest arriving grows the select (D12.7), and everyone locked goes on. A
+guest leaving a VS or BATTLE select no longer sends the host back a menu : it waits there again.
+ARCADE starts alone, with its bots.
+
+**D13.3 — The code is characters.** A room's code is 3 of the game's 15 characters — 3 375 codes —,
+4 or 5 when the relay is crowded (`web/net/code.js`). The host draws it : the room id and the room
+secret are both derived from it in the browser (PBKDF2-SHA-256), so the relay keeps no table, sees
+no code and is not changed. The relay's answer to a hello already lists who is in a room : a host
+that finds another host under its code leaves and draws again, and three of those in a row add a
+character (`openFreeRoom`, `web/online/rules.js`). The first length is the site's setting,
+`web/online/config.json` (`codeLength`), read by the page at boot — edited without building the
+game. The link carries the code (`c=`) beside the room and the secret it gives, the relay and its
+key : a click is still enough.
+
+**D13.4 — The host's door.** So few codes can be tried one by one by whoever may use the relay.
+Knowing the code therefore only lets a guest knock (`web/online/admit.js`) : the host's game shows
+« BEE WANTS IN », ACCEPT / REFUSE, on its menus (in a race the page toasts it, the box comes with
+the menus). The link carries a random pass (`t=`), not derivable from the code : its guest comes
+straight in. A guest let in once comes back without being asked (its QUIT, a lost link : D12.12).
+Until it is let in a guest gets nothing of the room — the host's server and lobby share only ever
+see its link then. Not covered : someone holding the relay key who guesses the code can still read
+what the relay carries for that room (names, kart states) ; to settle before a public relay.
+
+**D13.5 — INVITE.** On a room's menus the pad's Select (the Space key) shows the code large : the
+characters' pictures and names, « NETPLAY - JOIN », and the page copies the link. Select no longer
+leaves the room there (upstream's `DisconSELECT` still does in a race). The tag of the menus
+(D12.12) is the code's pictures in a box whose top border carries ROOM — top right, bottom right
+on the track and cup selects, whose title is top right.
+
+**D13.6 — JOIN.** One dial per character : Up / Down turn it (the picture slides ; the dial in
+hand sits in a square, an arrow above and below it), Left / Right change dial, Right past the last one adds a dial up to
+five and Square takes it away, Start or Cross on the last dial joins, Triangle goes back. The
+keyboard drives it with the same keys as every menu. The page looks for the room on the relay and
+key of Settings (`joinByCode`) : a code no host holds is said at once (the relay's answer lists
+nobody hosting), then « WAITING FOR THE HOST » until its yes. What fails is a red line on the
+dials, which stay as they are : NO SUCH ROOM, ROOM FULL, RELAY OFFLINE, THE HOST SAID NO. In, the
+game enters the room under the host's picture, in the host's mode, as a link's guest does.
+
+**D13.7 — The relay and its key.** Settings › Netplay holds both ; they are saved as typed. A room
+link's relay and key are kept when Settings has no key yet (never over one already there).
+
+These screens are drawn by `OnlineNetplay_Frame`, called once a frame from `MainFrame_RenderFrame`
+after the pad was read : a screen that is up takes P1's presses, and the menu under it is neither
+run nor drawn that frame. Each has its way back.

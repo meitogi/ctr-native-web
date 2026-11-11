@@ -155,7 +155,9 @@ if(CTR_ONLINE)
 
         # the page module and the network layer it imports, next to index.html
         file(GLOB CTR_WEB_ONLINE_FILES CONFIGURE_DEPENDS
-            "${CMAKE_SOURCE_DIR}/web/online/*.js" "${CMAKE_SOURCE_DIR}/web/net/*.js")
+            "${CMAKE_SOURCE_DIR}/web/online/*.js" "${CMAKE_SOURCE_DIR}/web/net/*.js"
+            # the site's settings, read by the page at boot : edited without building the game
+            "${CMAKE_SOURCE_DIR}/web/online/config.json")
         list(REMOVE_ITEM CTR_WEB_ONLINE_FILES "${CTR_WEB_ONLINE_LIBRARY}")
         set(CTR_WEB_ONLINE_OUTPUTS)
         foreach(src IN LISTS CTR_WEB_ONLINE_FILES)

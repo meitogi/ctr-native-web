@@ -211,6 +211,17 @@ export async function boot(tab, url) {
 		say(`${tab.name} : no game output 60 s after load ${attempt}, reloading (${await pageLog(tab)})`)
 	}
 	// one build : the normal game boots ; the room is joined from the title
+	// the page's own module can fail to load over the port forward (« Failed to fetch dynamically
+	// imported module », nothing asked of the server) : the game runs without its panel — load again
+	for (let load = 1; ; load++) {
+		const lost = () => tab.js("return /Failed to fetch dynamically imported module/.test(document.getElementById('log')?.textContent ?? '')").catch(() => false)
+		const deadline = Date.now() + 20_000
+		while (Date.now() < deadline && !(await online(tab).catch(() => null)) && !(await lost())) await sleep(500)
+		if (await online(tab).catch(() => null)) break
+		if (load === 3 || !(await lost())) break
+		say(`${tab.name} : the page's Netplay module did not load, loading the page again`)
+		return boot(tab, url)
+	}
 	await until(tab, 'the Online panel', s => !!s, 180_000)
 	// a room link skips the intro and the title by itself (session 32e) : no press here, which
 	// would reach the host as this guest's pad
@@ -649,100 +660,6 @@ const TOASTS = `(() => {
 })()`
 
 /**
- * Session 32 : the main menu's NETPLAY row with no room. With no relay key saved, the game's
- * box says so : Triangle back to the main menu, OPEN brings the page's Netplay panel (Escape
- * closes it). With the relay and its key saved, a room at once : its link in a toast, the
- * ONLINE menu opened by itself.
- */
-async function netplayRow(ctx) {
-	const relay = ctx.args.relay
-	const rk = ctx.args.rk ?? ''
-	if (!relay || !rk) ctx.skip('no keyed relay : --set relay=ws://localhost:8788 --set rk=<key>')
-	const origin = new URL(ctx.args.url).origin
-	const host = { name: 'host', js: ctx.js, press: ctx.press, frames: ctx.frames, navigate: url => ctx.conn.send('Page.navigate', { url }, ctx.sid) }
-	const steps = []
-	await ctx.conn.send('Page.addScriptToEvaluateOnNewDocument', { source: TOASTS }, ctx.sid)
-	const bootWith = async key => {
-		await boot(host, `${origin}/index.html`)
-		await ctx.js(`localStorage.setItem('ctr-online.relay', ${JSON.stringify(relay)}); localStorage.setItem('ctr-online.rk', ${JSON.stringify(key)})
-			localStorage.setItem('ctr-online.points', 'relay'); localStorage.setItem('ctr-online.name', 'Host'); return true`)
-		await boot(host, `${origin}/index.html`)
-		await menuTo(ctx, 'NETPLAY', dir => ctx.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
-	}
-	const panelOpen = () => ctx.js("return !!(document.getElementById('online')?.checkVisibility?.() || document.getElementById('ctr-settings')?.checkVisibility?.())")
-
-	await bootWith('')
-	await ctx.press(CROSS)
-	await untilGame(host, 'the NO RELAY KEY box', s => s.sub?.title === 'NO RELAY KEY', 10_000)
-	await shot(ctx, 'netplay-no-key')
-	await ctx.press('z')
-	const back = await untilGame(host, 'the main menu again', s => !s.sub && s.menu?.label === 'NETPLAY', 10_000)
-	steps.push(`no key : the box, Triangle back to ${back.menu.label}`)
-	if ((await online(host)).role === 'host') throw new Error('a room opened with no relay key')
-	await ctx.press(CROSS)
-	await untilGame(host, 'the box again', s => s.sub?.title === 'NO RELAY KEY', 10_000)
-	// OPEN : the first row (a press landing as the box opens is lost : again until the panel shows)
-	await ctx.press('ArrowUp')
-	for (let i = 0; i < 4 && !(await panelOpen()); i++) {
-		await sleep(800)
-		const s = await game(host)
-		if (s?.sub?.title === 'NO RELAY KEY' && s.sub.label === 'OPEN NETPLAY SETTINGS') await ctx.press(CROSS)
-		else if (s?.sub?.title === 'NO RELAY KEY') await ctx.press('ArrowUp')
-	}
-	for (let i = 0; i < 20 && !(await panelOpen()); i++) await sleep(250)
-	if (!(await panelOpen())) throw new Error('OPEN did not bring the Netplay panel')
-	await shot(ctx, 'netplay-no-key-panel')
-	await ctx.press('Escape')
-	for (let i = 0; i < 20 && (await panelOpen()); i++) await sleep(250)
-	steps.push(`OPEN : the panel, Escape ${(await panelOpen()) ? 'did not close it' : 'closed it'}`)
-
-	await bootWith(rk)
-	await ctx.press(CROSS)
-	const s = await until(host, 'the room NETPLAY opened', s => s.role === 'host' && !!s.link && s.lobby.active, 30_000)
-	const g = await untilGame(host, 'the ONLINE menu by itself', s => s.sub?.title === 'NETPLAY', 20_000)
-	await shot(ctx, 'netplay-auto-host')
-	const toasts = await ctx.js('return globalThis.__toasts ?? []')
-	if (!toasts.some(t => /Room open/.test(t))) throw new Error(`no « Room open » toast : ${JSON.stringify(toasts)}`)
-	steps.push(`key saved : a room on ${s.backend}, the ONLINE menu (${g.sub.label}) by itself, toasts ${JSON.stringify(toasts)}`)
-	// Alone in the room (session 32b) : VS and BATTLE grey, Cross on VS stays ; ARCADE's race
-	// type and its way back ; Triangle to the main menu, the room kept
-	await untilGame(host, 'the cursor on VS', s => s.sub?.label === 'VS.', 5_000)
-	await ctx.press(CROSS)
-	await ctx.frames(30)
-	const vs = await game(host)
-	if (vs?.sub?.title !== 'NETPLAY') throw new Error(`alone, Cross on VS left the ONLINE menu : ${vs?.sub?.title}/${vs?.sub?.label}`)
-	for (let i = 0; i < 6 && (await game(host))?.sub?.label !== 'ARCADE'; i++) {
-		await ctx.press('ArrowDown')
-		await ctx.frames(10)
-	}
-	await untilGame(host, 'the cursor on ARCADE', s => s.sub?.label === 'ARCADE', 5_000)
-	await ctx.press(CROSS)
-	const rt = await untilGame(host, 'ARCADE\'s race type', s => s.sub?.title === 'RACE TYPE', 10_000)
-	await ctx.press('z')
-	await untilGame(host, 'the ONLINE menu again', s => s.sub?.title === 'NETPLAY', 10_000)
-	// a press landing as a menu opens is lost (as the box's above) : again until it leaves
-	for (let i = 0; i < 4 && (await game(host))?.sub; i++) {
-		await ctx.press('z')
-		await ctx.frames(20)
-	}
-	const main = await untilGame(host, 'the main menu', s => !s.sub && s.menu?.label === 'NETPLAY', 10_000)
-	// up on the main menu : out of the room (the user, 32e)
-	const out = await online(host)
-	const left = !out.role || out.role === 'none'
-	steps.push(`alone : VS stays grey, ARCADE → ${rt.sub.title}, Triangle ×2 → ${main.menu.label}, room ${left ? 'left' : out.role}`)
-	if (!left) throw new Error(steps.join(' · '))
-	// NETPLAY again opens a new room, its menu by itself (session 32c)
-	const before = s.room
-	await ctx.press(CROSS)
-	const again = await until(host, 'a new room from NETPLAY', s => s.role === 'host' && s.lobby.active && s.room !== before, 30_000)
-	await untilGame(host, 'the ONLINE menu by itself again', s => s.sub?.title === 'NETPLAY', 20_000)
-	await ctx.js('window.__ctrOnline.leave(); return true')
-	steps.push(`NETPLAY again : room ${again.room} (was ${before}) and its menu`)
-	if (/did not close/.test(steps[1])) throw new Error(steps.join(' · '))
-	return steps.join(' · ')
-}
-
-/**
  * Session 32b, a changed link : the guest's page hosts its own room B, then its address bar gets
  * the host's room A link. Its page leaves B and joins A in place (no reload) : a toast, then A's
  * lobby on both games (the guest behind the host's picture, its pad as P2). The same link again
@@ -873,8 +790,7 @@ export default async ctx => {
 	await ctx.scenario('ONLINE-2TAB-WS', () => twoTabs(ctx, 'ws'))
 	// A whole race, both driving and firing, both screens filmed ; over WebRTC when it pairs.
 	await ctx.scenario('ONLINE-ITEM-RACE', () => twoTabs(ctx, 'auto', { itemRace: true }))
-	// Session 32 : NETPLAY with no room (the no-key box, a room at once) ; a whole VS Cup, humans only (D12)
-	await ctx.scenario('NETPLAY-ROW', () => netplayRow(ctx))
+	// NETPLAY with no room, the no-key box, the room a mode hosts : netplay-rooms.suite.mjs (session 28)
 	// Session 32b : another room's link opened in the page : leave this room, join that one in place
 	await ctx.scenario('LINK-CHANGE', () => linkChange(ctx))
 	await ctx.scenario('ONLINE-VS-CUP', () => cupOn(ctx))

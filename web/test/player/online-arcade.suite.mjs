@@ -456,7 +456,7 @@ async function quitBack(ctx) {
 		if ((out.role && out.role !== 'none') || out.watch?.band || g.mode.join('|') !== 'MAIN_MENU') throw new Error(`on the main menu : room ${out.role}, band ${JSON.stringify(out.watch?.band)}, mode ${g.mode.join('|')} || ${steps.join(' | ')}`)
 		for (let i = 0; i < 6 && (await game(guest))?.menu?.label !== 'NETPLAY'; i++) { await guest.press('ArrowDown'); await sleep(400) }
 		await guest.press('c')
-		g = await untilGame(guest, 'the ONLINE menu of a new room', s => !s.charSelect && /VS|BATTLE|ARCADE/.test(s.sub?.label ?? ''), 20_000)
+		g = await untilGame(guest, 'the NETPLAY menu again', s => !s.charSelect && /VS|BATTLE|ARCADE/.test(s.sub?.label ?? ''), 20_000)
 		await sleep(800)
 		g = await note('NETPLAY again')
 		if (g.sub.label !== 'VS.') throw new Error(`the ONLINE menu's cursor on ${g.sub.label}, not its first row`)
@@ -466,6 +466,9 @@ async function quitBack(ctx) {
 			await sleep(800)
 		}
 		await row('ARCADE')
+		// no room any more : ARCADE hosts a new one first (session 28), its race type comes after
+		await untilGame(guest, 'the race type of a new room', s => s.sub?.title === 'RACE TYPE', 30_000)
+		await sleep(500)
 		g = await note('race type')
 		if (g.sub?.label !== 'SINGLE') throw new Error(`the race type's cursor on ${g.sub?.label}, not its first row`)
 		await row('CUP')

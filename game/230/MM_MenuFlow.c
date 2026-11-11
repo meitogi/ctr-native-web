@@ -82,11 +82,15 @@ static struct MenuRow onlineRowsMainWithScrapbook[9] =
 };
 // NETPLAY's row in both main menus above
 #define ONLINE_MAIN_ROW 5
-static struct MenuRow onlineRowsModes[4] =
+// JOIN, beside the three modes (session 28) : its string takes a slot as NETPLAY's does
+#define ONLINE_LNG_JOIN 0x9e
+#define ONLINE_JOIN_ROW 3
+static struct MenuRow onlineRowsModes[5] =
 {
 	{0x4F, 0, 1, 0, 0},
 	{0x50, 0, 2, 1, 1},
-	{LNG_ARCADE, 1, 2, 2, 2},
+	{LNG_ARCADE, 1, 3, 2, 2},
+	{ONLINE_LNG_JOIN, 2, 3, 3, 3},
 	{RECTMENU_STRING_NONE},
 };
 static void OnlineMenu_Proc(struct RectMenu *menu);
@@ -117,16 +121,45 @@ static struct RectMenu onlineMenuRaceType =
 	.funcPtr = OnlineArcadeRaceType_Proc,
 };
 
-// NETPLAY with no room (session 32) : the page hosts one at once with its saved relay and key,
-// and the ONLINE menu opens once it is on (MM_MenuProc_Main) ; without them this box says why
-// and offers the page's Netplay settings. Its strings take language slots the mod's own
-// menus use on native only (ONLINE_LNG_ROW's neighbours).
+// A room that could not open (session 28 ; the NO RELAY KEY box of session 32) : no relay key in
+// the page's Settings, a key the relay refused, a relay that does not answer. The box says which
+// and offers the page's Netplay settings, or another try. Its strings take language slots the
+// mod's own menus use on native only (ONLINE_LNG_ROW's neighbours).
 #define ONLINE_LNG_NO_KEY 0x9b
 #define ONLINE_LNG_OPEN_SETTINGS 0x9c
 #define ONLINE_LNG_BACK 0x9d
-// frames left for the room NETPLAY asked for to come on (a refused host never opens the menu later)
-#define ONLINE_AUTO_OPEN_FRAMES 1800
-static int onlineAutoOpen;
+// frames a room asked for may take to come on : past them the relay is said offline
+#define NETPLAY_OPEN_FRAMES 1800
+
+// What the page says of the room a mode or JOIN asked for (NativeWeb_NetplayStatus ;
+// web/online/page.js NP)
+enum NetplayStatus
+{
+	NETPLAY_IDLE = 0,
+	NETPLAY_BUSY = 1,
+	NETPLAY_WAITING_HOST = 2,
+	NETPLAY_IN_ROOM = 3,
+	NETPLAY_NO_KEY = 10,
+	NETPLAY_KEY_REFUSED = 11,
+	NETPLAY_OFFLINE = 12,
+	NETPLAY_NO_ROOM = 13,
+	NETPLAY_FULL = 14,
+	NETPLAY_REFUSED = 15,
+};
+// The screens NETPLAY draws over the game's menus (OnlineNetplay_Frame)
+enum NetplayScreen
+{
+	NETPLAY_SCREEN_NONE,
+	NETPLAY_SCREEN_OPENING, // a mode picked : its room on its way
+	NETPLAY_SCREEN_JOIN,    // JOIN : the dials
+	NETPLAY_SCREEN_JOINING, // the dials sent : the room, then the host's yes
+	NETPLAY_SCREEN_INVITE,  // the room's code, large
+	NETPLAY_SCREEN_ASK,     // a guest who typed the code : ACCEPT / REFUSE
+};
+static int netplayScreen;
+static int netplayRow;    // the mode whose room is opening
+static int netplayFrames; // left for that room
+static int netplayError;  // the box's reason (enum NetplayStatus)
 static struct MenuRow onlineRowsNoKey[3] =
 {
 	{ONLINE_LNG_OPEN_SETTINGS, 0, 1, 0, 0},
@@ -142,16 +175,33 @@ static struct RectMenu onlineMenuNoKey =
 	.funcPtr = OnlineNoKey_Proc,
 };
 
-// Cross on OPEN : the page's panel ; BACK, Triangle or Circle : the main menu
+static void OnlineMenu_Host(int row);
+static void NetplayJoin_Open(void);
+
+// The box under the NETPLAY menu : why the room did not open
+static void OnlineMenu_ErrorBox(int status)
+{
+	netplayError = status;
+	onlineMenuNoKey.rowSelected = 0;
+	onlineMenu.ptrNextBox_InHierarchy = &onlineMenuNoKey;
+	onlineMenu.state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
+}
+
+// Cross on its first row : the page's panel (a key missing or refused), or another try (the
+// relay silent) ; BACK, Triangle or Circle : the NETPLAY menu
 static void OnlineNoKey_Proc(struct RectMenu *menu)
 {
 	s16 row = menu->rowSelected;
 
 	if (row < -1 || row > 1)
 		return;
-	if ((row == 0) && ((sdata->gGamepads->gamepad[0].buttonsTapped & BTN_CIRCLE) == 0))
-		NativeWeb_OpenMultiplayer();
 	menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+	if ((row != 0) || ((sdata->gGamepads->gamepad[0].buttonsTapped & BTN_CIRCLE) != 0))
+		return;
+	if (netplayError != NETPLAY_OFFLINE)
+		NativeWeb_OpenMultiplayer();
+	else if (onlineMenu.rowSelected != ONLINE_JOIN_ROW)
+		OnlineMenu_Host(onlineMenu.rowSelected);
 }
 
 // The room's humans, one per machine : the host and its guests (P2-P4, held while the host's
@@ -170,17 +220,11 @@ static int OnlineRoom_Humans(void)
 	return n;
 }
 
-// as MM_ToggleRows_PlayerCount : VS and BATTLE need a second human, ARCADE has its bots
-static void OnlineMenu_ToggleModeRows(void)
+// A Netplay VS or BATTLE opens alone and does not start alone (session 28) : its character
+// select holds the lock until a second human is there. ARCADE has its bots.
+static int OnlineRoom_NeedsPlayer(void)
 {
-	int alone = OnlineRoom_Humans() < 2;
-
-	for (int i = 0; i < 2; i++)
-	{
-		onlineRowsModes[i].stringIndex &= MENU_ROW_LNG_MASK;
-		if (alone)
-			onlineRowsModes[i].stringIndex |= MENU_ROW_LOCKED;
-	}
+	return ONLINE_ROOM && octrOnlineMenuPath && !octrOnlineArcade && (OnlineRoom_Humans() < 2);
 }
 
 // The ONLINE menu and every box below it closed (32e) : the select's Triangle jumps back to the
@@ -222,7 +266,7 @@ static void OnlineMenus_Fresh(void)
 	OnlineMenus_Fold();
 	octrOnlineArcade = 0;
 	octrSlotGone = 0;
-	onlineAutoOpen = 0;
+	netplayScreen = NETPLAY_SCREEN_NONE;
 }
 
 // No players menu in a room (session 32b) : the room's humans, then the character select,
@@ -256,6 +300,450 @@ static void OnlineArcadeRaceType_Proc(struct RectMenu *menu)
 	MM_CHARACTER_SELECT_TRANSITION_STATE = IN_MENU;
 }
 
+// ---- NETPLAY rooms from the game (session 28) ----
+// A mode hosts its room by itself, INVITE shows the room's code, JOIN takes one. The code is a
+// few of the game's characters (web/net/code.js) : their pictures on dials, their names under
+// them. These screens are drawn by OnlineNetplay_Frame, once a frame before the menus read the
+// pad : a screen that is up takes P1's presses, and the menu under it is neither run nor drawn
+// that frame (MainFrame_RenderFrame) — but for OPENING ROOM, a line under the NETPLAY menu.
+#define NETPLAY_CODE_MIN 3
+#define NETPLAY_CODE_MAX 5
+#define NETPLAY_CHARACTERS 15
+#define NETPLAY_SLIDE_FRAMES 6
+// between two characters of a code on screen : their names side by side must not touch
+#define NETPLAY_CODE_STEP(count) (((count) > 4) ? 0x60 : ((count) > 3) ? 0x70 : 0x80)
+// DecalFont's flags are an s16 : the centring bit is its sign
+#define NETPLAY_CENTER ((s16)JUSTIFY_CENTER)
+static s8 joinDial[NETPLAY_CODE_MAX]; // the character of each dial ; kept from one JOIN to the next
+static int joinCount = NETPLAY_CODE_MIN; // dials in use
+static int joinAt;                       // the dial the pad turns
+static int joinSlide;                    // frames left of its picture sliding, signed by the way it turned
+static int joinSaid;                     // the red line (enum NetplayStatus), 0 : none
+static int askRow;                       // ACCEPT / REFUSE
+
+static void OnlineMenu_Host(int row)
+{
+	netplayRow = row;
+	if (!NativeWeb_NetplayHost())
+	{
+		OnlineMenu_ErrorBox(NETPLAY_NO_KEY);
+		return;
+	}
+	netplayScreen = NETPLAY_SCREEN_OPENING;
+	netplayFrames = NETPLAY_OPEN_FRAMES;
+}
+
+static void NetplayJoin_Open(void)
+{
+	netplayScreen = NETPLAY_SCREEN_JOIN;
+	joinAt = 0;
+	joinSlide = 0;
+	joinSaid = 0;
+	// a room joined from here does not make the NETPLAY menu « left »
+	octrFreshMenu = 0;
+}
+
+// back to the NETPLAY menu
+static void NetplayJoin_Close(void)
+{
+	netplayScreen = NETPLAY_SCREEN_NONE;
+	octrFreshMenu = 1;
+}
+
+static struct Icon *Netplay_CharacterIcon(int character)
+{
+	return GAME_TRACKER->ptrIcons[GAME_CHARACTER_METADATA[character].iconID];
+}
+
+// a character's picture centred on x, its top at y
+static void Netplay_DrawCharacter(int character, int x, int y, int scale)
+{
+	struct GameTracker *gGT = GAME_TRACKER;
+	struct Icon *icon = Netplay_CharacterIcon(character);
+	int width = FP_Mult(icon->texLayout.u1 - icon->texLayout.u0, scale);
+
+	Color tint = MakeColor(0x80, 0x80, 0x80);
+
+	// as the character select draws its icons (UI_DrawDriverIcon does not scale its texture)
+	DecalHUD_DrawPolyGT4(icon, x - (width / 2), y, &gGT->backBuffer->primMem, gGT->pushBuffer_UI.ptrOT, tint, tint, tint, tint, TRANS_50_DECAL, scale);
+}
+
+// the bordered panel every one of these screens sits on, as a menu box's ; drawn after its
+// text, so behind it. `layers` : the box's dark glass that many times (a menu box has one ; a
+// screen that covers the game is nearly opaque with three)
+static void Netplay_DrawPanel(int x, int y, int w, int h, int layers)
+{
+	RECT r = {.x = x, .y = y, .w = w, .h = h};
+	RECT glass = {.x = x + 3, .y = y + 2, .w = w - 6, .h = h - 4};
+	u32 *ot = GAME_TRACKER->backBuffer->otMem.uiOT;
+
+	RECTMENU_DrawInnerRect(&r, 0, ot);
+	for (int i = 1; i < layers; i++)
+		RECTMENU_DrawInnerRect(&glass, 2, ot);
+}
+
+// the menus' own arrow (the high scores' left / right), turned to point up or down, centred on x
+static void Netplay_DrawArrow(int x, int y, int up)
+{
+	struct GameTracker *gGT = GAME_TRACKER;
+	struct Icon *icon = (ICONGROUP_GETICONS(gGT->iconGroup[4]))[0x38];
+	Color tint = MakeColor(0x80, 0x80, 0x80);
+
+	DecalHUD_Arrow2D(icon, x, y, &gGT->backBuffer->primMem, gGT->pushBuffer_UI.ptrOT, tint, tint, tint, tint, 0, FP(1.0), up ? 0x400 : 0xc00);
+}
+
+// `count` characters in a row centred on the screen, their names under them ; `at` : the dial
+// in hand — in a square of its own, an arrow above and below it (Up / Down turn it), its name
+// lit, its picture sliding as it turns ; -1 : none
+static void Netplay_DrawCode(const s8 *code, int count, int y, int at)
+{
+	int step = NETPLAY_CODE_STEP(count);
+	int x0 = 0x100 - ((count - 1) * step) / 2;
+
+	for (int i = 0; i < count; i++)
+	{
+		int x = x0 + i * step;
+
+		Netplay_DrawCharacter(code[i], x, y + ((i == at) ? joinSlide * 2 : 0), FP(1.5));
+		DecalFont_DrawLine(GAME_LANGUAGE_STRINGS[GAME_CHARACTER_METADATA[code[i]].name_LNG_short], x, y + 0x2c, FONT_SMALL,
+		                   NETPLAY_CENTER | ((i == at) ? ORANGE : WHITE));
+		if (i == at)
+		{
+			Netplay_DrawArrow(x, y - 0x10, 1);
+			Netplay_DrawArrow(x, y + 0x40, 0);
+			Netplay_DrawPanel(x - 0x26, y - 6, 0x4c, 0x40, 1);
+		}
+	}
+}
+
+// the page's room code (one hex digit per character) as character ids ; their count
+static int Netplay_RoomCode(s8 *code)
+{
+	char text[NETPLAY_CODE_MAX + 1];
+	int n = NativeWeb_RoomCode(text, sizeof(text));
+
+	for (int i = 0; i < n; i++)
+	{
+		int id = (text[i] <= '9') ? (text[i] - '0') : (text[i] - 'a' + 10);
+
+		if ((id < 0) || (id >= NETPLAY_CHARACTERS))
+			return 0;
+		code[i] = (s8)id;
+	}
+	return (n >= NETPLAY_CODE_MIN) ? n : 0;
+}
+
+// The room's code on the menus (the tag of 32f) : its characters, small, in a box whose top
+// border carries ROOM (the user, session 28). Top right ; bottom right on the track and cup
+// selects, whose title sits top right.
+void OnlineRoom_DrawCodeTag(void)
+{
+	s8 code[NETPLAY_CODE_MAX];
+	int count = Netplay_RoomCode(code);
+	int low = (sdata->ptrActiveMenu == &MM_MENU_TRACK_SELECT) || (sdata->ptrActiveMenu == &MM_MENU_CUP_SELECT);
+	int y = low ? 0xb8 : 0x0a;
+	int w = count * 0x1a + 0x0c;
+	int x = 0x1f8 - w;
+
+	if (!count)
+		return;
+	DecalFont_DrawLine("ROOM", x + (w / 2), y - 4, FONT_SMALL, NETPLAY_CENTER | WHITE);
+	for (int i = 0; i < count; i++)
+		Netplay_DrawCharacter(code[i], x + 0x13 + i * 0x1a, y + 4, FP(0.6));
+	Netplay_DrawPanel(x, y, w, 0x18, 1);
+}
+
+static void NetplayJoin_Send(void)
+{
+	char text[NETPLAY_CODE_MAX + 1];
+
+	for (int i = 0; i < joinCount; i++)
+		text[i] = "0123456789abcde"[joinDial[i]];
+	text[joinCount] = 0;
+	joinSaid = 0;
+	if (!NativeWeb_NetplayJoin(text))
+	{
+		NetplayJoin_Close();
+		OnlineMenu_ErrorBox(NETPLAY_NO_KEY);
+		return;
+	}
+	netplayScreen = NETPLAY_SCREEN_JOINING;
+	netplayFrames = NETPLAY_OPEN_FRAMES;
+}
+
+// JOIN : Up / Down turn the dial, Left / Right change dial (Right past the last adds one, up to
+// five ; Square takes the last one away), Start or Cross on the last dial joins, Triangle goes back
+static void NetplayJoin_Frame(int tap)
+{
+	const char *said = (joinSaid == NETPLAY_NO_ROOM)   ? "NO SUCH ROOM"
+	                   : (joinSaid == NETPLAY_FULL)    ? "ROOM FULL"
+	                   : (joinSaid == NETPLAY_REFUSED) ? "THE HOST SAID NO"
+	                   : (joinSaid != 0)               ? "RELAY OFFLINE"
+	                                                   : 0;
+
+	if (joinSlide > 0)
+		joinSlide--;
+	else if (joinSlide < 0)
+		joinSlide++;
+
+	if (tap & BTN_TRIANGLE)
+	{
+		OtherFX_Play(2, 1);
+		NetplayJoin_Close();
+		return;
+	}
+	if (tap & (BTN_UP | BTN_DOWN))
+	{
+		int way = (tap & BTN_UP) ? -1 : 1;
+
+		joinDial[joinAt] = (s8)((joinDial[joinAt] + NETPLAY_CHARACTERS + way) % NETPLAY_CHARACTERS);
+		joinSlide = way * NETPLAY_SLIDE_FRAMES;
+		joinSaid = 0;
+		OtherFX_Play(0, 1);
+	}
+	else if ((tap & BTN_LEFT) && (joinAt > 0))
+	{
+		joinAt--;
+		joinSlide = 0;
+		OtherFX_Play(0, 1);
+	}
+	else if ((tap & BTN_START) || ((tap & BTN_CROSS_one) && (joinAt == joinCount - 1)))
+	{
+		OtherFX_Play(1, 1);
+		NetplayJoin_Send();
+		return;
+	}
+	else if (tap & (BTN_RIGHT | BTN_CROSS_one))
+	{
+		if (joinAt < joinCount - 1)
+			joinAt++;
+		else if ((tap & BTN_RIGHT) && (joinCount < NETPLAY_CODE_MAX))
+		{
+			joinDial[joinCount++] = 0;
+			joinAt++;
+			joinSaid = 0;
+		}
+		joinSlide = 0;
+		OtherFX_Play(0, 1);
+	}
+	else if ((tap & BTN_SQUARE_one) && (joinCount > NETPLAY_CODE_MIN))
+	{
+		joinCount--;
+		if (joinAt >= joinCount)
+			joinAt = joinCount - 1;
+		joinSaid = 0;
+		OtherFX_Play(2, 1);
+	}
+
+	DecalFont_DrawLine("ROOM CODE", 0x100, 0x1c, FONT_BIG, NETPLAY_CENTER | ORANGE);
+	Netplay_DrawCode(joinDial, joinCount, 0x48, joinAt);
+	if (joinCount < NETPLAY_CODE_MAX)
+	{
+		// the dial a longer code would use, empty : at the right of the last one
+		int step = NETPLAY_CODE_STEP(joinCount);
+
+		DecalFont_DrawLine("+", 0x100 + ((joinCount - 1) * step) / 2 + 0x30, 0x54, FONT_BIG, NETPLAY_CENTER | GRAY);
+	}
+	if (said)
+		DecalFont_DrawLine((char *)said, 0x100, 0x98, FONT_BIG, NETPLAY_CENTER | RED);
+	DecalFont_DrawLine("TRIANGLE - BACK", 0x30, 0xae, FONT_SMALL, GRAY);
+	DecalFont_DrawLine("START - JOIN", 0x1d0, 0xae, FONT_SMALL, JUSTIFY_RIGHT | WHITE);
+	if (joinCount > NETPLAY_CODE_MIN)
+		DecalFont_DrawLine("SQUARE - ONE LESS", 0x100, 0xae, FONT_SMALL, NETPLAY_CENTER | GRAY);
+	Netplay_DrawPanel(0x20, 0x12, 0x1c0, 0xaa, 3);
+}
+
+// The dials sent : the page looks for the room, then the host says yes (a guest by code is let
+// in by hand). In : this game enters the room, under the host's picture. Triangle gives up.
+static void NetplayJoining_Frame(int tap)
+{
+	int status = NativeWeb_NetplayStatus();
+
+	if (status == NETPLAY_IN_ROOM)
+	{
+		// the main menu whole again under the host's picture, as a room link finds it
+		netplayScreen = NETPLAY_SCREEN_NONE;
+		OnlineMenus_Fold();
+		MM_MENU_MAIN.state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+		return;
+	}
+	if ((status == NETPLAY_NO_KEY) || (status == NETPLAY_KEY_REFUSED))
+	{
+		NetplayJoin_Close();
+		OnlineMenu_ErrorBox(status);
+		return;
+	}
+	if ((tap & BTN_TRIANGLE) || (status >= NETPLAY_NO_KEY) || (status == NETPLAY_IDLE) || ((status == NETPLAY_BUSY) && (--netplayFrames <= 0)))
+	{
+		joinSaid = (tap & BTN_TRIANGLE) ? 0 : (status >= NETPLAY_NO_KEY) ? status : NETPLAY_OFFLINE;
+		NativeWeb_NetplayCancel();
+		OtherFX_Play(2, 1);
+		netplayScreen = NETPLAY_SCREEN_JOIN;
+		return;
+	}
+	DecalFont_DrawLine((status == NETPLAY_WAITING_HOST) ? "WAITING FOR THE HOST" : "JOINING...", 0x100, 0x1c, FONT_BIG, NETPLAY_CENTER | ORANGE);
+	Netplay_DrawCode(joinDial, joinCount, 0x48, -1);
+	DecalFont_DrawLine("TRIANGLE - BACK", 0x30, 0xae, FONT_SMALL, GRAY);
+	Netplay_DrawPanel(0x20, 0x12, 0x1c0, 0xaa, 3);
+}
+
+// A mode's room on its way : the mode's own screens once it is on, the reason in a box if not
+static void NetplayOpening_Frame(int tap)
+{
+	int status = NativeWeb_NetplayStatus();
+
+	// on once this game is its room's host in its lobby : the states before it reset the menu path
+	if (ONLINE_ROOM && (status == NETPLAY_IN_ROOM) && (octr->CurrState == LOBBY_HOST_TRACK_PICK))
+	{
+		netplayScreen = NETPLAY_SCREEN_NONE;
+		onlineMenu.rowSelected = netplayRow;
+		OnlineMenu_Proc(&onlineMenu);
+		return;
+	}
+	if ((tap & BTN_TRIANGLE) || (status >= NETPLAY_NO_KEY) || (--netplayFrames <= 0))
+	{
+		netplayScreen = NETPLAY_SCREEN_NONE;
+		NativeWeb_LeaveRoom();
+		if (tap & BTN_TRIANGLE)
+			OtherFX_Play(2, 1);
+		else
+			OnlineMenu_ErrorBox((status >= NETPLAY_NO_KEY) ? status : NETPLAY_OFFLINE);
+		return;
+	}
+	DecalFont_DrawLine("OPENING ROOM...", 0x100, 0xb8, FONT_BIG, NETPLAY_CENTER | ORANGE);
+}
+
+// INVITE : the room's code, large ; any button closes it
+static void NetplayInvite_Frame(int tap)
+{
+	s8 code[NETPLAY_CODE_MAX];
+	int count = Netplay_RoomCode(code);
+
+	if (!count || (tap & (BTN_TRIANGLE | BTN_CIRCLE | BTN_CROSS_one | BTN_SQUARE_one | BTN_SELECT | BTN_START)))
+	{
+		OtherFX_Play(2, 1);
+		netplayScreen = NETPLAY_SCREEN_NONE;
+		return;
+	}
+	DecalFont_DrawLine("INVITE", 0x100, 0x1c, FONT_BIG, NETPLAY_CENTER | ORANGE);
+	DecalFont_DrawLine("ROOM CODE", 0x100, 0x34, FONT_SMALL, NETPLAY_CENTER | WHITE);
+	Netplay_DrawCode(code, count, 0x48, -1);
+	DecalFont_DrawLine("NETPLAY - JOIN", 0x100, 0x8c, FONT_SMALL, NETPLAY_CENTER | WHITE);
+	DecalFont_DrawLine("TRIANGLE - BACK", 0x100, 0xae, FONT_SMALL, NETPLAY_CENTER | GRAY);
+	Netplay_DrawPanel(0x20, 0x12, 0x1c0, 0xaa, 3);
+}
+
+// A guest who typed the code waits at the door : ACCEPT lets it in, REFUSE (or Triangle) does not
+static void NetplayAsk_Frame(int tap)
+{
+	char name[20], line[40];
+
+	if (!NativeWeb_AskName(name, sizeof(name)))
+	{
+		// it gave up
+		netplayScreen = NETPLAY_SCREEN_NONE;
+		return;
+	}
+	if (tap & (BTN_UP | BTN_DOWN))
+	{
+		askRow ^= 1;
+		OtherFX_Play(0, 1);
+	}
+	if (tap & (BTN_CROSS_one | BTN_TRIANGLE))
+	{
+		int yes = ((tap & BTN_TRIANGLE) == 0) && (askRow == 0);
+
+		OtherFX_Play(yes ? 1 : 2, 1);
+		NativeWeb_AskAnswer(yes);
+		netplayScreen = NETPLAY_SCREEN_NONE;
+		return;
+	}
+	for (char *c = name; *c; c++)
+		if ((*c >= 'a') && (*c <= 'z'))
+			*c -= 'a' - 'A';
+	snprintf(line, sizeof(line), "%s WANTS IN", name);
+	DecalFont_DrawLine(line, 0x100, 0x40, FONT_BIG, NETPLAY_CENTER | ORANGE);
+	DecalFont_DrawLine("ACCEPT", 0x100, 0x60, FONT_BIG, NETPLAY_CENTER | ((askRow == 0) ? WHITE : GRAY));
+	DecalFont_DrawLine("REFUSE", 0x100, 0x74, FONT_BIG, NETPLAY_CENTER | ((askRow == 1) ? WHITE : GRAY));
+	Netplay_DrawPanel(0x50, 0x36, 0x160, 0x58, 3);
+}
+
+// Once a frame on the menus, after the pad was read and before the menus use it
+// (MainFrame_RenderFrame) ; 1 while one of these screens stands in for the menu
+int OnlineNetplay_Frame(void)
+{
+	char name[20];
+	int tap = sdata->buttonTapPerPlayer[0];
+	int host = ONLINE_ROOM && (octr->DriverID == 0) && (NativeWeb_NetplayStatus() == NETPLAY_IN_ROOM);
+
+	if (netplayScreen == NETPLAY_SCREEN_NONE)
+	{
+		if (!host)
+			return 0;
+		// a guest at the door comes first ; then INVITE on the pad's Select
+		if (NativeWeb_AskName(name, sizeof(name)))
+		{
+			netplayScreen = NETPLAY_SCREEN_ASK;
+			askRow = 0;
+		}
+		else if (tap & BTN_SELECT)
+		{
+			netplayScreen = NETPLAY_SCREEN_INVITE;
+			NativeWeb_Invite();
+			OtherFX_Play(1, 1);
+		}
+		else
+		{
+			// bottom left ; not over the track and cup selects' lists
+			if ((sdata->ptrActiveMenu != &MM_MENU_TRACK_SELECT) && (sdata->ptrActiveMenu != &MM_MENU_CUP_SELECT))
+				DecalFont_DrawLine("SELECT - INVITE", 0x14, 0xcc, FONT_SMALL, GRAY);
+			// a VS or BATTLE select whose only player locked : it waits here
+			if ((sdata->ptrActiveMenu == &MM_MENU_CHARACTER_SELECT) && (MM_CHARACTER_SELECT_MENU_STATE == IN_MENU) && OnlineRoom_NeedsPlayer() &&
+			    (MM_CHARACTER_SELECT_FLAGS & 1))
+			{
+				// a banner over the icons : the character is picked
+				DecalFont_DrawLine("WAITING FOR PLAYER 2", 0x100, 0x84, FONT_BIG, NETPLAY_CENTER | ORANGE);
+				Netplay_DrawPanel(0x40, 0x7c, 0x180, 0x20, 3);
+			}
+			return 0;
+		}
+		tap = 0;
+	}
+	RECTMENU_ClearInput();
+	switch (netplayScreen)
+	{
+	case NETPLAY_SCREEN_OPENING:
+		NetplayOpening_Frame(tap);
+		return 0;
+	case NETPLAY_SCREEN_JOIN:
+		NetplayJoin_Frame(tap);
+		break;
+	case NETPLAY_SCREEN_JOINING:
+		NetplayJoining_Frame(tap);
+		break;
+	case NETPLAY_SCREEN_INVITE:
+		NetplayInvite_Frame(tap);
+		break;
+	case NETPLAY_SCREEN_ASK:
+		NetplayAsk_Frame(tap);
+		break;
+	}
+	return 1;
+}
+
+// for the debug bridge (platform/web_debug_bridge.c, debug web builds) : what these screens show
+void OnlineNetplay_Debug(s32 *out)
+{
+	out[0] = netplayScreen;
+	out[1] = joinCount;
+	out[2] = joinAt;
+	out[3] = joinSaid;
+	for (int i = 0; i < NETPLAY_CODE_MAX; i++)
+		out[4 + i] = joinDial[i];
+	out[9] = (sdata->ptrActiveMenu == &MM_MENU_CHARACTER_SELECT) && (MM_CHARACTER_SELECT_MENU_STATE == IN_MENU) && OnlineRoom_NeedsPlayer() &&
+	         ((MM_CHARACTER_SELECT_FLAGS & 1) != 0);
+}
+
 static void OnlineMenu_Proc(struct RectMenu *menu)
 {
 	s16 row = menu->rowSelected;
@@ -265,8 +753,19 @@ static void OnlineMenu_Proc(struct RectMenu *menu)
 		menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
 		return;
 	}
-	if (row < -1 || row > 2 || !ONLINE_ROOM)
+	if (row < -1 || row > ONLINE_JOIN_ROW)
 	{
+		return;
+	}
+	if (row == ONLINE_JOIN_ROW)
+	{
+		NetplayJoin_Open();
+		return;
+	}
+	// a mode hosts the room by itself (session 28) : its screens come once the room is on
+	if (!ONLINE_ROOM)
+	{
+		OnlineMenu_Host(row);
 		return;
 	}
 
@@ -328,8 +827,10 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 	if (!octrBootOnline) // ctr-native: one build, runtime
 	{
 		GAME_LANGUAGE_STRINGS[ONLINE_LNG_ROW] = "NETPLAY";
-		GAME_LANGUAGE_STRINGS[ONLINE_LNG_NO_KEY] = "NO RELAY KEY";
-		GAME_LANGUAGE_STRINGS[ONLINE_LNG_OPEN_SETTINGS] = "OPEN NETPLAY SETTINGS";
+		GAME_LANGUAGE_STRINGS[ONLINE_LNG_JOIN] = "JOIN";
+		GAME_LANGUAGE_STRINGS[ONLINE_LNG_NO_KEY] =
+		    (netplayError == NETPLAY_OFFLINE) ? "RELAY OFFLINE" : (netplayError == NETPLAY_KEY_REFUSED) ? "KEY REFUSED" : "NO RELAY KEY";
+		GAME_LANGUAGE_STRINGS[ONLINE_LNG_OPEN_SETTINGS] = (netplayError == NETPLAY_OFFLINE) ? "TRY AGAIN" : "OPEN SETTINGS";
 		GAME_LANGUAGE_STRINGS[ONLINE_LNG_BACK] = "BACK";
 		MM_MENU_MAIN.rows = (MM_MENU_MAIN.rows == MM_ROWS_MAIN_WITH_SCRAPBOOK) ? onlineRowsMainWithScrapbook : onlineRowsMainBasic;
 		onlineMenu.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
@@ -338,17 +839,6 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		onlineMenuRaceType.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
 		onlineMenuNoKey.posX_curr = MM_MENU_RACE_TYPE.posX_curr;
 		onlineMenuNoKey.posY_curr = MM_MENU_RACE_TYPE.posY_curr;
-		OnlineMenu_ToggleModeRows();
-		// the room NETPLAY asked for is on : its menu, as the row would open it
-		if (onlineAutoOpen && !ONLINE_ROOM)
-			onlineAutoOpen--;
-		if (onlineAutoOpen && ONLINE_ROOM && ((mainMenu->state & DRAW_NEXT_MENU_IN_HIERARCHY) == 0))
-		{
-			onlineAutoOpen = 0;
-			octrFreshMenu = 1;
-			mainMenu->ptrNextBox_InHierarchy = &onlineMenu;
-			mainMenu->state |= ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY;
-		}
 	}
 #endif
 
@@ -383,7 +873,7 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 			octrOnlineArcade = 0;
 			// back here after a room (the pause menu's QUIT, Triangle up, the page's Leave) : out
 			// of it, the menus new ; a guest resting here in its room's lobby stays
-			if (octrFreshMenu && !onlineAutoOpen && (!ONLINE_ROOM || (octr->DriverID == 0)))
+			if (octrFreshMenu && (!ONLINE_ROOM || (octr->DriverID == 0)))
 			{
 				octrFreshMenu = 0;
 				NativeWeb_LeaveRoom();
@@ -462,10 +952,6 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 	GAME_TRACKER->gameMode2 &= ~(CUP_ANY_KIND);
 
 	mainMenu->state |= ONLY_DRAW_TITLE;
-#ifdef USE_ONLINE
-	// the ONLINE menu opens by itself only right after NETPLAY (below)
-	onlineAutoOpen = 0;
-#endif
 
 	// Default to 3,
 	// this intentionally disables the 1-lap cheat
@@ -559,20 +1045,7 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 	// ctr-native: one build — Online
 	case ONLINE_LNG_ROW:
 	{
-		if (!ONLINE_ROOM)
-		{
-			// no room yet : the page hosts one (its menu opens once it is on), and the
-			// main menu stays whole meanwhile ; no relay key saved : the box says why
-			if (NativeWeb_NetplayHost())
-			{
-				onlineAutoOpen = ONLINE_AUTO_OPEN_FRAMES;
-				mainMenu->state &= ~ONLY_DRAW_TITLE;
-				return;
-			}
-			mainMenu->ptrNextBox_InHierarchy = &onlineMenuNoKey;
-			mainMenu->state |= DRAW_NEXT_MENU_IN_HIERARCHY;
-			return;
-		}
+		// its menu at once, room or not (session 28) : a mode hosts one, JOIN looks for one
 		octrFreshMenu = 1;
 		mainMenu->ptrNextBox_InHierarchy = &onlineMenu;
 		mainMenu->state |= DRAW_NEXT_MENU_IN_HIERARCHY;
@@ -930,16 +1403,10 @@ void MM_MenuProc_SingleCup(struct RectMenu *menu)
 	// if mode is VS
 
 #ifdef USE_ONLINE
-	// ctr-native: ONLINE > VS has no players menu, the room's humans play (session 32b) ; the
-	// last guest gone meanwhile : back to the ONLINE menu, its VS row grey
+	// ctr-native: ONLINE > VS has no players menu, the room's humans play (session 32b) — one
+	// alone too (session 28 : its character select waits for a second)
 	if (ONLINE_ROOM && octrOnlineMenuPath)
 	{
-		if (OnlineRoom_Humans() < 2)
-		{
-			menu->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
-			previousMenuOwner->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
-			return;
-		}
 		OnlineMenu_ToCharacters(menu);
 		return;
 	}

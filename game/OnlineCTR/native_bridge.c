@@ -92,6 +92,11 @@ int NativeOnlineGame_PadHeld(int slot)
 	return sdata->gGamepads->gamepad[slot].buttonsHeldCurrFrame;
 }
 
+int NativeOnlineGame_SelectIsInvite(void)
+{
+	return octrExternalLobby && ((sdata->gGT->gameMode1 & MAIN_MENU) != 0);
+}
+
 void NativeOnlineGame_SetPad(int slot, int held, int tapped, int released, int prev)
 {
 	struct GamepadBuffer *pad = &sdata->gGamepads->gamepad[slot];

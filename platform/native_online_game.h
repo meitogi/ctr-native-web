@@ -31,6 +31,9 @@ void NativeOnlineGame_SetCharacterID(int slot, int characterID);
 
 // gGamepads->gamepad[slot]
 int NativeOnlineGame_PadHeld(int slot);
+// 1 on the web lobby's menus : the pad's Select is the room's INVITE there (session 28), not the
+// mod's « leave the room » — the main menu's top level leaves it
+int NativeOnlineGame_SelectIsInvite(void);
 void NativeOnlineGame_SetPad(int slot, int held, int tapped, int released, int prev);
 void NativeOnlineGame_SetPadStick(int slot, int stickLX, int stickLY);
 

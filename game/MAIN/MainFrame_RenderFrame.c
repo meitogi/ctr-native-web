@@ -51,6 +51,15 @@ void MainFrame_RenderFrame(struct GameTracker *gGT, struct GamepadSystem *gGamep
 		RECTMENU_CollectInput();
 	}
 
+#ifdef USE_ONLINE
+	// ctr-native: NETPLAY's own screens (session 28), ahead of the menus' input ; one that stands
+	// in for the menu : the menu is neither run nor drawn this frame
+	if (!octrBootOnline && (sdata->ptrActiveMenu != 0) && ((gGT->gameMode1 & MAIN_MENU) != 0) && (sdata->Loading.stage == LOAD_IDLE) &&
+	    OnlineNetplay_Frame())
+	{
+	}
+	else
+#endif
 	if (sdata->ptrActiveMenu != 0)
 	{
 		if (sdata->Loading.stage == LOAD_IDLE)

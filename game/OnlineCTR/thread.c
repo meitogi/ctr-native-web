@@ -168,7 +168,10 @@ void octr_ThreadFunc(struct Thread* t) // ctr-native: ThreadFunc is a typedef
 
 	// ctr-native: the page's room, top right on the menus (session 32f)
 	if (octrExternalLobby && (gGT->gameMode1 & MAIN_MENU))
+	{
 		OnlineRoom_DrawTag();
+		OnlineRoom_DrawCodeTag();
+	}
 
 	// ctr-native: what the host's guests learn beside the wire (session 32) : its AI's karts,
 	// by clientID (= slot here), its takeovers mid-race included

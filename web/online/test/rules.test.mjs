@@ -94,3 +94,26 @@ test('32f roomTag : 4 characters the game\'s capitals draw unambiguously, stable
   for (let i = 0; i < 2000; i++) seen.add(roomTag(Math.random().toString(36).slice(2, 13)));
   assert.ok(seen.size >= 1995, `${seen.size} distinct tags of 2000`);
 });
+
+test('openFreeRoom : a code another host holds is drawn again ; three taken in a row and the code grows, up to five', async () => {
+  const { openFreeRoom } = await import('../rules.js');
+  const run = async (takenFirst, length = 3) => {
+    const lengths = [];
+    let closed = 0;
+    const room = await openFreeRoom({
+      length,
+      open: async (n) => {
+        lengths.push(n);
+        return { room: { n, close: () => closed++ }, taken: lengths.length <= takenFirst };
+      },
+    });
+    return { kept: room.n, lengths, closed };
+  };
+  assert.deepEqual(await run(0), { kept: 3, lengths: [3], closed: 0 });
+  assert.deepEqual(await run(2), { kept: 3, lengths: [3, 3, 3], closed: 2 });
+  assert.deepEqual(await run(3), { kept: 4, lengths: [3, 3, 3, 4], closed: 3 });
+  assert.deepEqual((await run(6)).lengths, [3, 3, 3, 4, 4, 4, 5]);
+  // five is the longest : it keeps drawing there
+  assert.deepEqual((await run(11)).lengths.slice(-3), [5, 5, 5]);
+  assert.deepEqual((await run(1, 4)).lengths, [4, 4]);
+});

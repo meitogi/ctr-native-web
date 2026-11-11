@@ -25,6 +25,8 @@ void NativeOnlineGame_SetNumLaps(int numLaps) { stub.numLaps = (signed char)numL
 int NativeOnlineGame_CharacterID(int slot) { return stub.characterIDs[slot]; }
 void NativeOnlineGame_SetCharacterID(int slot, int characterID) { stub.characterIDs[slot] = (short)characterID; }
 int NativeOnlineGame_PadHeld(int slot) { return stub.pads[slot].held; }
+// the mod's own flow here (no web lobby) : Select leaves the room
+int NativeOnlineGame_SelectIsInvite(void) { return 0; }
 
 void NativeOnlineGame_SetPad(int slot, int held, int tapped, int released, int prev)
 {

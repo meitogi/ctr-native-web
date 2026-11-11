@@ -71,6 +71,9 @@ int OnlineSlot_IsBot(int slot);   // a bot's kart, or one the AI took over : its
 int OnlineRoom_HostQuit(void);    // the host's QUIT YES in the room's race : 1 when the room's reset takes it over
 void OnlineRoom_GuestQuit(void);  // a guest's QUIT YES in the room's race : the page keeps the room (32f)
 void OnlineRoom_DrawTag(void);    // the page's room tag, top right on the menus (32f)
+void OnlineRoom_DrawCodeTag(void); // the same for a room with a code : its characters (game/230/MM_MenuFlow.c, 28)
+void OnlineNetplay_Debug(s32 *out); // what they show, for the debug bridge
+int OnlineNetplay_Frame(void);    // NETPLAY's screens over the menus : the room opening, JOIN, INVITE, the door (28)
 void OnlineRoom_EndOfRace(void);  // every frame of the end of race : the humans left ; a Cup counted (host), its standings
 int OnlineCup_Showing(void);      // the standings replace the results
 // Session 32d, the Netplay pause (D12.9) and the host's skip (D12.10)
