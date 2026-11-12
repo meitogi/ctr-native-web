@@ -85,12 +85,16 @@ static struct MenuRow onlineRowsMainWithScrapbook[9] =
 // JOIN, beside the three modes (session 28) : its string takes a slot as NETPLAY's does
 #define ONLINE_LNG_JOIN 0x9e
 #define ONLINE_JOIN_ROW 3
-static struct MenuRow onlineRowsModes[5] =
+// MORE INFO, under them (session 29) : what NETPLAY is and its limits, asked for
+#define ONLINE_LNG_INFO 0xa1
+#define ONLINE_INFO_ROW 4
+static struct MenuRow onlineRowsModes[6] =
 {
 	{0x4F, 0, 1, 0, 0},
 	{0x50, 0, 2, 1, 1},
 	{LNG_ARCADE, 1, 3, 2, 2},
-	{ONLINE_LNG_JOIN, 2, 3, 3, 3},
+	{ONLINE_LNG_JOIN, 2, 4, 3, 3},
+	{ONLINE_LNG_INFO, 3, 4, 4, 4},
 	{RECTMENU_STRING_NONE},
 };
 static void OnlineMenu_Proc(struct RectMenu *menu);
@@ -164,6 +168,7 @@ static int netplayFrames; // left for that room
 static int netplayError;  // the box's reason (enum NetplayStatus)
 static int netplayCouch;  // the room on its way is Couch's (session 29), not a NETPLAY mode's
 static int netplayHelp;   // the help page up : 0 NETPLAY's, 1 Couch's
+static int netplayHelpBack; // the screen it goes back to (INVITE, or none : the NETPLAY menu)
 static struct MenuRow onlineRowsNoKey[3] =
 {
 	{ONLINE_LNG_OPEN_SETTINGS, 0, 1, 0, 0},
@@ -181,6 +186,7 @@ static struct RectMenu onlineMenuNoKey =
 
 static void OnlineMenu_Host(int row);
 static void NetplayJoin_Open(void);
+static void NetplayHelp_Open(int couch, int back);
 
 // The box under the NETPLAY menu : why the room did not open
 static void OnlineMenu_ErrorBox(int status)
@@ -659,21 +665,30 @@ static void NetplayOpening_Frame(int tap)
 	DecalFont_DrawLine("OPENING ROOM...", 0x100, 0xb8, FONT_BIG, NETPLAY_CENTER | ORANGE);
 }
 
-// INVITE : the room's code, large ; any button closes it. A Couch room's (session 29) has two
-// rows : BACK, and STOP COUCH, which closes the room where the host stands.
+// INVITE : the room's code, large, and its rows (session 29) : BACK ; MORE INFO, the help page,
+// which comes back here ; and for a Couch room STOP COUCH, which closes it where the host
+// stands. Triangle, Select and the other buttons close the box as BACK does.
 static void NetplayInvite_Frame(int tap)
 {
 	s8 code[NETPLAY_CODE_MAX];
 	int couch = !ONLINE_ROOM;
+	int rows = couch ? 3 : 2;
 	int count = Netplay_RoomCode(code);
+	static const char *const labels[3] = {"BACK", "MORE INFO", "STOP COUCH"};
 
-	if (couch && count && (tap & (BTN_UP | BTN_DOWN)))
+	if (count && (tap & (BTN_UP | BTN_DOWN)))
 	{
-		askRow ^= 1;
+		askRow = (askRow + ((tap & BTN_DOWN) ? 1 : rows - 1)) % rows;
 		OtherFX_Play(0, 1);
 		tap = 0;
 	}
-	if (couch && count && (tap & BTN_CROSS_one) && (askRow == 1))
+	if (count && (tap & BTN_CROSS_one) && (askRow == 1))
+	{
+		OtherFX_Play(1, 1);
+		NetplayHelp_Open(couch, NETPLAY_SCREEN_INVITE);
+		return;
+	}
+	if (count && (tap & BTN_CROSS_one) && (askRow == 2))
 	{
 		OtherFX_Play(2, 1);
 		NativeWeb_CouchStop();
@@ -686,24 +701,14 @@ static void NetplayInvite_Frame(int tap)
 		netplayScreen = NETPLAY_SCREEN_NONE;
 		return;
 	}
-	if (couch)
-	{
-		DecalFont_DrawLine("INVITE", 0x100, 0x16, FONT_BIG, NETPLAY_CENTER | ORANGE);
-		DecalFont_DrawLine("ROOM CODE", 0x100, 0x2a, FONT_SMALL, NETPLAY_CENTER | WHITE);
-		Netplay_DrawCode(code, count, 0x38, -1);
-		// a Share room's guest has no game : its code is typed on the page (28b)
-		DecalFont_DrawLine("HOME PAGE - JOIN A ROOM", 0x100, 0x76, FONT_SMALL, NETPLAY_CENTER | WHITE);
-		DecalFont_DrawLine("BACK", 0x100, 0x8e, FONT_BIG, NETPLAY_CENTER | ((askRow == 0) ? WHITE : GRAY));
-		DecalFont_DrawLine("STOP COUCH", 0x100, 0xa2, FONT_BIG, NETPLAY_CENTER | ((askRow == 1) ? WHITE : GRAY));
-		Netplay_DrawPanel(0x20, 0x10, 0x1c0, 0xac, 3);
-		return;
-	}
-	DecalFont_DrawLine("INVITE", 0x100, 0x1c, FONT_BIG, NETPLAY_CENTER | ORANGE);
-	DecalFont_DrawLine("ROOM CODE", 0x100, 0x34, FONT_SMALL, NETPLAY_CENTER | WHITE);
-	Netplay_DrawCode(code, count, 0x48, -1);
-	DecalFont_DrawLine("NETPLAY - JOIN", 0x100, 0x8c, FONT_SMALL, NETPLAY_CENTER | WHITE);
-	DecalFont_DrawLine("TRIANGLE - BACK", 0x100, 0xae, FONT_SMALL, NETPLAY_CENTER | GRAY);
-	Netplay_DrawPanel(0x20, 0x12, 0x1c0, 0xaa, 3);
+	DecalFont_DrawLine("INVITE", 0x100, 0x16, FONT_BIG, NETPLAY_CENTER | ORANGE);
+	DecalFont_DrawLine("ROOM CODE", 0x100, 0x2a, FONT_SMALL, NETPLAY_CENTER | WHITE);
+	Netplay_DrawCode(code, count, 0x38, -1);
+	// a Share room's guest has no game : its code is typed on the page (28b)
+	DecalFont_DrawLine(couch ? "HOME PAGE - JOIN A ROOM" : "NETPLAY - JOIN", 0x100, 0x72, FONT_SMALL, NETPLAY_CENTER | WHITE);
+	for (int i = 0; i < rows; i++)
+		DecalFont_DrawLine((char *)labels[i], 0x100, (couch ? 0x82 : 0x8c) + i * 0x12, FONT_BIG, NETPLAY_CENTER | ((askRow == i) ? WHITE : GRAY));
+	Netplay_DrawPanel(0x20, 0x10, 0x1c0, 0xac, 3);
 }
 
 // ---- Couch from the game, and the players who are in (session 29) ----
@@ -754,13 +759,14 @@ static void CouchOpening_Frame(int tap)
 	Netplay_DrawPanel(0x40, 0x7c, 0x180, 0x20, 3);
 }
 
-// Before NETPLAY's menu, and before a Couch room opens (the user, session 29) : what it is and
-// its limits, said every time — NETPLAY is one player per browser, each with their own disc ;
-// Couch streams the host's screen, so some delay, and takes several players on the host's
-// machine but one per guest. Cross goes on, Triangle goes back with nothing launched.
-static void NetplayHelp_Open(int couch)
+// MORE INFO (the user, session 29) : what NETPLAY or Couch is and its limits, asked for from the
+// NETPLAY menu or from a room's INVITE — NETPLAY is one player per browser, each with their own
+// disc ; Couch streams the host's screen, so some delay, and takes several players on the host's
+// machine but one per guest. Any button goes back where it was asked from.
+static void NetplayHelp_Open(int couch, int back)
 {
 	netplayHelp = couch;
+	netplayHelpBack = back;
 	netplayScreen = NETPLAY_SCREEN_HELP;
 }
 
@@ -773,28 +779,16 @@ static void NetplayHelp_Frame(int tap)
 	};
 	int count = (lines[netplayHelp][4] != NULL) ? 5 : 4;
 
-	if (tap & (BTN_CROSS_one | BTN_START))
-	{
-		OtherFX_Play(1, 1);
-		netplayScreen = NETPLAY_SCREEN_NONE;
-		if (netplayHelp)
-			Couch_Start();
-		return;
-	}
-	if (tap & BTN_TRIANGLE)
+	if (tap & (BTN_TRIANGLE | BTN_CIRCLE | BTN_CROSS_one | BTN_SQUARE_one | BTN_SELECT | BTN_START))
 	{
 		OtherFX_Play(2, 1);
-		netplayScreen = NETPLAY_SCREEN_NONE;
-		// NETPLAY's menu opened under the page : closed, the main menu again
-		if (!netplayHelp)
-			MM_MENU_MAIN.state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+		netplayScreen = netplayHelpBack;
 		return;
 	}
 	DecalFont_DrawLine(netplayHelp ? "COUCH" : "NETPLAY", 0x100, 0x1a, FONT_BIG, NETPLAY_CENTER | ORANGE);
 	for (int i = 0; i < count; i++)
 		DecalFont_DrawLine((char *)lines[netplayHelp][i], 0x100, 0x34 + i * 0x0c, FONT_SMALL, NETPLAY_CENTER | WHITE);
-	DecalFont_DrawLine(netplayHelp ? "OPEN THE ROOM" : "CONTINUE", 0x100, 0x88, FONT_BIG, NETPLAY_CENTER | WHITE);
-	DecalFont_DrawLine("TRIANGLE - BACK", 0x100, 0xa6, FONT_SMALL, NETPLAY_CENTER | GRAY);
+	DecalFont_DrawLine("BACK", 0x100, 0x88, FONT_BIG, NETPLAY_CENTER | WHITE);
 	Netplay_DrawPanel(0x20, 0x12, 0x1c0, 0xaa, 3);
 }
 
@@ -998,7 +992,7 @@ int OnlineNetplay_Frame(void)
 		{
 			if (!couchSelect || ((tap & BTN_SELECT) == 0))
 				return 0;
-			NetplayHelp_Open(1);
+			Couch_Start();
 			OtherFX_Play(1, 1);
 		}
 		// a guest at the door comes first ; then INVITE on the pad's Select
@@ -1124,8 +1118,13 @@ static void OnlineMenu_Proc(struct RectMenu *menu)
 		menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
 		return;
 	}
-	if (row < -1 || row > ONLINE_JOIN_ROW)
+	if (row < -1 || row > ONLINE_INFO_ROW)
 	{
+		return;
+	}
+	if (row == ONLINE_INFO_ROW)
+	{
+		NetplayHelp_Open(0, NETPLAY_SCREEN_NONE);
 		return;
 	}
 	if (row == ONLINE_JOIN_ROW)
@@ -1199,6 +1198,7 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 	{
 		GAME_LANGUAGE_STRINGS[ONLINE_LNG_ROW] = "NETPLAY";
 		GAME_LANGUAGE_STRINGS[ONLINE_LNG_JOIN] = "JOIN";
+		GAME_LANGUAGE_STRINGS[ONLINE_LNG_INFO] = "MORE INFO";
 		GAME_LANGUAGE_STRINGS[ONLINE_LNG_NO_KEY] =
 		    (netplayError == NETPLAY_OFFLINE) ? "RELAY OFFLINE" : (netplayError == NETPLAY_KEY_REFUSED) ? "KEY REFUSED" : "NO RELAY KEY";
 		GAME_LANGUAGE_STRINGS[ONLINE_LNG_OPEN_SETTINGS] = (netplayError == NETPLAY_OFFLINE) ? "TRY AGAIN" : "OPEN SETTINGS";
@@ -1423,10 +1423,6 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		octrFreshMenu = 1;
 		mainMenu->ptrNextBox_InHierarchy = &onlineMenu;
 		mainMenu->state |= DRAW_NEXT_MENU_IN_HIERARCHY;
-		// what NETPLAY is and its limits first, over its menu (the user, session 29) ; a guest
-		// resting here in its room has read it
-		if (!ONLINE_ROOM)
-			NetplayHelp_Open(0);
 		return;
 	}
 #endif

@@ -68,9 +68,7 @@ export async function pressUntil(tab, key, label, done, tries = 6) {
 /** Main menu → NETPLAY's own menu. */
 export async function toNetplay(tab) {
 	await menuTo(tab, 'NETPLAY', dir => tab.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
-	// its help page first (session 29), then Cross : the menu
-	const s = await pressUntil(tab, CROSS, 'the NETPLAY menu, or its help page', s => s.sub?.title === 'NETPLAY')
-	return s.netplay?.screen === 'help' ? pressUntil(tab, CROSS, 'the NETPLAY menu past its help page', s => s.sub?.title === 'NETPLAY' && s.netplay.screen === 'none') : s
+	return pressUntil(tab, CROSS, 'the NETPLAY menu', s => s.sub?.title === 'NETPLAY')
 }
 
 /** The NETPLAY menu's cursor on `label` (VS. / BATTLE / ARCADE / JOIN). */

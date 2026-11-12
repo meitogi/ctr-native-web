@@ -1668,15 +1668,15 @@ The native build keeps the retail boxes.
 
 **D15.3 — Couch on.** On that select the pad's Select (the Space key) opens a Couch room, on the
 relay and key of Settings › Netplay — one relay, one key for Netplay and Couch
-(`NativeWeb_CouchStart`, the page's `couchStart`) — after its help page (D15.8). OPENING ROOM...
-until it is on (Triangle cancels), then INVITE by itself : the code and HOME PAGE - JOIN A ROOM.
+(`NativeWeb_CouchStart`, the page's `couchStart`). OPENING ROOM... until it is on (Triangle
+cancels), then INVITE by itself : the code, HOME PAGE - JOIN A ROOM, and its rows (D15.4, D15.8).
 With no key : NO RELAY KEY (OPEN SETTINGS /
 BACK) ; a refused key : KEY REFUSED ; a relay that does not answer : RELAY OFFLINE (TRY AGAIN /
 BACK) — a box over the select, Triangle is BACK. Once on, the menus show the room's tag and Select
 is INVITE (D14.5) ; a guest let in is a player more, with a cursor on the select at once.
 
-**D15.4 — Couch off.** A Couch room's INVITE has two rows : BACK (Cross, Triangle or Select again)
-and STOP COUCH (Down, Cross), which closes the room where the host stands. Going back to the main
+**D15.4 — Couch off.** A Couch room's INVITE has three rows : BACK (Cross, Triangle or Select
+again), MORE INFO (D15.8) and STOP COUCH, which closes the room where the host stands. Going back to the main
 menu closes it too, as it closes a Netplay room — a race's QUIT included. The guests are told : one
 who came by code is back on its dials under THE HOST LEFT, a link's guest reads its page's own
 line.
@@ -1697,12 +1697,13 @@ and its key — the Netplay tab's own, typed in either —, the video bitrate, w
 button : Couch starts in the game. A build without Netplay has none of these screens in its game :
 its panel keeps its own relay, key and buttons, and the link alone joins. The relay is not changed.
 
-**D15.8 — The limits, said before the launch.** Picking NETPLAY in the main menu, and Select on
-the select before a Couch room opens, show a page first, every time (`NetplayHelp_Frame`) : what
-the mode is and what it cannot do. NETPLAY : everyone on their own screen, each with their own
+**D15.8 — The limits, under MORE INFO.** First shown before each launch (b.8), then moved where
+it is asked for (the user, b.10) : nothing stands between the player and the room. A room's INVITE
+— Couch's or Netplay's — has a row MORE INFO, and the NETPLAY menu a fifth row of that name ; it
+opens a page (`NetplayHelp_Frame`) saying what the mode is and what it cannot do, and any button
+goes back to the code, or to the menu. NETPLAY : everyone on their own screen, each with their own
 disc, one player per browser, up to four in a room. Couch : the host's screen is streamed — no disc
 needed, some delay for the guests —, several players on the host's machine and one per guest, four
-in all. Cross goes on, Triangle goes back with nothing launched ; a guest resting on the main menu
-in its room is not shown NETPLAY's again. The page's Settings › Help says the same, with how a
-player joins and leaves, while the game runs. What comes next (several players per guest, per
-Netplay browser) is the README's to say, not the game's.
+in all. The page's Settings › Help says the same, with how a player joins and leaves, while the
+game runs. What comes next (several players per guest, per Netplay browser) is the README's to
+say, not the game's.

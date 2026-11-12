@@ -443,18 +443,10 @@ async function pick(tab, press, label) {
 	await sleep(600)
 }
 const ONLINE_ROWS = g => !g?.charSelect && /VS|BATTLE|ARCADE/.test(cur(g)?.label ?? '')
-/** NETPLAY's help page (session 29), up over its menu with no room joined : Cross goes on. */
-async function pastHelp(tab, press) {
-	await sleep(500)
-	if ((await game(tab))?.netplay?.screen !== 'help') return
-	await press('cross')
-	await untilGame(tab, 'the help page closed', g => g.netplay?.screen === 'none', 5000)
-}
 /** NETPLAY on the main menu, then Cross : the ONLINE menu. */
 async function openOnlineMenu(ctx, tab, press) {
 	await menuTo(ctx, 'NETPLAY', press)
 	await press('cross')
-	await pastHelp(tab, press)
 	return untilGame(tab, 'the ONLINE menu', ONLINE_ROWS, 8000)
 }
 /**
@@ -582,7 +574,6 @@ async function arcadeGuestBack(ctx) {
 		if (out.role && out.role !== 'none') throw new Error(`still in the room on the main menu (${out.role}) || ${steps.join(' | ')}`)
 		await menuTo(ctx, 'NETPLAY', press)
 		await press('cross')
-		await pastHelp(host, press)
 		const g = await untilGame(host, 'the NETPLAY menu again', ONLINE_ROWS, 20_000)
 		await sleep(500)
 		await note('NETPLAY again')
@@ -731,7 +722,6 @@ async function selectGuestBack(ctx) {
 		await wait('the main menu', g => !g.charSelect && !g.sub && g.menu?.input, 10_000)
 		await menuTo(ctx, 'NETPLAY', press)
 		await press('cross')
-		await pastHelp(host, press)
 		await sleep(2000)
 		const g = await note('NETPLAY again')
 		if (g?.charSelect || cur(g)?.label !== 'VS.') throw new Error(`NETPLAY again not on a fresh ONLINE menu || ${steps.join(' | ')}`)

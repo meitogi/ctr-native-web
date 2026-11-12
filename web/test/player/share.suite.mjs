@@ -152,9 +152,8 @@ export async function share(ctx) {
 			await press('c', 'the character select', g => !!g.charSelect)
 			await new Promise(r => setTimeout(r, 1500))
 		}
-		// Select : Couch's help page ; Cross opens the room, INVITE comes by itself
-		await press(' ', 'Couch\'s help page', g => g.netplay.screen === 'help')
-		await ctx.press('c')
+		// Select opens the room ; INVITE comes by itself
+		await ctx.press(' ')
 		await until('INVITE, by itself', g => g.netplay.screen === 'invite' && g.netplay.share)
 		await press('c', 'INVITE closed by BACK', g => g.netplay.screen === 'none')
 	}

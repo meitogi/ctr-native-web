@@ -85,7 +85,7 @@ const en = {
       'Your screen is streamed to them, so they may see some delay.',
       'Several players on this machine, one per guest browser — four in all.',
       'Direct connections only : a guest who cannot reach this machine directly is told so.',
-      'Select again shows the code, and Stop couch. Going back to the main menu closes the room too.',
+      'Select again shows the code, More info and Stop couch. Going back to the main menu closes the room too.',
     ] },
     { title: 'Netplay — everyone on their own screen', lines: [
       'Each player runs their own game, with their own disc.',
@@ -278,7 +278,7 @@ const fr = {
       'Ton écran leur est diffusé : ils peuvent voir un peu de délai.',
       'Plusieurs joueurs sur cette machine, un seul par navigateur invité — quatre en tout.',
       'Connexions directes uniquement : un invité qui ne peut pas joindre cette machine directement en est prévenu.',
-      'Select de nouveau montre le code, et Stop couch. Revenir au menu principal ferme aussi la room.',
+      'Select de nouveau montre le code, More info et Stop couch. Revenir au menu principal ferme aussi la room.',
     ] },
     { title: 'Netplay — chacun sur son écran', lines: [
       'Chaque joueur lance son propre jeu, avec son propre disque.',

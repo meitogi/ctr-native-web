@@ -66,15 +66,10 @@ async function hostOnSelect(ctx, { relay = ctx.args.relay, rk = ctx.args.rk } = 
 	return { origin, host }
 }
 
-/** Select on the select : the help page ; Cross on it : what comes next (OPENING ROOM, or a box). */
-async function couchAsk(host) {
-	const s = await pressUntil(host, SELECT, 'Couch\'s help page', g => g.netplay.screen === 'help')
-	if (s.netplay.help !== 'couch') throw new Error(`Select opened the help page of ${s.netplay.help}`)
-	await host.press(CROSS)
-	return s
-}
+/** Select on the select : the room is asked for at once (OPENING ROOM, or a box saying why not). */
+const couchAsk = host => host.press(SELECT)
 
-/** Select, the help page, Cross : OPENING ROOM, then INVITE by itself. */
+/** Select : OPENING ROOM, then INVITE by itself. */
 async function couchOn(ctx, host) {
 	await couchAsk(host)
 	const s = await untilGame(host, 'INVITE, by itself', g => g.netplay.screen === 'invite' && g.netplay.share, 30_000)
@@ -173,18 +168,21 @@ async function couchOnOff(ctx) {
 		let s = await game(host)
 		if (s.netplay.share || (await shareState(ctx)).sharing) throw new Error('Couch is on before Select')
 		await shot(ctx, 'select-couch-hint')
-		// the help page : Triangle goes back with nothing opened
-		await pressUntil(host, SELECT, 'Couch\'s help page', g => g.netplay.screen === 'help')
-		await shot(ctx, 'couch-help')
-		s = await pressUntil(host, TRIANGLE, 'Triangle on the help page', g => g.netplay.screen === 'none')
-		if (!s.charSelect || s.netplay.share || (await shareState(ctx)).sharing) throw new Error('Triangle on the help page opened something, or left the select')
-		steps.push('Select → the help page ; Triangle → the select, nothing opened')
 		const { share } = await couchOn(ctx, host)
 		const link = new URLSearchParams(share.link.split('#')[1])
 		if (link.get('relay') !== ctx.args.relay || link.get('rk') !== ctx.args.rk) throw new Error(`the room is on ${link.get('relay')}, not on the Netplay settings' relay`)
 		if (await ctx.js("return localStorage.getItem('ctr-share.relay') || localStorage.getItem('ctr-share.rk')")) throw new Error('the Share panel\'s own relay or key was written')
 		await shot(ctx, 'invite-by-itself')
 		steps.push(`Select → INVITE by itself, the room on ${link.get('relay')} (Settings › Netplay), code ${share.code}`)
+		// MORE INFO : the help page, and back on the code with the room untouched
+		await pressUntil(host, 'ArrowDown', 'the cursor on MORE INFO', g => g.netplay.row === 1)
+		s = await pressUntil(host, CROSS, 'MORE INFO', g => g.netplay.screen === 'help')
+		if (s.netplay.help !== 'couch') throw new Error(`MORE INFO opened the help page of ${s.netplay.help}`)
+		await shot(ctx, 'couch-help')
+		s = await pressUntil(host, TRIANGLE, 'back on the code', g => g.netplay.screen === 'invite')
+		if (!s.netplay.share) throw new Error('the help page closed Couch')
+		await pressUntil(host, 'ArrowUp', 'the cursor on BACK', g => g.netplay.row === 0)
+		steps.push('MORE INFO → the help page ; Triangle → the code again, Couch still on')
 		// BACK : the box closed, Couch still on ; Select opens it again
 		s = await pressUntil(host, CROSS, 'BACK', g => g.netplay.screen === 'none')
 		if (!s.netplay.share || !s.charSelect) throw new Error('BACK closed Couch, or left the select')
@@ -195,12 +193,12 @@ async function couchOnOff(ctx) {
 		steps.push('BACK, then Select twice : the box only, Couch still on')
 		// STOP COUCH : Down, Cross — where the host stands
 		await pressUntil(host, SELECT, 'INVITE', g => g.netplay.screen === 'invite')
-		await pressUntil(host, 'ArrowDown', 'the cursor on STOP COUCH', g => g.netplay.row === 1)
+		await pressUntil(host, 'ArrowDown', 'the cursor on STOP COUCH', g => g.netplay.row === 2)
 		await shot(ctx, 'invite-stop-couch')
 		s = await pressUntil(host, CROSS, 'STOP COUCH', g => g.netplay.screen === 'none' && !g.netplay.share)
 		if (!s.charSelect) throw new Error('STOP COUCH left the select')
 		if ((await shareState(ctx)).sharing) throw new Error('the page still shares after STOP COUCH')
-		steps.push('Select, Down, Cross → stopped, still on the select')
+		steps.push('Select, Down, Down, Cross → stopped, still on the select')
 		// on again, then the main menu closes it
 		await couchOn(ctx, host)
 		await pressUntil(host, CROSS, 'BACK', g => g.netplay.screen === 'none')
@@ -276,7 +274,7 @@ async function couchGuests(ctx) {
 		steps.push('its keys move P2\'s cursor')
 		// STOP COUCH : told
 		await pressUntil(host, SELECT, 'INVITE', x => x.netplay.screen === 'invite')
-		await pressUntil(host, 'ArrowDown', 'the cursor on STOP COUCH', x => x.netplay.row === 1)
+		await pressUntil(host, 'ArrowDown', 'the cursor on STOP COUCH', x => x.netplay.row === 2)
 		await pressUntil(host, CROSS, 'STOP COUCH', x => x.netplay.screen === 'none' && !x.netplay.share)
 		s = await untilGame(host, 'the select back to one player', x => x.charSelect?.players === 1, 15_000)
 		const d = await said(guest, 'THE HOST LEFT')
@@ -340,19 +338,20 @@ async function helpAndTab(ctx) {
 	const click = sel => ctx.js(`const e = document.querySelector(${JSON.stringify(sel)}); if (!e) throw new Error('no ${sel}'); e.click(); return true`)
 	await bootWith(host, origin, { relay: ctx.args.relay, rk: ctx.args.rk, name: 'Host' })
 	try {
-		// NETPLAY : its help page over its menu ; Triangle back to the main menu, Cross on to the menu
+		// NETPLAY : its menu at once ; its fifth row, MORE INFO, is the help page — any button back
 		await toMain(host)
 		await to(host, 'NETPLAY')
-		let s = await pressUntil(host, CROSS, 'NETPLAY\'s help page', g => g.netplay.screen === 'help')
-		if (s.netplay.help !== 'netplay') throw new Error(`NETPLAY opened the help page of ${s.netplay.help}`)
+		let s = await pressUntil(host, CROSS, 'the NETPLAY menu, with no page before it', g => g.sub?.title === 'NETPLAY')
+		if (s.netplay.screen !== 'none') throw new Error(`NETPLAY opened ${s.netplay.screen} before its menu`)
+		// a press is read once it was seen released : a pause between two
+		for (let i = 0; i < 10 && (await game(host)).sub?.label !== 'MORE INFO'; i++) { await host.press('ArrowDown'); await sleep(350) }
+		if ((await game(host)).sub?.label !== 'MORE INFO') throw new Error(`the NETPLAY menu has no MORE INFO row : the cursor stops on ${(await game(host)).sub?.label}`)
+		s = await pressUntil(host, CROSS, 'NETPLAY\'s help page', g => g.netplay.screen === 'help')
+		if (s.netplay.help !== 'netplay') throw new Error(`MORE INFO opened the help page of ${s.netplay.help}`)
 		await shot(ctx, 'netplay-help')
-		s = await pressUntil(host, TRIANGLE, 'Triangle on the help page', g => g.netplay.screen === 'none')
-		await sleep(600)
-		s = await game(host)
-		if (s.sub || s.menu?.label !== 'NETPLAY') throw new Error(`Triangle on NETPLAY's help page left ${s.sub?.title ?? s.menu?.label}`)
-		await pressUntil(host, CROSS, 'the help page again', g => g.netplay.screen === 'help')
-		s = await pressUntil(host, CROSS, 'Cross : the NETPLAY menu', g => g.netplay.screen === 'none' && g.sub?.title === 'NETPLAY')
-		steps.push('NETPLAY → its help page ; Triangle → the main menu ; Cross → the NETPLAY menu')
+		s = await pressUntil(host, CROSS, 'back on the NETPLAY menu', g => g.netplay.screen === 'none')
+		if (s.sub?.title !== 'NETPLAY' || s.sub.label !== 'MORE INFO') throw new Error(`the help page left ${s.sub?.title}/${s.sub?.label}`)
+		steps.push('NETPLAY → its menu at once ; MORE INFO → the help page ; Cross → the menu again')
 		// Settings › Help
 		await ctx.press('Escape')
 		await click('[data-tab=help]')

@@ -38,7 +38,7 @@ browser now. nothing gets uploaded. next time you just press the button and send
   play as P2–P4 **with no disc**. they get your game as live video + sound — so a bit
   of delay — you get their pads, peer to peer. they lose, it's lag. they win, it's
   skill. classic. Select again to stop. the fine print : several players on the host's
-  machine, one per guest browser, four in all — the game says so before it opens the room.
+  machine, one per guest browser, four in all — MORE INFO, next to the code, says so.
 - **host your own relay** — Couch and Netplay rooms go through a tiny relay. the default one needs
   a key (slide into the DMs), or spin up yours : Docker image, a one-file setup for a
   throwaway cloud VM with auto HTTPS, or drop it behind Traefik, HAProxy or Caddy
