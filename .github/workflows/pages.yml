@@ -51,7 +51,14 @@ jobs:
       # emsdk's own node on PATH for the duration of that script only) ; cmake
       # is already on ubuntu-latest's PATH. One build since session 14 : the
       # CTR_ONLINE=ON game plays solo until a room is joined.
+      # A fork's page points at its own relay : two repository variables (Settings › Secrets and
+      # variables › Actions › Variables), read by web/build-web.sh. Unset : web/net/relay-default.js's
+      # relay, no key. CTR_RELAY_KEY is built into the page, so it is public : anyone reads it in the
+      # page's source — a variable, never a secret ; leave it unset for a relay that stays private.
       - name: Build (Solo + Share + Online)
+        env:
+          CTR_RELAY_URL: ${{ vars.CTR_RELAY_URL }}
+          CTR_RELAY_KEY: ${{ vars.CTR_RELAY_KEY }}
         run: web/build-web.sh release -DCTR_WEB_PRELOAD_DISC=OFF -DCTR_ONLINE=ON
 
       - name: Assemble the site

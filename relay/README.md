@@ -8,6 +8,75 @@ secret, which stays in the room link and never reaches any server.
 
 One Node file (`relay.js`), one dependency (`ws`). Node 24 or later.
 
+## The fastest way
+
+Four ways, the quickest first. Each ends with the same two things : the relay's **`wss://`
+address** and its **key**. Players type both once in **Settings › Multiplayer › Netplay** (Couch
+uses the same), or get them inside your invite links : a room link made on a page with your
+relay set carries them (`relay=` and `rk=` after the `#`).
+
+**1. Any box with Docker — one line.** The image is published by this repository
+([.github/workflows/relay-image.yml](../.github/workflows/relay-image.yml)), for amd64 and arm64 :
+
+```
+key=$(openssl rand -base64 24); echo "relay key : $key"
+docker run -d --name ctr-relay --restart unless-stopped -p 8787:8787 -e RELAY_KEY="$key" ghcr.io/meitogi/ctr-relay
+```
+
+That is `ws://<box>:8787` : fine on your own network (`ws://192.168.1.20:8787`) when the page
+is served there too ; the published page (HTTPS) needs `wss://` — put it behind your proxy
+([below](#behind-your-reverse-proxy)), or use 2, 3 or 4. A fork's own image is
+`ghcr.io/<owner>/ctr-relay`, once its workflow has run and the package is public.
+
+**2. A hosted service — a few clicks, HTTPS included.** Checked 2026-11-12 ; offers change.
+
+| | Cost | Click | The address | The key |
+|---|---|---|---|---|
+| **Koyeb** | free (one free service ; a card on file, not charged) | [Deploy to Koyeb](https://app.koyeb.com/deploy?type=docker&image=ghcr.io/meitogi/ctr-relay:latest&name=ctr-relay&instance_type=free&regions=fra&ports=8787;http;/&env[PORT]=8787&env[RELAY_KEY]=CHANGE-ME) — replace `CHANGE-ME` in the form before Deploy | `wss://<app>-<org>-<id>.koyeb.app`, on the service's page | the one you typed |
+| **Render** | free (sleeps after 15 min with nobody on it ; the first room after that waits ~1 min) | [Deploy to Render](https://render.com/deploy?repo=https://github.com/meitogi/ctr-native-web) — builds `relay/` from the repository ([render.yaml](../render.yaml)) | `wss://<name>.onrender.com` | drawn by Render : the service's Environment, `RELAY_KEY` |
+| **DigitalOcean** | ~$5 a month (App Platform's smallest service) | [Deploy to DigitalOcean](https://cloud.digitalocean.com/apps/new?repo=https://github.com/meitogi/ctr-native-web/tree/web/main) — runs the image ([.do/deploy.template.yaml](../.do/deploy.template.yaml)) ; set `RELAY_KEY` at the Environment Variables step | `wss://<app>-<id>.ondigitalocean.app` | the one you typed |
+
+Left out : Fly.io (no free plan for new accounts ; about $2 a month, `fly launch --image
+ghcr.io/meitogi/ctr-relay`), Hugging Face Docker Spaces (paid now), Google Cloud Run (a billing
+card, and a WebSocket cut at 60 min), Railway (a template to publish from its dashboard first ;
+$5 a month), Glitch (closed). A fork's buttons : change `meitogi` in the links and in
+`.do/deploy.template.yaml` to its owner.
+
+**3. A throwaway VM, no domain** : [deploy/cloud-init.yaml](deploy/cloud-init.yaml) as the VM's
+user data, at any provider (a $4–6 a month VM, by the hour). It prints the `wss://` address and
+the key ([below](#on-a-fresh-vm-no-domain--cloud-init)).
+
+**4. Behind your reverse proxy** : Traefik, HAProxy or Caddy, one `.env`
+([below](#behind-your-reverse-proxy)).
+
+### What the key protects
+
+The key keeps strangers off your relay : without it a socket is closed at its first message.
+Give it with the room links (or out loud) ; change it (`RELAY_KEY`, restart) when it has gone
+too far. **`RELAY_ORIGINS`** is the other half : the pages allowed to connect
+(`RELAY_ORIGINS=https://you.github.io`), so another site's page cannot use your relay even with
+the key. A program that is not a browser sends no `Origin` : only the key stops it.
+
+What the relay sees and cannot see : [the front page](../README.md#how-its-built).
+
+### Your own page on your own relay
+
+A fork that publishes its page (GitHub Pages, [.github/workflows/pages.yml](../.github/workflows/pages.yml))
+points it at its relay with one **repository variable** — Settings › Secrets and variables ›
+Actions › **Variables** :
+
+| Variable | Unset | Set |
+|---|---|---|
+| `CTR_RELAY_URL` | the page's relay is `wss://ctr-relay.suuuper.app` ([web/net/relay-default.js](../web/net/relay-default.js)) | your `wss://` address : the page's default when a player has typed none |
+| `CTR_RELAY_KEY` | no key built in : it comes in the room links, or is typed once | a key built into the page : players never type one |
+
+Push to `web/main` : the page is rebuilt with them. **A key built into the page is public** :
+anyone reads it in the page's source. That is why it is a *variable*, not a *secret* — a secret
+would end up in the same public file. It still keeps other sites' pages (with `RELAY_ORIGINS`)
+and casual scans off, nothing more. **For a relay that must stay private, leave
+`CTR_RELAY_KEY` unset** and hand the key with your invite links. Locally :
+`CTR_RELAY_URL=wss://… CTR_RELAY_KEY=… web/build-web.sh release …` does the same.
+
 ## Run it
 
 ```

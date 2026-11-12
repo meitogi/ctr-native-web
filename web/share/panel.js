@@ -28,12 +28,12 @@ import { gateHost } from '../net/admit.js';
 import { CODE_MAX, CODE_MIN, ROOM_KIND, codeNames, codeRoom, openFreeRoom, parseCode, randomCode } from '../net/code.js';
 import { formatRoomLink, newRoom } from '../net/link.js';
 import { openRoom, peersOf } from '../net/room.js';
+import { DEFAULT_RELAY, DEFAULT_RELAY_KEY } from '../net/relay-default.js';
 import { createCapture } from './capture.js';
 import { BITRATE, createShareHost } from './host.js';
 import { nameOf } from './protocol.js';
 import { FIRST_SLOT, LOCAL, SLOT_COUNT, createSlots, isLocal } from './slots.js';
 
-const DEFAULT_RELAY = 'wss://ctr-relay.suuuper.app';
 const STORE = 'ctr-share.';
 
 const CSS = `
@@ -147,7 +147,7 @@ Module.ctrShare = {
 const query = new URLSearchParams(location.search);
 document.head.append(el('style', { textContent: CSS }));
 const relay = el('input', { type: 'text', id: 'share-relay', value: query.get('relay') || load('relay') || DEFAULT_RELAY });
-const rk = el('input', { type: 'password', id: 'share-rk', value: query.get('rk') || load('rk') || '', autocomplete: 'off' });
+const rk = el('input', { type: 'password', id: 'share-rk', value: query.get('rk') || load('rk') || DEFAULT_RELAY_KEY, autocomplete: 'off' });
 const startButton = el('button', { type: 'button', id: 'share-start', textContent: 'Couch' });
 const stopButton = el('button', { type: 'button', id: 'share-stop', textContent: 'Stop', disabled: true });
 const copyButton = el('button', { type: 'button', id: 'share-copy', textContent: 'Copy guest link', disabled: true });

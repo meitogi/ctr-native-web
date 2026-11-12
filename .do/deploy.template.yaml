@@ -1,0 +1,25 @@
+# ctr-relay on DigitalOcean App Platform (paid : the smallest service, about $5 a month) — the
+# « Deploy to DigitalOcean » button of relay/README.md reads this file (the button looks for it
+# here, at .do/ in the repository's root). It runs the published image (ghcr.io/meitogi/ctr-relay,
+# .github/workflows/relay-image.yml) : a fork that publishes its own changes `registry` to its owner.
+# At the « Environment Variables » step, replace RELAY_KEY's value with your own key before Create.
+# The players' address : wss://<the app's name>.ondigitalocean.app
+spec:
+  name: ctr-relay
+  services:
+    - name: relay
+      image:
+        registry_type: GHCR
+        registry: meitogi
+        repository: ctr-relay
+        tag: latest
+      instance_count: 1
+      instance_size_slug: apps-s-1vcpu-0.5gb
+      http_port: 8787
+      health_check:
+        http_path: /healthz
+      envs:
+        - key: RELAY_KEY
+          scope: RUN_TIME
+          type: SECRET
+          value: CHANGE-ME

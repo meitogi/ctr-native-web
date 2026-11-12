@@ -28,6 +28,7 @@ import { CODE_MAX, CODE_MIN, ROOM_KIND, codeNames, codeRoom, codeText, parseCode
 import { b64u, randomBytes } from '../net/crypto.js';
 import { formatRoomLink, newRoom, parseRoomLink } from '../net/link.js';
 import { openRoom, peersOf } from '../net/room.js';
+import { DEFAULT_RELAY, DEFAULT_RELAY_KEY } from '../net/relay-default.js';
 import { probeRelay } from '../net/signaling.js';
 import { createShareGuest } from '../share/guest.js';
 import { gateGuest, gateHost } from '../net/admit.js';
@@ -50,7 +51,6 @@ const NP_OF = { 'relay-key': NP.keyRefused, absent: NP.noRoom, 'room-full': NP.f
 /** The page's one OnlineCTR room (OnlineExternal_State) ; SG_ROOMS adds 8 to a locked room's count. */
 const ROOM = 5;
 
-const DEFAULT_RELAY = 'wss://ctr-relay.suuuper.app';
 const NAME_LEN = 9; // game/OnlineCTR/global.h
 const WIDTH = 300; // the sidebar, CSS px
 
@@ -492,7 +492,7 @@ export function attach(Module) {
     return { id, box, node: el('div', { className: 'opt' }, el('label', {}, box, ' ', label), el('div', { className: 'help' }, help), ...(extra ? [extra] : [])) };
   };
   const relay = el('input', { type: 'text', id: 'online-relay', value: query.get('relay') ?? load('relay', DEFAULT_RELAY) });
-  const rk = el('input', { type: 'password', id: 'online-rk', value: query.get('rk') ?? load('rk'), autocomplete: 'off' });
+  const rk = el('input', { type: 'password', id: 'online-rk', value: query.get('rk') ?? load('rk', DEFAULT_RELAY_KEY), autocomplete: 'off' });
   // the relay and its key tried on leaving either field (no room opened) : only the last try shows
   const relayCheck = el('div', { className: 'check', id: 'online-relay-check', role: 'status' });
   let checked = '';

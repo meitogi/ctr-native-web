@@ -1,0 +1,69 @@
+name: Something went wrong
+description: A bug, a crash, a freeze, a room that will not open, a sound that is off.
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        thanks for taking the time. the page's **Settings › System** has a « Report a problem » link that fills the version, the browser and the mode for you.
+
+        **never attach the disc, or any piece of it** (no `.bin`, no `.zip`, no file pulled out of it, no save file) — the issue is public and the game is not ours to share. screenshots and short videos of the page are fine.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: what you did, step by step, and what the page or the game did.
+      placeholder: "picked NETPLAY › VS, friend joined by code, at the character select the screen froze…"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: mode
+    attributes:
+      label: Mode
+      description: "Solo, Couch host, Couch guest, Netplay host or Netplay guest."
+      placeholder: Netplay guest
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "on the boot screen (bottom right) and in Settings › System, like `v1.0.0-b.10`."
+      placeholder: v1.0.0-b.10
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: Chrome 131 · macOS
+    validations:
+      required: true
+  - type: input
+    id: input
+    attributes:
+      label: Pad or keyboard
+      description: "the pad's name if you know it (DualSense, Xbox, 8BitDo…), or keyboard."
+  - type: input
+    id: lang
+    attributes:
+      label: Page language
+      description: filled by the page's link ; leave it as it is.
+  - type: textarea
+    id: state
+    attributes:
+      label: The state
+      description: "if the page gave you a copy of its state, paste it here as it is. it holds nothing private : no room code, no relay key, no name."
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: "the other players' browsers, Wi-Fi or cable, a screenshot or a short video (drag it here)."

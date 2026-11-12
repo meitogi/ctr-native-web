@@ -23,7 +23,7 @@ import { formatRoomLink } from '../../net/link.js'
 import { resolveDisc } from './lib/discsource.js'
 import { guestInput } from './lib/guest-input.js'
 import { createInputHook } from './lib/input-hook.js'
-import { DEFAULT_RELAY, SAID, findRoom, press } from './lib/join.js'
+import { DEFAULT_RELAY, DEFAULT_RELAY_KEY, SAID, findRoom, press } from './lib/join.js'
 import { createPlayers } from './lib/players.js'
 import { LANG, T, errorText } from './lib/strings.js'
 import { ui } from './state.svelte.js'
@@ -183,7 +183,7 @@ export function joinBack() {
 // module only loads with the game).
 const read = (key) => { try { return localStorage.getItem(key) } catch { return null } }
 const write = (key, value) => { try { localStorage.setItem(key, value) } catch { /* private mode */ } }
-const where = () => ({ relay: (read('ctr-online.relay') ?? DEFAULT_RELAY).trim(), rk: (read('ctr-online.rk') ?? '').trim() })
+const where = () => ({ relay: (read('ctr-online.relay') ?? DEFAULT_RELAY).trim(), rk: (read('ctr-online.rk') ?? DEFAULT_RELAY_KEY).trim() })
 const hashParam = (name) => new URLSearchParams(location.hash.slice(1)).get(name)
 const joinsAtBoot = () => location.hash.includes('room=') || !!parseCode(hashParam('c'))
 let looking = 0 // a newer look, or Back, drops the one on its way

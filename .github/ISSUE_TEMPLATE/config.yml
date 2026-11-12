@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Play it
+    url: https://ctr.suuuper.app/
+    about: the page itself — Settings › System has a « Report a problem » link that fills the form for you.
+  # the testers' guide (session 24) goes here once it exists :
+  # - name: Testers' guide
+  #   url: https://github.com/meitogi/ctr-native-web/blob/web/main/<the guide>.md
+  #   about: open the link, pick a mode, what to report.

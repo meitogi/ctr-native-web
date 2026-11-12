@@ -35,7 +35,11 @@ fi
 build="$root/build-web-$config"
 # the version the page and the title show : our v* tags only (upstream's beta-* are not ours)
 version=$(git -C "$root" describe --tags --match 'v*' 2>/dev/null || echo dev)
-emcmake cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE="$build_type" -DBUILD_TESTING=ON -DCTR_WEB_VERSION="$version" "$@"
+# the page's default relay and its key : CTR_RELAY_URL / CTR_RELAY_KEY (a fork's own, the Pages
+# workflow's repository variables), else empty — web/net/relay-default.js's built-in relay, no key.
+# Always passed, so an earlier value never lingers in the CMake cache.
+emcmake cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE="$build_type" -DBUILD_TESTING=ON -DCTR_WEB_VERSION="$version" \
+    -DCTR_WEB_RELAY="${CTR_RELAY_URL:-}" -DCTR_WEB_RELAY_KEY="${CTR_RELAY_KEY:-}" "$@"
 cmake --build "$build" -j"$(nproc)"
 
 echo ""

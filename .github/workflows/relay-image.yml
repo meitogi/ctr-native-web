@@ -1,0 +1,77 @@
+name: Relay image
+
+# Builds relay/ (relay/Dockerfile) and pushes it to this repository's own container registry :
+# ghcr.io/<owner>/ctr-relay — a fork publishes its own, nothing to set. Then a relay is one line,
+# no clone, no build (relay/README.md « The fastest way ») :
+#   docker run -d -p 8787:8787 -e RELAY_KEY=… ghcr.io/<owner>/ctr-relay
+# On a change under relay/ on web/main : `latest` and `sha-<short>`. On a version tag (v*) : the
+# version too (v1.0.0-b.11 → 1.0.0-b.11). amd64 and arm64 (an Apple-silicon Mac, an Arm VM).
+# The package starts private on GitHub : make it public once (the package's settings, « Change
+# visibility »), or `docker pull` asks for a login.
+
+on:
+  push:
+    branches: [web/main]
+    paths: ['relay/**', '.github/workflows/relay-image.yml']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: relay-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # the registry wants a lower-case name ; a fork's owner may not be
+      - name: Image name
+        id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ctr-relay" >> "$GITHUB_OUTPUT"
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.name.outputs.image }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/web/main' }}
+            type=sha,prefix=sha-
+            type=match,pattern=v(.*),group=1
+          labels: |
+            org.opencontainers.image.title=ctr-relay
+            org.opencontainers.image.description=WebSocket meeting point and fallback relay for CTR Native Web rooms
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: relay
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Say how to run it
+        run: |
+          {
+            echo "### ctr-relay"
+            echo '```'
+            echo "docker run -d --name ctr-relay -p 8787:8787 -e RELAY_KEY=\"\$(openssl rand -base64 24)\" ${{ steps.name.outputs.image }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

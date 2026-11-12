@@ -65,6 +65,24 @@ endif()
 set(CTR_WEB_VERSION "dev" CACHE STRING "The version shown on the page and the title")
 file(APPEND "${CMAKE_BINARY_DIR}/preload-flag.js" "window.__CTR_VERSION = \"${CTR_WEB_VERSION}\";\n")
 target_compile_definitions(ctr_native PRIVATE CTR_WEB_VERSION=\"${CTR_WEB_VERSION}\")
+# The default relay of a fork's own page (web/build-web.sh : CTR_RELAY_URL ; the Pages workflow sets
+# it from the repository variable). Empty : no line, the page keeps web/net/relay-default.js's.
+set(CTR_WEB_RELAY "" CACHE STRING "The page's default relay (ws:// or wss://) ; empty = the built-in one")
+if(CTR_WEB_RELAY)
+    if(NOT CTR_WEB_RELAY MATCHES "^wss?://[^ \t\"'\\]+$")
+        message(FATAL_ERROR "CTR_WEB_RELAY must be a ws:// or wss:// URL, got '${CTR_WEB_RELAY}'")
+    endif()
+    file(APPEND "${CMAKE_BINARY_DIR}/preload-flag.js" "window.__CTR_RELAY = \"${CTR_WEB_RELAY}\";\n")
+endif()
+# Its key (CTR_RELAY_KEY), for a fork whose players should never type one. Built into a public page,
+# it is public : anyone reads it in the page's source. Empty : no line, no key (our own site).
+set(CTR_WEB_RELAY_KEY "" CACHE STRING "A relay key built into the page (public) ; empty = none")
+if(CTR_WEB_RELAY_KEY)
+    if(NOT CTR_WEB_RELAY_KEY MATCHES "^[A-Za-z0-9+/=_.~-]+$")
+        message(FATAL_ERROR "CTR_WEB_RELAY_KEY may hold letters, digits and + / = _ . ~ - only")
+    endif()
+    file(APPEND "${CMAKE_BINARY_DIR}/preload-flag.js" "window.__CTR_RELAY_KEY = \"${CTR_WEB_RELAY_KEY}\";\n")
+endif()
 
 add_custom_command(
     OUTPUT "${CMAKE_BINARY_DIR}/index.html"
@@ -106,7 +124,7 @@ add_custom_command(
             # the home page's room code (src/lib/join.js) bundles these
             "${CMAKE_SOURCE_DIR}/web/net/code.js" "${CMAKE_SOURCE_DIR}/web/net/link.js"
             "${CMAKE_SOURCE_DIR}/web/net/signaling.js" "${CMAKE_SOURCE_DIR}/web/net/crypto.js"
-            "${CMAKE_SOURCE_DIR}/web/net/events.js"
+            "${CMAKE_SOURCE_DIR}/web/net/events.js" "${CMAKE_SOURCE_DIR}/web/net/relay-default.js"
             "${CTR_WEB_UI_DIR}/node_modules/.package-lock.json"
     COMMENT "web/ui : vite build"
 )

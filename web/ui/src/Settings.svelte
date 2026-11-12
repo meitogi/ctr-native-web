@@ -14,8 +14,9 @@
   import Players from './Players.svelte'
   import RoomPlayers from './RoomPlayers.svelte'
   import WhoPlays from './WhoPlays.svelte'
+  import { browserOf, issueUrl, modeOf } from './lib/report.js'
   import { NAME_LEN } from './lib/settings.js'
-  import { T } from './lib/strings.js'
+  import { LANG, T } from './lib/strings.js'
   import { ui } from './state.svelte.js'
   import { live, settings } from './store.js'
   // debug builds only : the Dev tab's component, loaded with the dev tools (__CTR_DEV__ : vite.config.js)
@@ -58,6 +59,15 @@
     return { destroy() { if (el.parentNode === node) document.getElementById('ctr-parked')?.appendChild(el) } }
   }
   const mb = (n) => Math.round(n / (1024 * 1024))
+  // « Report a problem » : the bug form filled when the link is used, with the mode the page is in then
+  // (lib/report.js — nothing private goes in the link) ; set on focus and on any button's press, so
+  // a middle click or a keyboard Enter gets it too
+  function report(e) {
+    const online = globalThis.__ctrOnline?.state?.()
+    const netplay = online?.room && (online.role === 'host' || online.role === 'guest') ? online.role : null
+    const mode = modeOf({ guest, sharing: !!globalThis.__ctrShare?.state?.().sharing, netplay })
+    e.currentTarget.href = issueUrl({ version: globalThis.__CTR_VERSION ?? 'dev', browser: browserOf(navigator.userAgent), mode, lang: LANG })
+  }
   const pickAnother = () => document.getElementById('disc-input')?.click()
 </script>
 
@@ -142,7 +152,8 @@
       {/if}
       <div class="label">{T.about}</div>
       <p class="about">{T.aboutText}</p>
-      <p class="about" id="ctr-version">{T.version} {globalThis.__CTR_VERSION ?? 'dev'}</p>
+      <p class="about"><span id="ctr-version">{T.version} {globalThis.__CTR_VERSION ?? 'dev'}</span>
+        · <a id="ctr-report" href={issueUrl()} target="_blank" rel="noopener" title={T.reportHelp} onfocus={report} onpointerdown={report}>{T.report}</a></p>
       <div class="label">{T.licences}</div>
       <ul class="lic">{#each T.licenceLines as l}<li>{l}</li>{/each}</ul>
       <p class="help">{T.keysHint}</p>
@@ -193,6 +204,7 @@
   .btn.danger { color: var(--danger); }
   .btn:disabled { opacity: 0.4; cursor: default; }
   .about { color: var(--ink); margin: 4px 2px 0; font-size: 14px; }
+  .about a { color: inherit; }
   .lic { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink-dim); display: grid; gap: 4px; }
   /* an adopted panel (Online, Share) : its own layout, made to sit in the tab */
   .adopted :global(> *) { position: static !important; width: auto !important; inset: auto !important; max-height: none !important; border: 0 !important; background: none !important; padding: 0 !important; display: block !important; font: 13px/1.5 var(--text) !important; color: var(--ink) !important; }

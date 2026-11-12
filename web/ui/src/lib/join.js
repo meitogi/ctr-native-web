@@ -8,8 +8,8 @@ import { lookRoom } from '../../../net/signaling.js'
 /** Why a code did not join : the numbers of the game's NETPLAY screens (web/online/page.js NP), then Share's two. */
 export const SAID = { noKey: 10, keyRefused: 11, offline: 12, noRoom: 13, full: 14, refused: 15, hostLeft: 16, noDirect: 17 }
 
-/** The relay the Netplay settings use when none was typed (web/online/page.js DEFAULT_RELAY). */
-export const DEFAULT_RELAY = 'wss://ctr-relay.suuuper.app'
+/** The relay (and its key) the Netplay settings use when none was typed (web/net/relay-default.js, the one source). */
+export { DEFAULT_RELAY, DEFAULT_RELAY_KEY } from '../../../net/relay-default.js'
 
 /**
  * One press on the dials. `key` : 'up' | 'down' | 'left' | 'right' | 'cross' | 'square' | 'start'.

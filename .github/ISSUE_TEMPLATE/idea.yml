@@ -1,0 +1,21 @@
+name: An idea or a request
+description: Something you would like the page or the game to do.
+title: "[idea] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        the front page's « what is coming » list may already have it ; a +1 on an issue that already asks for it is fine too.
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: what you would like, and when it would help (which mode, how many players, which device).
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: what you do today instead, or what stops you.

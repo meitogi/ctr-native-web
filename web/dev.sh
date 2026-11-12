@@ -25,7 +25,9 @@ tree=$(cd "$(dirname "$0")/.." && pwd)
 source "$tree/web/build-progress.sh"
 PAGE=8090
 RELAY=8787
-DEFAULT_RELAY=wss://ctr-relay.suuuper.app # web/online/page.js's DEFAULT_RELAY
+# the page's default relay : CTR_RELAY_URL as the build gets it, else web/net/relay-default.js's
+DEFAULT_RELAY=${CTR_RELAY_URL:-$(sed -n "s/^export const BUILT_IN_RELAY = '\(.*\)'$/\1/p" "$tree/web/net/relay-default.js")}
+[ -n "$DEFAULT_RELAY" ] || { echo "dev.sh: no BUILT_IN_RELAY in web/net/relay-default.js" >&2; exit 1; }
 RELAY_KEY_FILE="$tree/web/.relay-key"
 PORTS_FILE="$tree/web/dev-ports.tsv"
 DEVCONTAINER=${DEVCONTAINER_DIR:-/workspace/.devcontainer}

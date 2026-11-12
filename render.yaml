@@ -1,0 +1,18 @@
+# ctr-relay on Render's free plan — the « Deploy to Render » button of relay/README.md reads this file
+# (Render looks for it at the repository's root). It builds relay/ from this repository — a fork
+# deploys its own copy — and serves it on https://<name>.onrender.com : the players' address is
+# wss://<name>.onrender.com. RELAY_KEY is drawn by Render : read it in the service's Environment.
+# The free instance sleeps after 15 minutes with nobody connected ; the first room after that
+# waits about a minute.
+services:
+  - type: web
+    name: ctr-relay
+    runtime: docker
+    plan: free
+    dockerfilePath: ./relay/Dockerfile
+    dockerContext: ./relay
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: RELAY_KEY
+        generateValue: true
