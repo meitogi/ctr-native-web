@@ -1704,5 +1704,5 @@ disc, one player per browser, up to four in a room. Couch : the host's screen is
 needed, some delay for the guests —, several players on the host's machine and one per guest, four
 in all. Cross goes on, Triangle goes back with nothing launched ; a guest resting on the main menu
 in its room is not shown NETPLAY's again. The page's Settings › Help says the same, with how a
-player joins and leaves, while the game runs. « Several players per guest, per Netplay browser »
-is a next, said on both.
+player joins and leaves, while the game runs. What comes next (several players per guest, per
+Netplay browser) is the README's to say, not the game's.

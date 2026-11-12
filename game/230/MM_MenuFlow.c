@@ -766,12 +766,12 @@ static void NetplayHelp_Open(int couch)
 
 static void NetplayHelp_Frame(int tap)
 {
-	// a line holds about 36 of the small font's characters ; the last one is the « next »
-	static const char *const lines[2][6] = {
-		{"EVERYONE ON THEIR OWN SCREEN", "EACH PLAYER NEEDS THEIR OWN DISC", "ONE PLAYER PER BROWSER", "UP TO 4 PLAYERS IN A ROOM", "NEXT - SEVERAL PER BROWSER", NULL},
-		{"YOUR SCREEN IS STREAMED", "GUESTS NEED NO DISC", "THEY MAY SEE SOME DELAY", "SEVERAL HERE, ONE PER GUEST", "UP TO 4 PLAYERS IN ALL", "NEXT - SEVERAL PER GUEST"},
+	// a line holds about 36 of the small font's characters
+	static const char *const lines[2][5] = {
+		{"EVERYONE ON THEIR OWN SCREEN", "EACH PLAYER NEEDS THEIR OWN DISC", "ONE PLAYER PER BROWSER", "UP TO 4 PLAYERS IN A ROOM", NULL},
+		{"YOUR SCREEN IS STREAMED", "GUESTS NEED NO DISC", "THEY MAY SEE SOME DELAY", "SEVERAL HERE, ONE PER GUEST", "UP TO 4 PLAYERS IN ALL"},
 	};
-	int count = (lines[netplayHelp][5] != NULL) ? 6 : 5;
+	int count = (lines[netplayHelp][4] != NULL) ? 5 : 4;
 
 	if (tap & (BTN_CROSS_one | BTN_START))
 	{
@@ -792,7 +792,7 @@ static void NetplayHelp_Frame(int tap)
 	}
 	DecalFont_DrawLine(netplayHelp ? "COUCH" : "NETPLAY", 0x100, 0x1a, FONT_BIG, NETPLAY_CENTER | ORANGE);
 	for (int i = 0; i < count; i++)
-		DecalFont_DrawLine((char *)lines[netplayHelp][i], 0x100, 0x34 + i * 0x0c, FONT_SMALL, NETPLAY_CENTER | ((i == count - 1) ? GRAY : WHITE));
+		DecalFont_DrawLine((char *)lines[netplayHelp][i], 0x100, 0x34 + i * 0x0c, FONT_SMALL, NETPLAY_CENTER | WHITE);
 	DecalFont_DrawLine(netplayHelp ? "OPEN THE ROOM" : "CONTINUE", 0x100, 0x88, FONT_BIG, NETPLAY_CENTER | WHITE);
 	DecalFont_DrawLine("TRIANGLE - BACK", 0x100, 0xa6, FONT_SMALL, NETPLAY_CENTER | GRAY);
 	Netplay_DrawPanel(0x20, 0x12, 0x1c0, 0xaa, 3);
