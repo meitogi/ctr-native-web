@@ -28,9 +28,16 @@ const text = new TextDecoder();
  *   the error carries the relay's `url`
  * - `relay-key` : the relay refused its access key (rk), or no hello in time (close 4401)
  * - `room-full` / `id-taken` : the relay refused the hello (4403 / 4409)
+ * - `relay-full` / `relay-address` : an open relay at its limit — sockets or rooms (4503), sockets
+ *   from this address (4430) ; `room-alone` / `room-life` / `relay-idle` : it closed the room —
+ *   nobody joined (4410), its longest life (4411), a silent socket (4408)
  * @typedef {Error & {code: string}} SignalingError
  */
-const CLOSE_CODES = { 4401: 'relay-key', 4403: 'room-full', 4409: 'id-taken', 4429: 'rate', 4400: 'bad-hello' };
+const CLOSE_CODES = {
+  4401: 'relay-key', 4403: 'room-full', 4409: 'id-taken', 4429: 'rate', 4400: 'bad-hello',
+  // an open relay's limits (relay/README.md) : refused at the door, or a room it closed
+  4503: 'relay-full', 4430: 'relay-address', 4410: 'room-alone', 4411: 'room-life', 4408: 'relay-idle',
+};
 
 function fail(code, message) {
   const error = new Error(message);
@@ -148,8 +155,11 @@ export function relaySignaling({ url, rk = '', room, aead, id = crypto.randomUUI
  * Tries a relay and its key without opening a room : a hello for a throwaway room, then closes.
  * @param {string} url - ws:// or wss://
  * @param {string} rk - the relay access key
- * @returns {Promise<'ok'|'key'|'unreachable'>} welcomed, the key refused (4401), or no relay there
+ * @returns {Promise<'ok'|'key'|'full'|'address'|'unreachable'>} welcomed, the key refused (4401), the
+ *   relay at its limit (4503) or at this address's (4430), or no relay there
  */
+const PROBE_SAYS = { 'relay-key': 'key', 'relay-full': 'full', 'relay-address': 'address' };
+
 export function probeRelay(url, rk, { timeoutMs = CONNECT_TIMEOUT_MS, WebSocketImpl = globalThis.WebSocket } = {}) {
   return new Promise((resolve) => {
     let ws;
@@ -162,7 +172,7 @@ export function probeRelay(url, rk, { timeoutMs = CONNECT_TIMEOUT_MS, WebSocketI
       try { msg = JSON.parse(event.data); } catch { return; }
       if (msg.type === 'welcome') done('ok');
     });
-    ws.addEventListener('close', (event) => done(CLOSE_CODES[event.code] === 'relay-key' ? 'key' : 'unreachable'));
+    ws.addEventListener('close', (event) => done(PROBE_SAYS[CLOSE_CODES[event.code]] ?? 'unreachable'));
   });
 }
 
@@ -173,7 +183,8 @@ export function probeRelay(url, rk, { timeoutMs = CONNECT_TIMEOUT_MS, WebSocketI
  * @param {string} rk - the relay access key
  * @param {string} room - the room id
  * @returns {Promise<{id: string, name: string, kind: string}[]>} the peers there, this look aside ;
- *   rejects with `code` : 'relay' (nothing there), 'relay-silent', 'relay-key', 'room-full'
+ *   rejects with `code` : 'relay' (nothing there), 'relay-silent', 'relay-key', 'room-full',
+ *   'relay-full', 'relay-address'
  */
 export function lookRoom(url, rk, room, { timeoutMs = CONNECT_TIMEOUT_MS, WebSocketImpl = globalThis.WebSocket } = {}) {
   return new Promise((resolve, reject) => {

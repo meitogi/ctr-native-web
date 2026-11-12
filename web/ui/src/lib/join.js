@@ -5,11 +5,15 @@
 import { CODE_MAX, CODE_MIN, CODE_NAMES, codeText, roomFromCode, roomKind } from '../../../net/code.js'
 import { lookRoom } from '../../../net/signaling.js'
 
-/** Why a code did not join : the numbers of the game's NETPLAY screens (web/online/page.js NP), then Share's two. */
-export const SAID = { noKey: 10, keyRefused: 11, offline: 12, noRoom: 13, full: 14, refused: 15, hostLeft: 16, noDirect: 17 }
+/**
+ * Why a code did not join : the numbers of the game's NETPLAY screens (web/online/page.js NP), Share's
+ * two, then a public relay's (NP again) — at its limit, too many sockets from this address.
+ */
+export const SAID = { noKey: 10, keyRefused: 11, offline: 12, noRoom: 13, full: 14, refused: 15, hostLeft: 16, noDirect: 17, relayFull: 18, tooMany: 20 }
+const SAID_OF = { 'relay-key': SAID.keyRefused, 'room-full': SAID.full, 'relay-full': SAID.relayFull, 'relay-address': SAID.tooMany }
 
 /** The relay (and its key) the Netplay settings use when none was typed (web/net/relay-default.js, the one source). */
-export { DEFAULT_RELAY, DEFAULT_RELAY_KEY } from '../../../net/relay-default.js'
+export { DEFAULT_RELAY, DEFAULT_RELAY_KEY, keptRelay } from '../../../net/relay-default.js'
 
 /**
  * One press on the dials. `key` : 'up' | 'down' | 'left' | 'right' | 'cross' | 'square' | 'start'.
@@ -52,19 +56,19 @@ const said = (status) => Object.assign(new Error(`room code : ${status}`), { sai
 /**
  * The room a code names, and its kind, asked of the relay without joining it.
  * @param {number[]} ids
- * @param {{relay: string, rk: string}} where - the relay and its key (Settings › Netplay's)
+ * @param {{relay: string, rk: string}} where - the relay (Settings › Netplay's) and its key, '' when it has none
  * @param {object} [o] - lookRoom's options (tests)
  * @returns {Promise<{kind: 'share' | 'netplay', link: object}>} `link` : the room as a room link
  *   carries it, without a pass — its guest knocks ; rejects with `said` (SAID)
  */
 export async function findRoom(ids, { relay, rk }, o) {
-  if (!relay || !rk) throw said(SAID.noKey)
+  if (!relay) throw said(SAID.noKey)
   const target = await roomFromCode(ids)
   let peers
   try {
     peers = await lookRoom(relay, rk, target.room, o)
   } catch (e) {
-    throw said(e.code === 'relay-key' ? SAID.keyRefused : e.code === 'room-full' ? SAID.full : SAID.offline)
+    throw said(SAID_OF[e.code] ?? SAID.offline)
   }
   const kind = roomKind(peers)
   if (!kind) throw said(SAID.noRoom)

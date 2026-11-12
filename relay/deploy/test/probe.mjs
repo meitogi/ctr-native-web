@@ -1,6 +1,6 @@
 // Probe a relay through a proxy : wss connect, key check, data round trip, /healthz.
 // Runs inside the ctr-relay image (it has `ws`) on the proxy's network :
-//   node probe.mjs <wss-url>   with RELAY_KEY in the environment.
+//   node probe.mjs <wss-url>   with RELAY_KEY in the environment (none : an open relay).
 import WebSocket from 'ws';
 
 const url = process.argv[2];
@@ -63,10 +63,13 @@ check('data forwarded through the proxy, from stamped',
   await waitFor(() => b.messages.some((m) => m.type === 'data' && m.from === 'pa' && m.data === 'cHJvYmU='), 3000));
 a.ws.close(); b.ws.close();
 
-const wrong = open({ type: 'hello', id: 'pw', room, key: key + '-wrong' });
-await wrong.opened;
-await wrong.closed;
-check('wrong key → closed 4401, no welcome', wrong.closeCode === 4401 && !wrong.messages.length, `code ${wrong.closeCode}`);
+// an open relay (no RELAY_KEY here) has no key to refuse : the welcome above was the check
+if (key) {
+  const wrong = open({ type: 'hello', id: 'pw', room, key: key + '-wrong' });
+  await wrong.opened;
+  await wrong.closed;
+  check('wrong key → closed 4401, no welcome', wrong.closeCode === 4401 && !wrong.messages.length, `code ${wrong.closeCode}`);
+}
 
 const silent = open(null);
 await silent.opened;

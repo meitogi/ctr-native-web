@@ -95,11 +95,9 @@ print_links() {
   local vps_key=''
   [ -f "$RELAY_KEY_FILE" ] && vps_key=$(tr -d '[:space:]' < "$RELAY_KEY_FILE")
   echo "Ready, local relay : http://localhost:$PAGE/?relay=ws://localhost:$RELAY&rk=$relay_key"
-  if [ -n "$vps_key" ]; then
-    echo "Ready, VPS relay   : http://localhost:$PAGE/?relay=$DEFAULT_RELAY&rk=$vps_key"
-  else
-    echo "Ready, VPS relay   : http://localhost:$PAGE/   (no key : paste the VPS's CTR_RELAY_KEY into web/.relay-key)"
-  fi
+  echo "Ready, public relay : http://localhost:$PAGE/   (the page's default, $DEFAULT_RELAY : no key)"
+  # the VPS's private relay, for whoever keeps its key in web/.relay-key
+  [ -z "$vps_key" ] || echo "Ready, private relay : http://localhost:$PAGE/?relay=${CTR_PRIVATE_RELAY:-wss://ctr-relay.suuuper.app}&rk=$vps_key"
 }
 
 cmd_dev() {

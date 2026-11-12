@@ -6,7 +6,8 @@
 // messages per second to the relay.
 //
 //   CTR_WEB_CLIENT=build-online-web/online_web_client.js node --test web/online/test/relay-load.test.mjs
-//   (CTR_LOAD_PLAYERS=4 CTR_LOAD_SECONDS=20 CTR_LOAD_RATE=120 to change the run)
+//   (CTR_LOAD_PLAYERS=4 CTR_LOAD_SECONDS=20 CTR_LOAD_RATE=120 to change the run ;
+//    CTR_LOAD_RELAY=ws://127.0.0.1:8789 CTR_LOAD_RK=… : through a relay started apart)
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
@@ -31,6 +32,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PLAYERS = Number(process.env.CTR_LOAD_PLAYERS ?? 4);
 const SECONDS = Number(process.env.CTR_LOAD_SECONDS ?? 20);
 const RATE = process.env.CTR_LOAD_RATE ? Number(process.env.CTR_LOAD_RATE) : undefined;
+const EXTERNAL = process.env.CTR_LOAD_RELAY;
 
 /** A WebSocket that counts what this page sends to the relay ; `mute` : it sends nothing more. */
 function countingWs(counter) {
@@ -79,9 +81,10 @@ async function waitFor(what, clients, pred, timeoutMs) {
 
 test(`${PLAYERS} players, every guest on the relay, ${SECONDS} s of race`, { skip: (!createWebClient && 'CTR_WEB_CLIENT not set') || (!relayDeps && 'npm ci in relay/') }, async () => {
   const { createRelay } = await import('../../../relay/relay.js');
-  const rk = 'load-key';
-  const relay = await createRelay({ port: 0, host: '127.0.0.1', key: rk, log: () => {}, ...(RATE ? { rate: RATE, burst: RATE * 2 } : {}) });
-  const link = formatRoomLink('http://localhost/', newRoom({ relay: `ws://127.0.0.1:${relay.port}`, rk }));
+  const rk = process.env.CTR_LOAD_RK ?? 'load-key';
+  // CTR_LOAD_RELAY : a relay already running in a process of its own (so its memory and CPU can be read alone)
+  const relay = EXTERNAL ? { close: async () => {} } : await createRelay({ port: 0, host: '127.0.0.1', key: rk, log: () => {}, ...(RATE ? { rate: RATE, burst: RATE * 2 } : {}) });
+  const link = formatRoomLink('http://localhost/', newRoom({ relay: EXTERNAL ?? `ws://127.0.0.1:${relay.port}`, rk }));
   const hostCount = { sent: 0 };
   const closes = [];
   const rooms = [];

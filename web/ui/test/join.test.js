@@ -82,7 +82,9 @@ test('roomKind : a host from before the kinds (its name is its player\'s) is a N
 test('findRoom : what fails, in the game\'s own numbers', async () => {
   const saidOf = (p) => p.then(() => 'found', (e) => e.said)
   assert.equal(await saidOf(findRoom([0, 0, 0], where)), SAID.noRoom)
-  assert.equal(await saidOf(findRoom([0, 0, 0], { relay: where.relay, rk: '' })), SAID.noKey)
+  // a keyed relay refuses a missing key itself ; only no relay at all is said before asking
+  assert.equal(await saidOf(findRoom([0, 0, 0], { relay: where.relay, rk: '' })), SAID.keyRefused)
+  assert.equal(await saidOf(findRoom([0, 0, 0], { relay: '', rk: '' })), SAID.noKey)
   assert.equal(await saidOf(findRoom([0, 0, 0], { relay: where.relay, rk: 'wrong' })), SAID.keyRefused)
   assert.equal(await saidOf(findRoom([0, 0, 0], { relay: 'ws://127.0.0.1:1', rk: RK })), SAID.offline)
   // a relay that takes one peer per room : the host fills it, the look is refused
@@ -90,4 +92,26 @@ test('findRoom : what fails, in the game\'s own numbers', async () => {
   const host = await openRoom({ link: await codeRoom([5, 5, 5], there), role: 'host', name: ROOM_KIND.netplay })
   assert.equal(await saidOf(findRoom([5, 5, 5], there)), SAID.full)
   host.close()
+})
+
+test('findRoom on a relay with no key : the room is found with none ; the relay at its limit, and at this address\'s, each said', async () => {
+  const saidOf = (p) => p.then(() => 'found', (e) => e.said)
+  const open = await createRelay({ port: 0, host: '127.0.0.1', log: () => {}, maxSockets: 2 })
+  const there = { relay: `ws://127.0.0.1:${open.port}`, rk: '' }
+  const host = await openRoom({ link: await codeRoom([2, 4, 6], there), role: 'host', name: ROOM_KIND.share })
+  const found = await findRoom([2, 4, 6], there)
+  assert.deepEqual([found.kind, found.link.rk, found.link.pass], ['share', '', ''])
+  // a second socket holds the last place : the look is one too many
+  const other = await openRoom({ link: await codeRoom([1, 1, 1], there), role: 'host', name: ROOM_KIND.netplay })
+  assert.equal(await saidOf(findRoom([2, 4, 6], there)), SAID.relayFull)
+  other.close()
+  host.close()
+  await open.close()
+
+  const perAddress = await createRelay({ port: 0, host: '127.0.0.1', log: () => {}, ipMax: 1 })
+  const here = { relay: `ws://127.0.0.1:${perAddress.port}`, rk: '' }
+  const mine = await openRoom({ link: await codeRoom([3, 3, 3], here), role: 'host', name: ROOM_KIND.netplay })
+  assert.equal(await saidOf(findRoom([3, 3, 3], here)), SAID.tooMany)
+  mine.close()
+  await perAddress.close()
 })

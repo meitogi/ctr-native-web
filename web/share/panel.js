@@ -28,7 +28,7 @@ import { gateHost } from '../net/admit.js';
 import { CODE_MAX, CODE_MIN, ROOM_KIND, codeNames, codeRoom, openFreeRoom, parseCode, randomCode } from '../net/code.js';
 import { formatRoomLink, newRoom } from '../net/link.js';
 import { openRoom, peersOf } from '../net/room.js';
-import { DEFAULT_RELAY, DEFAULT_RELAY_KEY } from '../net/relay-default.js';
+import { DEFAULT_RELAY, DEFAULT_RELAY_KEY, keptRelay, relayWord } from '../net/relay-default.js';
 import { createCapture } from './capture.js';
 import { BITRATE, createShareHost } from './host.js';
 import { nameOf } from './protocol.js';
@@ -50,6 +50,8 @@ const CSS = `
 #share .error { color: #f66; white-space: pre-wrap; }
 #share .status { white-space: pre-wrap; margin-top: 6px; }
 #share .hint { color: #888; margin-top: 6px; }
+#share .word.public { color: #6c6; }
+#share .word.yours { color: #fb4; }
 `;
 
 const load = (k) => { try { return localStorage.getItem(STORE + k); } catch { return null; } };
@@ -73,6 +75,21 @@ let linkText = '';
 let error = '';
 let gate = null; // the room's door, while the panel's own Share is on
 let code = ''; // its code (one hex digit per character), '' with none
+let closedBy = ''; // the relay's close that ended the panel's own room ('room-alone'…), '' : none since the last start
+// What the relay said, in words (its close codes : web/net/signaling.js)
+const NO_ANSWER = 'The relay does not answer.';
+const NO_ONE_CAME = 'Room closed : no one came. Couch opens a new one.';
+const RELAY_SAYS = {
+  relay: NO_ANSWER,
+  'relay-silent': NO_ANSWER,
+  'relay-key': 'This relay asks for a key, or refused this one.',
+  'relay-full': 'The relay is full. Try again later, or set your own relay.',
+  'relay-address': 'Too many players from your network are on this relay. Try again later, or set your own relay.',
+  'room-alone': NO_ONE_CAME,
+  'relay-idle': NO_ONE_CAME,
+  'room-life': 'Room closed : its time on the relay is up. Couch opens a new one.',
+};
+const RELAY_CLOSED = { 'room-alone': true, 'relay-idle': true, 'room-life': true };
 // the characters of a new room's code : the site's setting, shared with Netplay
 let codeLength = CODE_MIN;
 fetch(new URL('../online/config.json', import.meta.url)).then((r) => r.json()).then((config) => {
@@ -146,8 +163,11 @@ Module.ctrShare = {
 
 const query = new URLSearchParams(location.search);
 document.head.append(el('style', { textContent: CSS }));
-const relay = el('input', { type: 'text', id: 'share-relay', value: query.get('relay') || load('relay') || DEFAULT_RELAY });
 const rk = el('input', { type: 'password', id: 'share-rk', value: query.get('rk') || load('rk') || DEFAULT_RELAY_KEY, autocomplete: 'off' });
+const relay = el('input', { type: 'text', id: 'share-relay', value: query.get('relay') || keptRelay(load('relay') || '', rk.value) });
+// which relay that is, in a word : « public » (the page's own, no key), « yours »
+const relayWordOut = el('span', { id: 'share-relay-word' });
+const usePublic = el('button', { type: 'button', id: 'share-relay-public', textContent: 'Use the public relay' });
 const startButton = el('button', { type: 'button', id: 'share-start', textContent: 'Couch' });
 const stopButton = el('button', { type: 'button', id: 'share-stop', textContent: 'Stop', disabled: true });
 const copyButton = el('button', { type: 'button', id: 'share-copy', textContent: 'Copy guest link', disabled: true });
@@ -165,8 +185,9 @@ const HINT_IN_GAME = 'Started and stopped in the game : Select on the character 
 const panel = el('div', { id: 'share' },
   el('h2', {}, 'Couch'),
   codeRow,
-  el('label', {}, 'Relay', relay),
-  el('label', {}, 'Relay key', rk),
+  el('label', {}, 'Relay ', relayWordOut, relay),
+  usePublic,
+  el('label', {}, 'Relay key (a private relay only)', rk),
   startButton, stopButton, copyButton,
   el('label', {}, 'Video bitrate ', bitrateLabel, bitrate),
   status, errorLine,
@@ -208,7 +229,19 @@ async function startOn(room, { relayGuests = false, by = 'share' } = {}) {
   audioOn = true;
   if (!(await tapAudio(3000))) error = 'No game audio yet : guests get video only.';
   room.on('warning', (w) => { error = `${w.code}: ${w.message}`; render(); });
-  room.on('close', () => { error = 'relay: the relay closed the room'; render(); });
+  room.on('close', (info) => {
+    if (!host) return; // stopped here : not the relay's doing
+    const why = info?.code;
+    error = RELAY_CLOSED[why] ? RELAY_SAYS[why] : 'The relay closed the room.';
+    // the panel's own room, ended by the relay's limits : Couch is off, and says why (the game's box
+    // reads closedBy ; a Netplay room is its own module's to leave)
+    if (by === 'share' && RELAY_CLOSED[why]) {
+      stopOn();
+      closedBy = why;
+      ui?.toast('Room closed', error, '', { ms: 15_000 });
+    }
+    render();
+  });
   host = createShareHost({ room, stream: capture.stream, maxBitrate: Number(bitrate.value), scale: capture.scale, slots, hostName: hostName(),
     game: () => globalThis.__ctr ?? null, relayGuests, compact: by === 'online', compactNow: () => !racing() });
   host.on('change', () => {
@@ -228,9 +261,10 @@ async function startOn(room, { relayGuests = false, by = 'share' } = {}) {
 
 /** Stops sharing ; the room stays open when another module owns it. */
 function stopOn({ keepRoom = false } = {}) {
-  host?.close({ keepRoom });
-  capture?.stop();
+  const mine = host;
   host = null;
+  mine?.close({ keepRoom });
+  capture?.stop();
   capture = null;
   linkText = '';
   gate = null;
@@ -254,6 +288,7 @@ function start(where) {
 async function begin(given) {
   let result = { ok: true };
   error = '';
+  closedBy = '';
   startButton.disabled = true;
   if (!given) {
     save('relay', relay.value.trim());
@@ -285,7 +320,7 @@ async function begin(given) {
     tellCode();
   } catch (e) {
     const message = String(e.message ?? e);
-    error = `${e.code ? `${e.code}: ` : ''}${message}`;
+    error = RELAY_SAYS[e.code] ?? `${e.code ? `${e.code}: ` : ''}${message}`;
     result = { ok: false, code: e.code ?? '', message };
     capture?.stop();
     capture = null;
@@ -326,11 +361,19 @@ function said() {
 }
 
 // start / link : the page's home hosts Share without this panel's button (ui/src/lib/home.js)
-globalThis.ctrShareApi = { slots, startOn, stopOn, host: () => host, guests, start, link: () => linkText, door, said };
+globalThis.ctrShareApi = { slots, startOn, stopOn, host: () => host, guests, start, link: () => linkText, door, said, closedBy: () => closedBy };
 
 ui?.settings.subscribe((s) => { if (host && s.name !== host.hostName) host.setHostName(s.name); });
 
 startButton.addEventListener('click', () => start());
+usePublic.addEventListener('click', () => {
+  relay.value = DEFAULT_RELAY;
+  rk.value = DEFAULT_RELAY_KEY;
+  // the Netplay tab's fields when they are there (they save), this panel's own otherwise
+  for (const [field] of mirrored) field.dispatchEvent(new Event('input', { bubbles: true }));
+  if (!inGame()) { save('relay', relay.value); save('rk', rk.value); }
+  render();
+});
 stopButton.addEventListener('click', stop);
 copyButton.addEventListener('click', () => navigator.clipboard?.writeText(linkText));
 bitrate.addEventListener('input', () => {
@@ -363,6 +406,10 @@ function render() {
       if (theirs && document.activeElement !== field && field.value !== theirs.value) field.value = theirs.value;
     }
   }
+  const word = relayWord(relay.value);
+  relayWordOut.className = `word ${word}`;
+  relayWordOut.textContent = word;
+  usePublic.hidden = word === 'public';
   bitrateLabel.textContent = `${(Number(bitrate.value) / 1e6).toFixed(2)} Mbit/s per guest`;
   const lines = [];
   if (!host) lines.push('Not sharing.');

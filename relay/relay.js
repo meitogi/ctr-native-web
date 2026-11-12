@@ -25,6 +25,12 @@ export const CLOSE = {
   roomFull: 4403,
   idTaken: 4409,
   rate: 4429,
+  // an open relay's limits (all off by default) : each refusal and each kick says which it was
+  idle: 4408, // nothing but pings on this socket for idleMs
+  alone: 4410, // nobody joined this room for aloneMs
+  life: 4411, // the room reached roomLifeMs
+  address: 4430, // ipMax sockets already open from this address
+  full: 4503, // maxSockets or maxRooms reached
 };
 
 const FIELD_MAX = 64;
@@ -39,7 +45,12 @@ function validField(value, required) {
 
 /** Forwarding counters since start (`GET /stats` with `stats: true`). */
 function newStats() {
-  return { since: new Date().toISOString(), sockets: 0, rooms: 0, forwarded: 0, droppedLossy: 0, closedRate: 0, refusedOrigin: 0 };
+  return {
+    since: new Date().toISOString(), sockets: 0, rooms: 0, forwarded: 0, droppedLossy: 0, closedRate: 0, refusedOrigin: 0,
+    peakSockets: 0, peakRooms: 0,
+    refused: { sockets: 0, rooms: 0, address: 0 },
+    kicked: { idle: 0, alone: 0, life: 0 },
+  };
 }
 
 /**
@@ -60,6 +71,17 @@ function newStats() {
  *   header) ; empty = any. A client without the header (not a browser) is not refused : the
  *   key gates the relay, this only fences other sites' pages off it
  * @param {boolean} [options.stats=false] - answer `GET /stats` with the counters (JSON)
+ * @param {number} [options.maxSockets=0] - sockets open at once ; one more is closed `full` (0 = no limit,
+ *   as for every limit below : a relay started without them behaves as it always did)
+ * @param {number} [options.maxRooms=0] - rooms open at once ; a hello that would open one more is closed `full`
+ * @param {number} [options.ipMax=0] - sockets open at once from one client address ; one more is closed `address`
+ * @param {number} [options.trustProxy=0] - reverse proxies in front of the relay. 0 : the client's address
+ *   is the socket's. n : it is the n-th entry from the right of `X-Forwarded-For`, the one the outermost
+ *   trusted proxy wrote — never the left of the list, which the client writes itself
+ * @param {number} [options.idleMs=0] - a joined socket that neither sent nor was sent anything but pings
+ *   for that long is closed `idle`. Players on a direct link are silent on the relay : this cuts their room
+ * @param {number} [options.aloneMs=0] - a room with one peer for that long is closed `alone`
+ * @param {number} [options.roomLifeMs=0] - a room open for that long is closed `life`, whoever is in it
  * @param {(line: string) => void} [options.log=console.log]
  * @returns {Promise<{port: number, stats(): object, setTls(tls: {cert, key}): void, close(): Promise<void>}>}
  *   `setTls` swaps the certificate for new TLS handshakes ; open sockets keep theirs.
@@ -77,17 +99,26 @@ export function createRelay({
   logData = false,
   origins = [],
   stats: statsOn = false,
+  maxSockets = 0,
+  maxRooms = 0,
+  ipMax = 0,
+  trustProxy = 0,
+  idleMs = 0,
+  aloneMs = 0,
+  roomLifeMs = 0,
   log = console.log,
 } = {}) {
   const keyDigest = key ? digest(key) : null;
   /** room name → peer id → client */
   const rooms = Object.create(null);
+  /** room name → { born, aloneSince } : when it opened, since when it has had one peer (0 : it has more) */
+  const roomInfo = Object.create(null);
+  let roomCount = 0;
+  /** client address → its open sockets ; the accepted sockets in all */
+  const perAddress = Object.create(null);
+  let accepted = 0;
   const stats = newStats();
-  const snapshot = () => {
-    let roomCount = 0;
-    for (const _ in rooms) roomCount++;
-    return { ...stats, sockets: wss.clients.size, rooms: roomCount };
-  };
+  const snapshot = () => ({ ...stats, sockets: wss.clients.size, rooms: roomCount });
 
   const onRequest = (req, res) => {
     if (statsOn && req.url === '/stats') {
@@ -132,15 +163,28 @@ export function createRelay({
     if (!validField(id, true) || !validField(roomName) || !validField(msg.name) || !validField(msg.kind)) {
       return client.ws.close(CLOSE.badHello, 'bad hello');
     }
-    const room = (rooms[roomName] ??= Object.create(null));
-    if (room[id]) return client.ws.close(CLOSE.idTaken, 'id taken');
+    let room = rooms[roomName];
     let count = 0;
-    for (const _ in room) count++;
-    if (count >= roomMax) return client.ws.close(CLOSE.roomFull, 'room full');
+    if (room) {
+      if (room[id]) return client.ws.close(CLOSE.idTaken, 'id taken');
+      for (const _ in room) count++;
+      if (count >= roomMax) return client.ws.close(CLOSE.roomFull, 'room full');
+    } else {
+      if (maxRooms && roomCount >= maxRooms) {
+        stats.refused.rooms++;
+        return client.ws.close(CLOSE.full, 'rooms');
+      }
+      // opened only now : a refused hello leaves no room behind
+      room = rooms[roomName] = Object.create(null);
+      roomInfo[roomName] = { born: Date.now(), aloneSince: 0 };
+      if (++roomCount > stats.peakRooms) stats.peakRooms = roomCount;
+    }
+    roomInfo[roomName].aloneSince = count ? 0 : Date.now();
     client.id = id;
     client.roomName = roomName;
     client.name = msg.name || id.slice(0, 6);
     client.kind = msg.kind || 'client';
+    client.active = Date.now();
     room[id] = client;
     clearTimeout(client.helloTimer);
     log(`  hello ${client.name} (${id.slice(0, 6)}) kind=${client.kind} room=${roomName.slice(0, 8) || '-'}`);
@@ -171,8 +215,37 @@ export function createRelay({
     }
   }
 
+  /** The client's address : the socket's, or the one the outermost trusted proxy saw. */
+  function addressOf(req) {
+    const direct = req.socket.remoteAddress;
+    if (!trustProxy) return direct;
+    const list = String(req.headers['x-forwarded-for'] ?? '').split(',');
+    return list[list.length - trustProxy]?.trim() || direct;
+  }
+
+  function refuse(ws, why, code) {
+    stats.refused[why]++;
+    ws.on('error', () => {});
+    ws.close(code, why);
+  }
+
+  function kick(client, why) {
+    if (client.kicked) return;
+    client.kicked = true;
+    stats.kicked[why]++;
+    log(`  kicked ${client.name} (${client.id.slice(0, 6)}) ${why}`);
+    client.ws.close(CLOSE[why], why);
+  }
+
   wss.on('connection', (ws, req) => {
     const remote = `${req.socket.remoteAddress}:${req.socket.remotePort}`;
+    // refused just after the handshake : a browser cannot read why an upgrade was refused, a close code it can
+    const address = addressOf(req);
+    if (maxSockets && accepted >= maxSockets) return refuse(ws, 'sockets', CLOSE.full);
+    const fromHere = perAddress[address] ?? 0;
+    if (ipMax && fromHere >= ipMax) return refuse(ws, 'address', CLOSE.address);
+    perAddress[address] = fromHere + 1;
+    if (++accepted > stats.peakSockets) stats.peakSockets = accepted;
     const client = {
       ws,
       id: null,
@@ -180,11 +253,14 @@ export function createRelay({
       name: null,
       kind: null,
       alive: true,
+      kicked: false,
+      active: 0, // the last message that was not a ping, either way
       tokens: burst,
       stamp: Date.now(),
       drops: 0,
       helloTimer: setTimeout(() => ws.close(CLOSE.key, 'no hello'), helloTimeoutMs),
-      send(raw) {
+      send(raw, isPong = false) {
+        if (!isPong) client.active = Date.now();
         if (ws.readyState === ws.OPEN) ws.send(raw);
       },
     };
@@ -229,19 +305,28 @@ export function createRelay({
         return;
       }
       if (!valid) return;
-      if (msg.type === 'ping') client.send(JSON.stringify({ type: 'pong', ts: msg.ts, srv: now }));
-      else route(client, msg);
+      if (msg.type === 'ping') return client.send(JSON.stringify({ type: 'pong', ts: msg.ts, srv: now }), true);
+      client.active = now;
+      route(client, msg);
     });
     ws.on('close', (code) => {
       clearTimeout(client.helloTimer);
+      accepted--;
+      if (--perAddress[address] === 0) delete perAddress[address];
       const roomName = client.roomName;
       if (client.id === null) return log(`- ${remote} (no hello, ${code})`);
       const room = rooms[roomName];
       delete room[client.id];
-      let empty = true;
-      for (const _ in room) { empty = false; break; }
-      if (empty) delete rooms[roomName];
-      else broadcastPeers(roomName);
+      let left = 0;
+      for (const _ in room) left++;
+      if (!left) {
+        delete rooms[roomName];
+        delete roomInfo[roomName];
+        roomCount--;
+      } else {
+        if (left === 1) roomInfo[roomName].aloneSince = Date.now();
+        broadcastPeers(roomName);
+      }
       log(`- ${client.name} (${client.id.slice(0, 6)}) ${code}`);
     });
     ws.on('error', () => {}); // a 1009 (too big) or a reset ; 'close' follows
@@ -256,11 +341,33 @@ export function createRelay({
     }
   }, HEARTBEAT_MS);
 
+  // the kicks, looked for often enough that none is late by more than a quarter of its own delay
+  let shortest = Infinity;
+  for (const ms of [idleMs, aloneMs, roomLifeMs]) if (ms && ms < shortest) shortest = ms;
+  const sweep = shortest === Infinity ? null : setInterval(() => {
+    const now = Date.now();
+    for (const roomName in rooms) {
+      const info = roomInfo[roomName];
+      const room = rooms[roomName];
+      if (roomLifeMs && now - info.born >= roomLifeMs) for (const id in room) kick(room[id], 'life');
+      else if (aloneMs && info.aloneSince && now - info.aloneSince >= aloneMs) for (const id in room) kick(room[id], 'alone');
+    }
+    if (!idleMs) return;
+    for (const ws of wss.clients) {
+      const client = ws.client;
+      if (client && client.id !== null && now - client.active >= idleMs) kick(client, 'idle');
+    }
+  }, Math.min(5000, Math.max(20, shortest / 4)));
+
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
       const actual = server.address().port;
       log(`ctr-relay listening ${tls ? 'wss' : 'ws'}://${host}:${actual} ${keyDigest ? 'private (RELAY_KEY set)' : 'OPEN (no RELAY_KEY)'}`);
+      if (maxSockets || maxRooms || ipMax || trustProxy || sweep) {
+        const s = (ms) => (ms ? `${ms / 1000} s` : 'off');
+        log(`limits : sockets ${maxSockets || 'off'}, rooms ${maxRooms || 'off'}, per address ${ipMax || 'off'} (proxies trusted : ${trustProxy}), idle ${s(idleMs)}, alone ${s(aloneMs)}, room life ${s(roomLifeMs)}`);
+      }
       resolve({
         port: actual,
         stats: snapshot,
@@ -270,6 +377,7 @@ export function createRelay({
         },
         close() {
           clearInterval(heartbeat);
+          clearInterval(sweep);
           for (const ws of wss.clients) ws.terminate();
           wss.close();
           return new Promise((done) => server.close(() => done()));
@@ -300,6 +408,13 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     logData: env.RELAY_LOG_DATA === '1',
     origins: (env.RELAY_ORIGINS || '').split(',').map((o) => o.trim()).filter(Boolean),
     stats: env.RELAY_STATS === '1',
+    maxSockets: envInt('RELAY_MAX_SOCKETS', 0),
+    maxRooms: envInt('RELAY_MAX_ROOMS', 0),
+    ipMax: envInt('RELAY_IP_MAX', 0),
+    trustProxy: envInt('RELAY_TRUST_PROXY', 0),
+    idleMs: envInt('RELAY_IDLE_S', 0) * 1000,
+    aloneMs: envInt('RELAY_ALONE_S', 0) * 1000,
+    roomLifeMs: envInt('RELAY_ROOM_LIFE_S', 0) * 1000,
   }).then((relay) => {
     if (!tls) return;
     // A renewed certificate (lego, certbot…) is written over the same files : re-read them on

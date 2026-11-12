@@ -33,7 +33,8 @@ const CROSS = 'c'
 const TRIANGLE = 'z'
 const START = 'Enter'
 const SELECT = ' '
-const SILENT = 'ws://localhost:8787'
+// nothing listens there ; CTR_SILENT_RELAY names another dead port when a dev relay holds 8787
+const SILENT = process.env.CTR_SILENT_RELAY ?? 'ws://localhost:8787'
 const NAMES = ['Crash', 'Cortex', 'Tiny', 'Coco', 'N. Gin', 'Dingodile', 'Polar', 'Pura', 'Pinstripe', 'Papu Papu', 'Ripper Roo', 'Komodo Joe', 'N. Tropy', 'Penta', 'Fake Crash']
 const TOASTS = `(() => {
 	globalThis.__toasts = []
@@ -232,15 +233,15 @@ async function homeErrors(ctx) {
 	await said(tab, 'RELAY OFFLINE')
 	steps.push('RELAY OFFLINE')
 
-	// no key in this browser : said on the page, typed there once
+	// no key in this browser, on a relay that has one : said on the page, typed there once
 	await home(tab, origin, { relay, rk: '' })
 	await joinFromHome(tab, code)
-	await page(tab, 'the NO RELAY KEY card', "document.getElementById('join-nokey')?.innerText.includes('NO RELAY KEY')", 10_000)
+	await page(tab, 'the KEY REFUSED card', "document.getElementById('join-nokey')?.innerText.includes('KEY REFUSED')", 15_000)
 	await shot(ctx, 'home-no-relay-key')
 	await click(tab, 'join-back')
-	if ((await page(tab, 'the dials back', "document.getElementById('join-code') ? 1 : 0", 5000)) && (await dials(tab)).code.join() !== code.join()) throw new Error('Back from NO RELAY KEY lost the dials')
+	if ((await page(tab, 'the dials back', "document.getElementById('join-code') ? 1 : 0", 5000)) && (await dials(tab)).code.join() !== code.join()) throw new Error('Back from KEY REFUSED lost the dials')
 	await tab.press(START)
-	await page(tab, 'the NO RELAY KEY card again', "!!document.getElementById('join-nokey')", 10_000)
+	await page(tab, 'the KEY REFUSED card again', "!!document.getElementById('join-nokey')", 15_000)
 	const type = (id, value) => tab.js(`const e = document.getElementById(${JSON.stringify(id)}); e.value = ${JSON.stringify(value)}; e.dispatchEvent(new Event('input', { bubbles: true })); return true`)
 	await type('join-rk', 'not-the-key')
 	await click(tab, 'join-save')
@@ -250,7 +251,7 @@ async function homeErrors(ctx) {
 	await said(tab, 'NO SUCH ROOM')
 	const kept = await tab.js("return localStorage.getItem('ctr-online.rk')")
 	if (kept !== rk) throw new Error(`the key typed on the page was not kept : ${kept}`)
-	steps.push('NO RELAY KEY (Back to the dials), KEY REFUSED, the right key typed there and kept')
+	steps.push('no key on a keyed relay : KEY REFUSED (Back to the dials), a wrong key refused, the right key typed there and kept')
 	return steps.join(' · ')
 }
 

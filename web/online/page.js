@@ -28,7 +28,7 @@ import { CODE_MAX, CODE_MIN, ROOM_KIND, codeNames, codeRoom, codeText, parseCode
 import { b64u, randomBytes } from '../net/crypto.js';
 import { formatRoomLink, newRoom, parseRoomLink } from '../net/link.js';
 import { openRoom, peersOf } from '../net/room.js';
-import { DEFAULT_RELAY, DEFAULT_RELAY_KEY } from '../net/relay-default.js';
+import { DEFAULT_RELAY, DEFAULT_RELAY_KEY, keptRelay, relayWord } from '../net/relay-default.js';
 import { probeRelay } from '../net/signaling.js';
 import { createShareGuest } from '../share/guest.js';
 import { gateGuest, gateHost } from '../net/admit.js';
@@ -46,8 +46,18 @@ const ST = { pickRoom: 2, assignRole: 4, waitForRace: 10, endRace: 12 };
  * What the game's NETPLAY screens read (NativeWeb_NetplayStatus, game/230/MM_MenuFlow.c) : the
  * room a mode or JOIN asked for — on its way, waiting for the host's yes, there, or why not.
  */
-export const NP = { idle: 0, busy: 1, waiting: 2, room: 3, noKey: 10, keyRefused: 11, offline: 12, noRoom: 13, full: 14, refused: 15 };
-const NP_OF = { 'relay-key': NP.keyRefused, absent: NP.noRoom, 'room-full': NP.full, full: NP.full, refused: NP.refused };
+export const NP = {
+  idle: 0, busy: 1, waiting: 2, room: 3, noKey: 10, keyRefused: 11, offline: 12, noRoom: 13, full: 14, refused: 15,
+  // a public relay's own (16 and 17 are the home page's : the host left, no direct path — web/ui lib/join.js) :
+  // at its limit, a room it closed for want of a guest, too many sockets from this address, a room's longest life
+  relayFull: 18, roomClosed: 19, tooMany: 20, timeUp: 21,
+};
+const NP_OF = {
+  'relay-key': NP.keyRefused, absent: NP.noRoom, 'room-full': NP.full, full: NP.full, refused: NP.refused,
+  'relay-full': NP.relayFull, 'relay-address': NP.tooMany, 'room-alone': NP.roomClosed, 'relay-idle': NP.roomClosed, 'room-life': NP.timeUp,
+};
+/** The closes by which a relay ends a room it had let in (its limits, relay/README.md). */
+const RELAY_CLOSED = { 'room-alone': true, 'relay-idle': true, 'room-life': true };
 /** The page's one OnlineCTR room (OnlineExternal_State) ; SG_ROOMS adds 8 to a locked room's count. */
 const ROOM = 5;
 
@@ -79,7 +89,12 @@ const STRINGS = {
     copied: 'Copied',
     copyFailed: 'Select the link and copy it (Cmd-C).',
     checking: 'Checking the relay…',
-    relayChecks: { ok: '✓ The relay accepts this key.', key: '✗ The relay refused this key.', unreachable: '✗ The relay does not answer.' },
+    relayChecks: { ok: '✓ The relay accepts this key.', key: '✗ The relay refused this key.', unreachable: '✗ The relay does not answer.', full: 'The relay answers, and is full right now.', address: 'The relay answers ; too many players from your network are on it.' },
+    relayChecksNoKey: { ok: '✓ The relay answers : no key needed.', key: '✗ This relay asks for a key.' },
+    relayWords: { public: 'public', yours: 'yours' },
+    relayKeyHelp: 'Only for a relay that has a key : the public one needs none.',
+    usePublic: 'Use the public relay',
+    closedByRelay: 'Room closed',
     joinTitle: 'Join a room',
     joinPlaceholder: 'paste a room link',
     join: 'Join',
@@ -154,6 +169,11 @@ const STRINGS = {
       relay: 'The relay closed the connection.',
       'relay-key': 'The relay refused the key : check it in Settings › Netplay.',
       'room-full': 'The room is full.',
+      'relay-full': 'The relay is full. Try again later, or set your own relay in Settings › Netplay.',
+      'relay-address': 'Too many players from your network are on this relay. Try again later, or set your own relay in Settings › Netplay.',
+      'room-alone': 'No one came : the relay closed the room. Open it again when your players are ready.',
+      'relay-idle': 'No one came : the relay closed the room. Open it again when your players are ready.',
+      'room-life': 'The room\'s time on the relay is up. Open a new one.',
       refused: 'The host did not let you in.',
       'relay-silent': (e) => `The relay does not answer (${e.url}).`,
       paste: 'This room has no copy-paste meeting point.',
@@ -250,6 +270,11 @@ const STRINGS = {
       ice: 'Connexion directe impossible ; essai via le relais.',
       relay: 'Le relais a fermé la connexion.',
       'relay-key': 'Le relais a refusé la clé : vérifie-la dans Réglages › Netplay.',
+      'relay-full': 'Le relais est plein. Réessaie plus tard, ou mets ton propre relais dans Réglages › Netplay.',
+      'relay-address': 'Trop de joueurs de ton réseau sont sur ce relais. Réessaie plus tard, ou mets ton propre relais dans Réglages › Netplay.',
+      'room-alone': 'Personne n\'est venu : le relais a fermé la partie. Rouvre-la quand tes joueurs sont prêts.',
+      'relay-idle': 'Personne n\'est venu : le relais a fermé la partie. Rouvre-la quand tes joueurs sont prêts.',
+      'room-life': 'Le temps de la partie sur le relais est écoulé. Ouvres-en une nouvelle.',
       paste: 'Cette partie n\'a pas de copier-coller.',
     },
   },
@@ -280,6 +305,9 @@ const CSS = `
 #online .check:empty { display: none; }
 #online .check.ok { color: #6c6; }
 #online .check.key, #online .check.unreachable { color: #f66; }
+#online .check.full, #online .check.address { color: #fb4; }
+#online .word.public { color: #6c6; }
+#online .word.yours { color: #fb4; }
 #online .hint { color: #888; margin-top: 10px; }
 #online-toggle { position: fixed; top: 40px; right: 10px; z-index: 16; width: 36px; height: 36px; border-radius: 50%;
   border: 1px solid #555; background: #111; color: #ddd; cursor: pointer; padding: 0; opacity: 0;
@@ -382,13 +410,13 @@ export function attach(Module) {
     // tag, INVITE and its door as a Netplay room's
     Module.ctrInput.shareHost = () => (!link && shareDoor() ? 1 : 0);
     // Couch, switched on in the game (Select on the character select) : the panel's own room, on
-    // the relay and key of Settings ; 0 in a Netplay room or with no key, couchStatus says why
+    // the relay of Settings (and its key, when it has one) ; 0 in a Netplay room or with no relay, couchStatus says why
     Module.ctrInput.couchStart = () => {
       if (shareDoor() || couch === NP.busy) return 1;
       if (net.room || hosting) return 0;
       const where = { relay: relay.value.trim(), rk: rk.value.trim() };
       const share = globalThis.ctrShareApi;
-      if (!where.relay || !where.rk || !share?.start) {
+      if (!where.relay || !share?.start) {
         couch = share?.start ? NP.noKey : NP.offline;
         return 0;
       }
@@ -403,7 +431,8 @@ export function attach(Module) {
     };
     Module.ctrInput.couchStatus = () => {
       if (shareDoor()) return NP.room;
-      if (couch === NP.room) couch = NP.idle; // the room is gone
+      // the room is gone : stopped here, or closed by the relay (the panel knows which)
+      if (couch === NP.room) couch = NP_OF[globalThis.ctrShareApi?.closedBy?.()] ?? NP.idle;
       return couch;
     };
     Module.ctrInput.couchStop = () => {
@@ -413,13 +442,13 @@ export function attach(Module) {
     };
     Module.ctrInput.couchSaid = () => globalThis.ctrShareApi?.said?.() ?? '';
     // NETPLAY > VS, BATTLE or ARCADE picked with no room (session 28) : this player hosts one, on
-    // the relay and key of Settings ; 0 with no key, the game says why
+    // the relay of Settings (and its key, when it has one) ; 0 with no relay, the game says why
     Module.ctrInput.netplayHost = () => {
       // a room the game left on its own (the pause menu's QUIT mid-race) : closed, a new one
       if (net.room && !hosting && !lobby().active) leave();
       if (net.room && net.role !== 'host') leave();
       if (net.room || hosting) return 1;
-      if (!haveKey()) return 0;
+      if (!haveRelay()) return 0;
       const relayBox = meets.find((m) => m.id === 'relay').box;
       relayBox.checked = true;
       np = NP.busy;
@@ -427,9 +456,9 @@ export function attach(Module) {
       return 1;
     };
     Module.ctrInput.netplayStatus = () => np;
-    // NETPLAY > JOIN, its dials set (one hex digit per character) : 0 with no key
+    // NETPLAY > JOIN, its dials set (one hex digit per character) : 0 with no relay
     Module.ctrInput.netplayJoin = (text) => {
-      if (!haveKey()) return 0;
+      if (!haveRelay()) return 0;
       joinByCode(parseCode(text));
       return 1;
     };
@@ -491,8 +520,17 @@ export function attach(Module) {
     const box = el('input', { type: 'checkbox', id: `online-meet-${id}`, checked: points.includes(id) });
     return { id, box, node: el('div', { className: 'opt' }, el('label', {}, box, ' ', label), el('div', { className: 'help' }, help), ...(extra ? [extra] : [])) };
   };
-  const relay = el('input', { type: 'text', id: 'online-relay', value: query.get('relay') ?? load('relay', DEFAULT_RELAY) });
   const rk = el('input', { type: 'password', id: 'online-rk', value: query.get('rk') ?? load('rk', DEFAULT_RELAY_KEY), autocomplete: 'off' });
+  const relay = el('input', { type: 'text', id: 'online-relay', value: query.get('relay') ?? keptRelay(load('relay', ''), rk.value) });
+  // which relay that is, in a word beside its field : « public » (the page's own, no key), « yours »
+  const relayWordOut = el('span', { id: 'online-relay-word' });
+  const usePublic = el('button', { type: 'button', id: 'online-relay-public', textContent: T.usePublic });
+  const tellRelay = () => {
+    const word = relayWord(relay.value);
+    relayWordOut.className = `word ${word}`;
+    relayWordOut.textContent = T.relayWords[word];
+    usePublic.hidden = word === 'public';
+  };
   // the relay and its key tried on leaving either field (no room opened) : only the last try shows
   const relayCheck = el('div', { className: 'check', id: 'online-relay-check', role: 'status' });
   let checked = '';
@@ -509,21 +547,31 @@ export function attach(Module) {
       if (gen !== checkGen) return;
       if (result === 'unreachable') checked = ''; // tried again on the next focus out (a relay started since)
       relayCheck.className = `check ${result}`;
-      relayCheck.textContent = T.relayChecks[result];
+      relayCheck.textContent = (key ? null : T.relayChecksNoKey[result]) ?? T.relayChecks[result];
     });
   };
   relay.addEventListener('focusout', checkRelay);
   rk.addEventListener('focusout', checkRelay);
   // typed once, kept by the browser (the game's NETPLAY menu reads them, no Create room needed)
-  relay.addEventListener('input', () => save('relay', relay.value));
+  relay.addEventListener('input', () => { save('relay', relay.value); tellRelay(); });
   rk.addEventListener('input', () => save('rk', rk.value));
-  const haveKey = () => {
-    if (relay.value.trim() && rk.value.trim()) return true;
+  usePublic.addEventListener('click', () => {
+    relay.value = DEFAULT_RELAY;
+    rk.value = DEFAULT_RELAY_KEY;
+    save('relay', relay.value);
+    save('rk', rk.value);
+    tellRelay();
+    checkRelay();
+  });
+  tellRelay();
+  // a relay is all a room needs : the public one has no key, a keyed one refuses a missing key itself
+  const haveRelay = () => {
+    if (relay.value.trim()) return true;
     np = NP.noKey;
     return false;
   };
   const meets = [
-    meet('relay', T.relay, T.relayHelp, el('div', { className: 'sub' }, el('label', {}, T.relayUrl, relay), el('label', {}, T.relayKey, rk), relayCheck)),
+    meet('relay', T.relay, T.relayHelp, el('div', { className: 'sub' }, el('label', {}, T.relayUrl, ' ', relayWordOut, relay), usePublic, el('label', {}, T.relayKey, rk), el('div', { className: 'help' }, T.relayKeyHelp), relayCheck)),
     meet('mqtt', T.mqtt, T.mqttHelp),
     meet('paste', T.paste, T.pasteHelp),
   ];
@@ -613,7 +661,7 @@ export function attach(Module) {
       room.on('linkclose', render);
       room.on('warning', (w) => fail(w));
       room.on('blob', (b) => { codeOut = b; render(); });
-      room.on('close', () => fail({ code: 'relay' }));
+      room.on('close', (info) => (RELAY_CLOSED[info?.code] ? closedByRelay(info.code) : fail({ code: 'relay' })));
       // the door : the game's server and the lobby share only see a guest once it is let in
       gate = gateHost(room, { pass: link.pass, onChange: knocked });
       net.host(gate);
@@ -657,6 +705,17 @@ export function attach(Module) {
   // someone who typed the code waits at the door : the game's box asks on its menus ; mid-race
   // the game draws one line, the box comes with the menus (28b : nothing of it on the page)
   const knocked = () => render();
+
+  /**
+   * The relay closed this host's room (nobody joined, or its longest life) : the room is left as
+   * by Leave, and said — a toast, the panel's line, and the game's box on its menus (np).
+   */
+  function closedByRelay(code) {
+    leave();
+    np = NP_OF[code];
+    fail({ code });
+    ui?.toast(T.closedByRelay, error, '', { ms: 15_000 });
+  }
 
   /** INVITE in the game : the link copied when the browser allows it (a pad press is no gesture). */
   function inviteCopy() {
@@ -1334,7 +1393,7 @@ export function attach(Module) {
   // page's UI, whose boot screen says « Joining the room… » (session 32e).
   setOpen(asGuest && !ui);
   if (asGuest) guest();
-  else if (bootCode && !haveKey()) codeSaid(NP.noKey);
+  else if (bootCode && !haveRelay()) codeSaid(NP.noKey);
   else if (bootCode) joinByCode(parseCode(bootCode));
   render();
 }

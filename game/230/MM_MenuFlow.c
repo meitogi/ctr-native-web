@@ -149,6 +149,12 @@ enum NetplayStatus
 	NETPLAY_NO_ROOM = 13,
 	NETPLAY_FULL = 14,
 	NETPLAY_REFUSED = 15,
+	// a public relay's own (16 and 17 are the home page's) : at its limit ; it closed a room nobody
+	// joined ; too many sockets from this address ; a room's longest life
+	NETPLAY_RELAY_FULL = 18,
+	NETPLAY_ROOM_CLOSED = 19,
+	NETPLAY_TOO_MANY = 20,
+	NETPLAY_TIME_UP = 21,
 };
 // The screens NETPLAY draws over the game's menus (OnlineNetplay_Frame)
 enum NetplayScreen
@@ -166,6 +172,8 @@ static int netplayScreen;
 static int netplayRow;    // the mode whose room is opening
 static int netplayFrames; // left for that room
 static int netplayError;  // the box's reason (enum NetplayStatus)
+static int netplayClosed; // a room the relay closed was said (once per close)
+static int netplayReopen; // the box's first row opens NETPLAY's room again, not Couch's
 static int netplayCouch;  // the room on its way is Couch's (session 29), not a NETPLAY mode's
 static int netplayHelp;   // the help page up : 0 NETPLAY's, 1 Couch's
 static int netplayHelpBack; // the screen it goes back to (INVITE, or none : the NETPLAY menu)
@@ -185,7 +193,39 @@ static struct RectMenu onlineMenuNoKey =
 };
 
 static void OnlineMenu_Host(int row);
+static void OnlineMenu_Reopen(void);
 static void NetplayJoin_Open(void);
+
+// A reason's words, for NETPLAY's box and Couch's : its title, the line under it (0 : none), and
+// whether its first row is another try (the relay's own reasons) or the page's settings (a key)
+static char *Netplay_ErrorTitle(int status)
+{
+	return (status == NETPLAY_OFFLINE)       ? "RELAY OFFLINE"
+	       : (status == NETPLAY_KEY_REFUSED) ? "KEY REFUSED"
+	       : (status == NETPLAY_RELAY_FULL)  ? "RELAY FULL"
+	       : (status == NETPLAY_TOO_MANY)    ? "TOO MANY HERE"
+	       : ((status == NETPLAY_ROOM_CLOSED) || (status == NETPLAY_TIME_UP)) ? "ROOM CLOSED"
+	                                         : "NO RELAY";
+}
+
+static char *Netplay_ErrorLine(int status)
+{
+	return (status == NETPLAY_RELAY_FULL)    ? "TRY LATER - OR YOUR OWN RELAY"
+	       : (status == NETPLAY_TOO_MANY)    ? "TOO MANY FROM YOUR NETWORK"
+	       : (status == NETPLAY_ROOM_CLOSED) ? "NO ONE CAME"
+	       : (status == NETPLAY_TIME_UP)     ? "ITS TIME ON THE RELAY IS UP"
+	                                         : 0;
+}
+
+static int Netplay_ErrorRetries(int status)
+{
+	return (status != NETPLAY_NO_KEY) && (status != NETPLAY_KEY_REFUSED);
+}
+
+static char *Netplay_ErrorRow(int status)
+{
+	return ((status == NETPLAY_ROOM_CLOSED) || (status == NETPLAY_TIME_UP)) ? "OPEN AGAIN" : Netplay_ErrorRetries(status) ? "TRY AGAIN" : "OPEN SETTINGS";
+}
 static void NetplayHelp_Open(int couch, int back);
 
 // The box under the NETPLAY menu : why the room did not open
@@ -198,7 +238,7 @@ static void OnlineMenu_ErrorBox(int status)
 }
 
 // Cross on its first row : the page's panel (a key missing or refused), or another try (the
-// relay silent) ; BACK, Triangle or Circle : the NETPLAY menu
+// relay silent, full, or one that closed the room) ; BACK, Triangle or Circle : the NETPLAY menu
 static void OnlineNoKey_Proc(struct RectMenu *menu)
 {
 	s16 row = menu->rowSelected;
@@ -208,7 +248,7 @@ static void OnlineNoKey_Proc(struct RectMenu *menu)
 	menu->ptrPrevBox_InHierarchy->state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
 	if ((row != 0) || ((sdata->gGamepads->gamepad[0].buttonsTapped & BTN_CIRCLE) != 0))
 		return;
-	if (netplayError != NETPLAY_OFFLINE)
+	if (!Netplay_ErrorRetries(netplayError))
 		NativeWeb_OpenMultiplayer();
 	else if (onlineMenu.rowSelected != ONLINE_JOIN_ROW)
 		OnlineMenu_Host(onlineMenu.rowSelected);
@@ -385,6 +425,12 @@ static void OnlineMenu_Host(int row)
 	netplayFrames = NETPLAY_OPEN_FRAMES;
 }
 
+// OPEN AGAIN, after the relay closed NETPLAY's room for want of a guest : the same mode's room
+static void OnlineMenu_Reopen(void)
+{
+	OnlineMenu_Host(netplayRow);
+}
+
 static void NetplayJoin_Open(void)
 {
 	netplayScreen = NETPLAY_SCREEN_JOIN;
@@ -530,6 +576,8 @@ static void NetplayJoin_Frame(int tap)
 	const char *said = (joinSaid == NETPLAY_NO_ROOM)   ? "NO SUCH ROOM"
 	                   : (joinSaid == NETPLAY_FULL)    ? "ROOM FULL"
 	                   : (joinSaid == NETPLAY_REFUSED) ? "THE HOST SAID NO"
+	                   : (joinSaid == NETPLAY_RELAY_FULL) ? "RELAY FULL"
+	                   : (joinSaid == NETPLAY_TOO_MANY) ? "TOO MANY HERE"
 	                   : (joinSaid != 0)               ? "RELAY OFFLINE"
 	                                                   : 0;
 
@@ -718,6 +766,7 @@ static void NetplayInvite_Frame(int tap)
 static void Couch_Start(void)
 {
 	askRow = 0;
+	netplayReopen = 0;
 	if (!NativeWeb_CouchStart())
 	{
 		netplayError = NETPLAY_NO_KEY;
@@ -792,11 +841,13 @@ static void NetplayHelp_Frame(int tap)
 	Netplay_DrawPanel(0x20, 0x12, 0x1c0, 0xaa, 3);
 }
 
-// Couch did not open : NETPLAY's words (no key, a key refused, a silent relay), the page's
-// Netplay settings or another try, or BACK (Triangle too)
+// Couch did not open, or the relay closed a room (Couch's or NETPLAY's) : NETPLAY's words (no
+// relay, a key refused, a silent or full relay, a room nobody joined), the page's Netplay
+// settings or another try, or BACK (Triangle too)
 static void CouchNo_Frame(int tap)
 {
-	int offline = netplayError == NETPLAY_OFFLINE;
+	int retries = Netplay_ErrorRetries(netplayError);
+	char *line = Netplay_ErrorLine(netplayError);
 
 	if (tap & (BTN_UP | BTN_DOWN))
 	{
@@ -809,17 +860,21 @@ static void CouchNo_Frame(int tap)
 
 		OtherFX_Play(go ? 1 : 2, 1);
 		netplayScreen = NETPLAY_SCREEN_NONE;
-		if (go && offline)
-			Couch_Start();
-		else if (go)
+		if (go && !retries)
 			NativeWeb_OpenMultiplayer();
+		// NETPLAY's own room, closed by the relay : its mode's room again, from the NETPLAY menu
+		else if (go && netplayReopen)
+			OnlineMenu_Reopen();
+		else if (go)
+			Couch_Start();
 		return;
 	}
-	DecalFont_DrawLine(offline ? "RELAY OFFLINE" : (netplayError == NETPLAY_KEY_REFUSED) ? "KEY REFUSED" : "NO RELAY KEY", 0x100, 0x40, FONT_BIG,
-	                   NETPLAY_CENTER | ORANGE);
-	DecalFont_DrawLine(offline ? "TRY AGAIN" : "OPEN SETTINGS", 0x100, 0x60, FONT_BIG, NETPLAY_CENTER | ((askRow == 0) ? WHITE : GRAY));
+	DecalFont_DrawLine(Netplay_ErrorTitle(netplayError), 0x100, 0x40, FONT_BIG, NETPLAY_CENTER | ORANGE);
+	if (line)
+		DecalFont_DrawLine(line, 0x100, 0x54, FONT_SMALL, NETPLAY_CENTER | WHITE);
+	DecalFont_DrawLine(Netplay_ErrorRow(netplayError), 0x100, 0x60, FONT_BIG, NETPLAY_CENTER | ((askRow == 0) ? WHITE : GRAY));
 	DecalFont_DrawLine("BACK", 0x100, 0x74, FONT_BIG, NETPLAY_CENTER | ((askRow == 1) ? WHITE : GRAY));
-	Netplay_DrawPanel(0x50, 0x36, 0x160, 0x58, 3);
+	Netplay_DrawPanel(line ? 0x28 : 0x50, 0x36, line ? 0x1b0 : 0x160, 0x58, 3);
 }
 
 // The two small pictures of a player in the panel : where it plays from, with what. 9 x 7, a
@@ -977,6 +1032,25 @@ int OnlineNetplay_Frame(void)
 	couchSaid = 0;
 	if (netplayScreen == NETPLAY_SCREEN_NONE)
 	{
+		// a room the relay closed (nobody came, its time is up) : said once, in Couch's box, with
+		// another room one press away ; the page said it too (a toast, off the menus as well)
+		int np = NativeWeb_NetplayStatus();
+		int cs = NativeWeb_CouchStatus();
+		int npClosed = (np == NETPLAY_ROOM_CLOSED) || (np == NETPLAY_TIME_UP);
+		int csClosed = (cs == NETPLAY_ROOM_CLOSED) || (cs == NETPLAY_TIME_UP);
+
+		if (!npClosed && !csClosed)
+			netplayClosed = 0;
+		else if (!netplayClosed && !ONLINE_ROOM)
+		{
+			netplayClosed = 1;
+			netplayReopen = npClosed;
+			netplayError = npClosed ? np : cs;
+			netplayScreen = NETPLAY_SCREEN_COUCH_NO;
+			askRow = 0;
+			OtherFX_Play(2, 1);
+			return 1;
+		}
 		if (local)
 		{
 			couchSaid = Couch_DrawSaid();
@@ -1199,9 +1273,8 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		GAME_LANGUAGE_STRINGS[ONLINE_LNG_ROW] = "NETPLAY";
 		GAME_LANGUAGE_STRINGS[ONLINE_LNG_JOIN] = "JOIN";
 		GAME_LANGUAGE_STRINGS[ONLINE_LNG_INFO] = "MORE INFO";
-		GAME_LANGUAGE_STRINGS[ONLINE_LNG_NO_KEY] =
-		    (netplayError == NETPLAY_OFFLINE) ? "RELAY OFFLINE" : (netplayError == NETPLAY_KEY_REFUSED) ? "KEY REFUSED" : "NO RELAY KEY";
-		GAME_LANGUAGE_STRINGS[ONLINE_LNG_OPEN_SETTINGS] = (netplayError == NETPLAY_OFFLINE) ? "TRY AGAIN" : "OPEN SETTINGS";
+		GAME_LANGUAGE_STRINGS[ONLINE_LNG_NO_KEY] = Netplay_ErrorTitle(netplayError);
+		GAME_LANGUAGE_STRINGS[ONLINE_LNG_OPEN_SETTINGS] = Netplay_ErrorRow(netplayError);
 		GAME_LANGUAGE_STRINGS[ONLINE_LNG_BACK] = "BACK";
 		MM_MENU_MAIN.rows = (MM_MENU_MAIN.rows == MM_ROWS_MAIN_WITH_SCRAPBOOK) ? onlineRowsMainWithScrapbook : onlineRowsMainBasic;
 		onlineMenu.posX_curr = MM_MENU_RACE_TYPE.posX_curr;

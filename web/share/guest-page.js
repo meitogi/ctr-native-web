@@ -126,7 +126,7 @@ if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(frameLoop);
 
 // ---- the room ----
 // what the home page's dials say of a room that did not take us (web/ui src/lib/join.js SAID)
-const SAID_OF = { refused: 15, full: 14, closed: 16, absent: 16, 'online-mode': 17, 'relay-key': 11, 'room-full': 14, relay: 12, 'relay-silent': 12 };
+const SAID_OF = { refused: 15, full: 14, closed: 16, absent: 16, 'online-mode': 17, 'relay-key': 11, 'room-full': 14, relay: 12, 'relay-silent': 12, 'relay-full': 18, 'relay-address': 20 };
 let leaving = false;
 /** Back on the home page's dials, kept, with what went wrong (0 : the player's own Back). */
 function backHome(status) {

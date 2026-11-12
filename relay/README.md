@@ -67,8 +67,8 @@ Actions › **Variables** :
 
 | Variable | Unset | Set |
 |---|---|---|
-| `CTR_RELAY_URL` | the page's relay is `wss://ctr-relay.suuuper.app` ([web/net/relay-default.js](../web/net/relay-default.js)) | your `wss://` address : the page's default when a player has typed none |
-| `CTR_RELAY_KEY` | no key built in : it comes in the room links, or is typed once | a key built into the page : players never type one |
+| `CTR_RELAY_URL` | the page's relay is `wss://ctr.public.suuuper.app` ([web/net/relay-default.js](../web/net/relay-default.js)) | your `wss://` address : the page's default when a player has typed none |
+| `CTR_RELAY_KEY` | no key built in : the public relay asks for none ; a keyed relay's comes in the room links, or is typed once | a key built into the page : players never type one |
 
 Push to `web/main` : the page is rebuilt with them. **A key built into the page is public** :
 anyone reads it in the page's source. That is why it is a *variable*, not a *secret* — a secret
@@ -100,7 +100,14 @@ reverse proxy ([deploy/](deploy/), next section), or give it a certificate with
 | `RELAY_RATE` / `RELAY_BURST` | `300` / `600` | messages per second per socket, sustained / at once (below) |
 | `RELAY_ROOM_MAX` | `8` | peers per room |
 | `RELAY_ORIGINS` | empty | pages allowed to connect, comma-separated `Origin`s (`https://ctr.suuuper.app`) ; empty = any. Only fences other sites' pages off a relay : a client without an `Origin` header (not a browser) still connects, the key is what gates it |
-| `RELAY_STATS` | — | `1` answers `GET /stats` with counters (sockets, rooms, forwarded, `droppedLossy`, `closedRate`, `refusedOrigin`) |
+| `RELAY_STATS` | — | `1` answers `GET /stats` with counters (sockets, rooms, forwarded, `droppedLossy`, `closedRate`, `refusedOrigin`, and an open relay's : `peakSockets`, `peakRooms`, `refused` per reason, `kicked` per reason) |
+| `RELAY_MAX_SOCKETS` | `0` | sockets open at once ; one more is closed 4503. `0` = no limit, as for every row below |
+| `RELAY_MAX_ROOMS` | `0` | rooms open at once ; a hello that would open one more is closed 4503 |
+| `RELAY_IP_MAX` | `0` | sockets open at once from one client address ; one more is closed 4430 |
+| `RELAY_TRUST_PROXY` | `0` | reverse proxies in front of the relay (below). Leave `0` when clients reach it directly |
+| `RELAY_ALONE_S` | `0` | seconds a room may stay with one peer ; then it is closed 4410 |
+| `RELAY_ROOM_LIFE_S` | `0` | seconds a room may stay open at all ; then everyone in it is closed 4411 |
+| `RELAY_IDLE_S` | `0` | seconds a joined socket may go with nothing but pings ; then it is closed 4408. **Players on a direct link are silent on the relay and their room ends when it closes them** : only for a relay that carries every room's traffic |
 | `RELAY_LOG_DATA` | — | `1` logs the first characters of each forwarded message (ciphertext), for debugging |
 
 `GET /healthz` answers `200 ok` (Docker healthcheck, proxy health checks).
@@ -112,6 +119,25 @@ burst, then the socket is closed with 4429 : a reliable message is never dropped
 the player's page reports the close. The browser coalesces what a host sends to a guest in one
 game frame into one message, so a room of N players on the relay costs the host (N − 1) × 30
 messages per second : 210 with 8 players.
+
+**An open relay** (no `RELAY_KEY`) is anyone's to use : give it limits. The ones this project's
+public relay starts with — one small container (half a CPU, 160 MB), measured at about 1 % of a
+core and 57 kB/s for a room of four with every player on the relay :
+
+```sh
+RELAY_MAX_SOCKETS=120 RELAY_MAX_ROOMS=40 RELAY_IP_MAX=8 RELAY_ALONE_S=600 RELAY_ROOM_LIFE_S=21600
+```
+
+A refusal or a kick is a close code of its own (below), so the player's page says which it was :
+« relay full », « too many players from your network », « room closed — no one came ». The counters
+of `GET /stats` say how often each happened, and the highest number of sockets and rooms seen :
+that is what to read before changing a limit.
+
+**The client's address behind a proxy.** `RELAY_IP_MAX` counts sockets per address. Behind a
+reverse proxy every socket comes from the proxy : set `RELAY_TRUST_PROXY` to the number of proxies
+in front (`1` for Traefik, HAProxy or Caddy alone), and the address is read in `X-Forwarded-For`,
+counting from the right — the entry your own proxy wrote. Never set it on a relay clients reach
+directly : they write that header themselves, and there would be no limit per address at all.
 
 A renewed certificate is picked up without a restart : when `TLS_CERT` / `TLS_KEY`
 change on disk, or on `SIGHUP` (`docker kill -s HUP ctr-relay`), the relay re-reads them
@@ -217,7 +243,9 @@ to rooms, plus `data`.
 `peers` / `list` are `[{id, name, kind}]` of the room, the peer itself included.
 A peer leaving triggers a new `peers`. Close codes : 4400 malformed hello,
 4401 key, 4403 room full, 4409 id already in the room, 4429 rate limit,
-1009 message too big.
+1009 message too big ; with an open relay's limits : 4503 relay full (sockets or rooms),
+4430 too many sockets from one address, 4410 a room nobody joined, 4411 a room's longest
+life, 4408 an idle socket.
 
 ## Tests
 

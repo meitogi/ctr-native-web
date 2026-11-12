@@ -62,6 +62,7 @@
       <button id="join-less" type="button" class="link" onclick={() => actions.press('square')}>{T.joinLess} <Glyph kind="psx" value="square" size={18} /></button>
     {/if}
     <div id="join-said" class="said" role="alert">{j.said ? T.joinSaid[j.said] ?? T.joinSaid[SAID.offline] : ''}</div>
+    {#if T.joinSaidHelp[j.said]}<p id="join-said-help" class="dim">{T.joinSaidHelp[j.said]}</p>{/if}
     <div class="row">
       <button id="join-back" type="button" class="ghost" onclick={actions.close}>{T.joinBack} <Glyph kind="psx" value="triangle" size={18} /></button>
       <button id="join-go" type="button" class="primary" onclick={actions.go}>{T.joinGo} <Glyph kind="psx" value="start" size={18} /></button>

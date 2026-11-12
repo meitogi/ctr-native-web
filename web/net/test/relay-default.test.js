@@ -3,17 +3,33 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BUILT_IN_RELAY, DEFAULT_RELAY, DEFAULT_RELAY_KEY, relayKeyOf, relayOf } from '../relay-default.js';
+import { BUILT_IN_RELAY, DEFAULT_RELAY, DEFAULT_RELAY_KEY, keptRelay, relayKeyOf, relayOf, relayWord } from '../relay-default.js';
 
 const web = new URL('../../', import.meta.url);
 const read = (p) => readFileSync(new URL(p, web), 'utf8');
 
-test('no build value : today\'s relay, no key', () => {
-  assert.equal(BUILT_IN_RELAY, 'wss://ctr-relay.suuuper.app');
+test('no build value : the public relay, no key', () => {
+  assert.equal(BUILT_IN_RELAY, 'wss://ctr.public.suuuper.app');
   assert.equal(DEFAULT_RELAY, BUILT_IN_RELAY);
   assert.equal(DEFAULT_RELAY_KEY, '');
   assert.equal(relayOf(undefined), BUILT_IN_RELAY);
   assert.equal(relayOf(''), BUILT_IN_RELAY);
+});
+
+test('a browser that kept the former built-in relay with no key moves to the public one ; with a key it stays', () => {
+  const former = 'wss://ctr-relay.suuuper.app';
+  assert.equal(keptRelay(former, ''), BUILT_IN_RELAY);
+  assert.equal(keptRelay(former, 'a-key'), former);
+  assert.equal(keptRelay('', ''), BUILT_IN_RELAY);
+  assert.equal(keptRelay('wss://relay.example.org', ''), 'wss://relay.example.org');
+  assert.equal(keptRelay(BUILT_IN_RELAY, ''), BUILT_IN_RELAY);
+});
+
+test('the relay in words : public for the built-in one, yours for any other', () => {
+  assert.equal(relayWord(BUILT_IN_RELAY), 'public');
+  assert.equal(relayWord(` ${BUILT_IN_RELAY} `), 'public');
+  assert.equal(relayWord('wss://ctr-relay.suuuper.app'), 'yours');
+  assert.equal(relayWord('ws://localhost:8787'), 'yours');
 });
 
 test('a build\'s relay is taken when it is a ws:// or wss:// URL, and only then', () => {

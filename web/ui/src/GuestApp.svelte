@@ -36,6 +36,8 @@
     if (!g || g.state === 'idle' || g.state === 'connecting') return { kind: 'wait', text: T.guestConnecting }
     if (g.state === 'nolink') return { kind: 'error', text: T.guestNoLink }
     if (g.state === 'refused') return { kind: 'error', text: g.code === 'online-mode' ? T.guestOnline : g.code === 'full' ? T.guestFull : g.message }
+    // the relay's own refusals, in words, with another try (web/net/signaling.js's codes)
+    if (g.state === 'closed' && T.guestRelay[g.code]) return { kind: 'error', text: T.guestRelay[g.code], retry: true }
     if (g.state === 'closed') return { kind: 'error', text: g.code === 'closed' ? T.guestHostLeft : g.message || T.guestClosed }
     if (g.stream && !g.sound) return { kind: 'click', text: T.guestClickSound, detail: T.guestClickHelp }
     if (!g.stream) return { kind: 'wait', text: T.guestConnecting }
@@ -109,6 +111,7 @@
       {/if}
       <p id="overlay-text">{screen.text}</p>
       {#if screen.detail}<small>{screen.detail}</small>{/if}
+      {#if screen.retry}<button id="overlay-retry" type="button" class="back" onclick={() => location.reload()}>{T.guestRetry}</button>{/if}
       {#if screen.back}<button id="overlay-back" type="button" class="back" onclick={() => actions.back()}>{T.guestBack} · Esc</button>{/if}
     </div>
   </div>

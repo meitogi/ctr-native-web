@@ -19,7 +19,7 @@ import { say } from './ctr.mjs'
 
 export const meta = { url: 'http://localhost:8093/index.html', login: false, player: { gamepad: true, pressFrames: 8 } }
 
-const BUILT_IN = 'wss://ctr-relay.suuuper.app'
+const BUILT_IN = 'wss://ctr.public.suuuper.app'
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const tabOf = ctx => ({ name: 'page', js: ctx.js, press: ctx.press, frames: ctx.frames, navigate: url => ctx.conn.send('Page.navigate', { url }, ctx.sid) })
 
@@ -51,11 +51,11 @@ async function homeDefault(ctx, want) {
 	if (mod.relay !== want.relay || mod.rk !== want.rk) throw new Error(`net/relay-default.js in this page : ${JSON.stringify(mod)}, expected ${JSON.stringify(want)}`)
 	await joinFromHome(tab, [0, 1, 2])
 	if (!want.rk) {
-		// no key anywhere : the card asks for it, its relay field filled with the default (ui.js's copy)
-		await page(tab, 'the NO RELAY KEY card', "!!document.getElementById('join-nokey')", 10_000)
-		const field = await tab.js("return document.getElementById('join-relay').value")
-		if (field !== want.relay) throw new Error(`the card's relay field : ${field}, expected ${want.relay}`)
-		return `preload-flag.js names ${JSON.stringify(mod.built)} ; DEFAULT_RELAY ${mod.relay}, no key ; the home page's NO RELAY KEY card offers ${field}`
+		// no key anywhere : none is asked for — the public relay answers the look itself (no such
+		// room, or offline from a network that cannot reach it), on the dials, with no key card
+		const line = await page(tab, 'the dials\' answer', "document.getElementById('join-nokey') ? 'card' : document.getElementById('join-said')?.textContent.trim()", 20_000)
+		if (line === 'card') throw new Error('the public relay asked for a key')
+		return `preload-flag.js names ${JSON.stringify(mod.built)} ; DEFAULT_RELAY ${mod.relay}, no key ; the home page looked the code up there with none : ${line}`
 	}
 	// the build's relay and key : the code is looked up there with no question asked
 	await said(tab, 'NO SUCH ROOM')

@@ -27,7 +27,8 @@ const CROSS = 'c'
 const TRIANGLE = 'z'
 const START = 'Enter'
 const SELECT = ' '
-const SILENT = 'ws://localhost:8787'
+// nothing listens there ; CTR_SILENT_RELAY names another dead port when a dev relay holds 8787
+const SILENT = process.env.CTR_SILENT_RELAY ?? 'ws://localhost:8787'
 const NP = { noKey: 10, keyRefused: 11, offline: 12 }
 const shareState = ctx => ctx.js('return window.__ctrShare.state()')
 const to = (tab, label) => menuTo(tab, label, dir => tab.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
@@ -215,11 +216,11 @@ async function couchOnOff(ctx) {
 /** Item : no key, and a silent relay, said in the game ; each way back. */
 async function couchNo(ctx) {
 	const steps = []
-	// no key
+	// no key, on a relay that has one : the relay refuses, the box points to Settings
 	let { host } = await hostOnSelect(ctx, { relay: ctx.args.relay ?? 'ws://localhost:8788', rk: '' })
 	await couchAsk(host)
-	let s = await untilGame(host, 'NO RELAY KEY', g => g.netplay.screen === 'couch-no', 10_000)
-	if (s.netplay.error !== NP.noKey) throw new Error(`no key : the box says ${s.netplay.error}`)
+	let s = await untilGame(host, 'KEY REFUSED', g => g.netplay.screen === 'couch-no', 20_000)
+	if (s.netplay.error !== NP.keyRefused) throw new Error(`no key on a keyed relay : the box says ${s.netplay.error}`)
 	await shot(ctx, 'couch-no-relay-key')
 	s = await pressUntil(host, TRIANGLE, 'Triangle : back on the select', g => g.netplay.screen === 'none')
 	if (!s.charSelect || s.netplay.share) throw new Error('Triangle on the box left the select')
@@ -229,7 +230,7 @@ async function couchNo(ctx) {
 	const open = await ctx.js("return !!(document.getElementById('online')?.checkVisibility?.() || document.getElementById('ctr-settings')?.checkVisibility?.())")
 	if (!open) throw new Error('OPEN SETTINGS opened nothing')
 	await ctx.press('Escape')
-	steps.push('no key → NO RELAY KEY ; Triangle → the select ; OPEN SETTINGS → the page\'s settings')
+	steps.push('no key on a keyed relay → KEY REFUSED ; Triangle → the select ; OPEN SETTINGS → the page\'s settings')
 	// a silent relay
 	;({ host } = await hostOnSelect(ctx, { relay: SILENT, rk: 'nokey' }))
 	await couchAsk(host)

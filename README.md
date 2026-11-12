@@ -56,10 +56,10 @@ browser now. nothing gets uploaded. next time you just press the button and send
 - **Couch needs a direct connection** between the host and each guest. some networks
   (offices, schools, some mobile data) don't allow one : the guest is told so. Netplay
   still works there, through the relay.
-- **the default relay needs a key.** rooms meet on our relay, and it's private : the key
-  comes inside an invite link, or is typed once in Settings › Multiplayer › Netplay. no
-  key ? ask whoever invited you, or [run your own relay](#run-your-own-relay). a public
-  relay without a key comes after the beta.
+- **the default relay is public, and capped.** no key to ask for : rooms meet on our relay
+  out of the box. it holds a limited number of players and rooms, closes a room nobody
+  joined after ten minutes, and any room after six hours. « RELAY FULL » ? try later, or
+  [run your own relay](#run-your-own-relay) and set it in Settings › Multiplayer › Netplay.
 - **a room's code is short on purpose** (you say it out loud). the host's door keeps
   strangers out ; for a room nobody else could ever read, share the link, not the code.
 - **browsers** : played in Chrome (and the other Chromium browsers) every session ; Safari
@@ -73,7 +73,6 @@ no dates. no versions. trust the process.
 
 | | what | why you care |
 |---|---|---|
-| next | **a public relay** | rooms with no key to ask for. capped, so be nice |
 | next | **every setting with the pad** | never touch the keyboard again (the Home button where the browser lets us) |
 | in the oven | **couch + netplay** | sofa vs. sofa. 2v2. bring snacks. several players per guest, and per Netplay browser |
 | in the oven | **your screen, your shape** | full window resolution + widescreen. 240p was a vibe in 1999, it's 2026 |
@@ -117,8 +116,8 @@ from inside it. screenshots and short videos are great.
 
 ## run your own relay
 
-our relay down, or you'd rather not ask for a key ? one line on any box with Docker
-(the key printed first, keep it) :
+our relay down or full, or you'd rather have one of your own ? one line on any box with
+Docker (the key printed first, keep it) :
 
 ```
 key=$(openssl rand -base64 24); echo "relay key : $key"

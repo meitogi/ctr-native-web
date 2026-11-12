@@ -27,7 +27,8 @@ const CROSS = 'c'
 const TRIANGLE = 'z'
 const START = 'Enter'
 const SELECT = ' '
-const SILENT = 'ws://localhost:8787'
+// nothing listens there ; CTR_SILENT_RELAY names another dead port when a dev relay holds 8787
+const SILENT = process.env.CTR_SILENT_RELAY ?? 'ws://localhost:8787'
 /** web/online/page.js NP */
 const NP = { noKey: 10, offline: 12, noRoom: 13, full: 14, refused: 15 }
 const TOASTS = `(() => {
@@ -39,7 +40,8 @@ const TOASTS = `(() => {
 })()`
 
 export const tabOf = ctx => ({ name: 'host', js: ctx.js, press: ctx.press, frames: ctx.frames, navigate: url => ctx.conn.send('Page.navigate', { url }, ctx.sid) })
-export const needRelay = ctx => { if (!ctx.args.relay || !ctx.args.rk) ctx.skip('no keyed relay : --set relay=ws://localhost:8788 --set rk=<key>') }
+// rk '' : a relay with no key, named as such by the caller (relay-public.suite.mjs)
+export const needRelay = ctx => { if (!ctx.args.relay || (!ctx.args.rk && ctx.args.rk !== '')) ctx.skip('no keyed relay : --set relay=ws://localhost:8788 --set rk=<key>') }
 const panelOpen = tab => tab.js("return !!(document.getElementById('online')?.checkVisibility?.() || document.getElementById('ctr-settings')?.checkVisibility?.())")
 
 /** The page booted to its main menu with this relay and key in Settings (as typed once, kept by the browser). */
@@ -72,7 +74,7 @@ export async function toNetplay(tab) {
 }
 
 /** The NETPLAY menu's cursor on `label` (VS. / BATTLE / ARCADE / JOIN). */
-async function row(tab, label) {
+export async function row(tab, label) {
 	const order = ['VS.', 'BATTLE', 'ARCADE', 'JOIN']
 	for (let i = 0; i < 8; i++) {
 		const s = await game(tab)
@@ -305,7 +307,7 @@ async function hostAndGuest(ctx, mode, { guestRelay = ctx.args.relay, guestKey =
 const pathOk = (mode, path) => (mode === 'ws' ? path === 'relay' : true)
 
 /** Item 4 : JOIN by code. The guest dials the host's characters ; the host says yes ; the guest is in the host's room and mode. */
-async function joinCode(ctx, mode) {
+export async function joinCode(ctx, mode) {
 	needRelay(ctx)
 	const { origin, host, o, guest, guestBrowser } = await hostAndGuest(ctx, mode)
 	try {
@@ -337,7 +339,7 @@ async function joinCode(ctx, mode) {
 }
 
 /** Item 4 : JOIN by link — a click is enough, the host is not asked. */
-async function joinLink(ctx, mode) {
+export async function joinLink(ctx, mode) {
 	needRelay(ctx)
 	// the guest's Settings hold no key : the link brings the relay and its key
 	const { host, o, guest, guestBrowser } = await hostAndGuest(ctx, mode, { guestRelay: '', guestKey: '' })
@@ -354,7 +356,8 @@ async function joinLink(ctx, mode) {
 		if (!pathOk(mode, path)) throw new Error(`forced relay, but the link is ${path}`)
 		// item 5 : the link's relay and key kept, Settings had none
 		const kept = guest.own ? await guest.js("return [localStorage.getItem('ctr-online.relay'), localStorage.getItem('ctr-online.rk')]") : null
-		if (kept && (kept[0] !== ctx.args.relay || kept[1] !== ctx.args.rk)) throw new Error(`the link's relay and key were not kept : ${JSON.stringify(kept)}`)
+		// (a link with no key leaves Settings alone : it carries its relay itself)
+		if (kept && ctx.args.rk && (kept[0] !== ctx.args.relay || kept[1] !== ctx.args.rk)) throw new Error(`the link's relay and key were not kept : ${JSON.stringify(kept)}`)
 		return `the link → in room ${g.room} (code ${g.code}) as slot ${g.share.slot} over ${path}, never asked ; the host's select ${h.charSelect.players}P ; Settings now ${kept ? `${kept[0]} + its key` : '(one browser : not read)'}`
 	} finally {
 		await guest.js('window.__ctrOnline.leave(); return true').catch(() => {})
@@ -435,12 +438,12 @@ async function joinErrors(ctx) {
 		steps.push(`a silent relay : RELAY OFFLINE after ${((Date.now() - t0) / 1000).toFixed(1)} s`)
 		await pressUntil(guest, TRIANGLE, 'back', s => s.netplay?.screen === 'none')
 
-		// no key : the box, pointing to Settings
+		// no key, on a relay that has one : the relay refuses, the box points to Settings
 		await guest.js(`const set = (id, v) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('input')) }
 			set('online-relay', ${JSON.stringify(ctx.args.relay)}); set('online-rk', ''); return true`)
 		await pressUntil(guest, CROSS, 'the JOIN screen', s => s.netplay?.screen === 'join')
 		await guest.press(START)
-		g = await untilGame(guest, 'the NO RELAY KEY box', s => s.sub?.title === 'NO RELAY KEY', 10_000)
+		g = await untilGame(guest, 'the KEY REFUSED box', s => s.sub?.title === 'KEY REFUSED', 20_000)
 		await guestShot(ctx, guest, 'join-no-key')
 		if (g.sub.label !== 'OPEN SETTINGS') throw new Error(`the box's first row is ${g.sub.label}`)
 		for (let i = 0; i < 4 && !(await panelOpen(guest)); i++) {
@@ -450,13 +453,15 @@ async function joinErrors(ctx) {
 		if (!(await panelOpen(guest))) throw new Error('OPEN SETTINGS did not bring the Netplay panel')
 		await guest.press('Escape')
 		await sleep(800)
-		steps.push('no key : the NO RELAY KEY box, OPEN SETTINGS brings the panel')
+		steps.push('no key on a keyed relay : the KEY REFUSED box, OPEN SETTINGS brings the panel')
 		// a mode with no key says the same, and BACK leaves the box
 		await untilGame(guest, 'the NETPLAY menu under the box', s => s.sub?.title === 'NETPLAY', 10_000)
 		await row(guest, 'ARCADE')
-		await pressUntil(guest, CROSS, 'the box on a mode', s => s.sub?.title === 'NO RELAY KEY')
+		// one press : the room is asked for, the relay answers — a second Cross would be the box's own
+		await guest.press(CROSS)
+		await untilGame(guest, 'the box on a mode', s => s.sub?.title === 'KEY REFUSED', 20_000)
 		await pressUntil(guest, TRIANGLE, 'the box\'s way back', s => s.sub?.title === 'NETPLAY')
-		if ((await online(guest)).role === 'host') throw new Error('a room opened with no key')
+		if ((await online(guest)).role === 'host') throw new Error('a room opened with no key on a keyed relay')
 		steps.push('ARCADE with no key : the same box, Triangle back')
 		return steps.join(' · ')
 	} finally {

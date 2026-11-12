@@ -19,7 +19,8 @@ import { menuTo, say } from './ctr.mjs'
 export const meta = { url: 'http://localhost:8093/index.html', login: false, player: { gamepad: true, pressFrames: 8 } }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
-const SILENT = 'ws://localhost:8787'
+// nothing listens there ; CTR_SILENT_RELAY names another dead port when a dev relay holds 8787
+const SILENT = process.env.CTR_SILENT_RELAY ?? 'ws://localhost:8787'
 // every toast shown, in order (Toasts.svelte's .toast nodes come and go)
 const TOASTS = `(() => {
 	globalThis.__toasts = []
