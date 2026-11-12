@@ -51,7 +51,13 @@ test('the dials : Start joins from any dial, Cross only on the last one (it step
 test('a picture per character, each its own', () => {
   assert.equal(PICTOS.length, 15)
   assert.equal(new Set(PICTOS).size, 15)
-  for (const svg of PICTOS) assert.doesNotMatch(svg, /<script|href=/)
+  for (const svg of PICTOS) {
+    assert.match(svg, /^<circle cx="32" cy="32" r="30" fill="#[0-9a-f]{6}"\/>/) // on its disc
+    assert.doesNotMatch(svg, /<script|href=|undefined|NaN/)
+    // well-formed : every group opened is closed, every other tag closes itself
+    assert.equal((svg.match(/<g[ >]/g) ?? []).length, (svg.match(/<\/g>/g) ?? []).length)
+    assert.equal((svg.match(/<(?!\/|g[ >])[a-z]+ [^>]*[^/]>/g) ?? []).length, 0)
+  }
 })
 
 test('findRoom : a Share room and a Netplay room are told apart by the host\'s name on the relay, before anything is joined', async () => {
