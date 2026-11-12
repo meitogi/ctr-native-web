@@ -108,7 +108,11 @@ function guestLink(ctx, link) {
 /** Waits for a guest window's link : connected with both tracks, or refused / closed. */
 const settled = js => waitIn(js, 'the guest connected or refused', "(() => { const s = window.__ctrShareGuest.state(); return s.state === 'refused' || s.state === 'closed' || (s.state === 'connected' && s.tracks.length === 2) ? s : null })()", 40_000)
 
-/** Starts sharing from the panel, as a player would ; returns the guest link. */
+/**
+ * Starts Couch as a player does ; returns the guest link. In the Netplay build that is the game's
+ * own menus (session 29) : VS > SINGLE > the character select, the pad's Select, INVITE closed —
+ * the host is left on that select. A build without Netplay has the panel's button.
+ */
 export async function share(ctx) {
 	const { relay, rk = '' } = ctx.args
 	if (!relay) ctx.skip('no relay : --set relay=ws://localhost:8788 --set rk=<key> (a local ctr-relay, see RUN)')
@@ -117,9 +121,43 @@ export async function share(ctx) {
 	await ctx.js("localStorage.removeItem('ctr-share.guest-device'); return true")
 	const s = await ctx.js('return window.__ctrShare?.state()')
 	if (s?.sharing) return s.link
-	await ctx.js(`const set = (id, v) => { document.getElementById(id).value = v }
-		set('share-relay', ${JSON.stringify(relay)}); set('share-rk', ${JSON.stringify(rk)})
-		document.getElementById('share-start').click(); return true`)
+	const game = () => ctx.js('if (!window.__ctr) return null; const { track, ...g } = window.__ctr; return g')
+	const until = async (label, done, timeout = 30_000) => {
+		for (const end = Date.now() + timeout; Date.now() < end; await new Promise(r => setTimeout(r, 200))) {
+			const g = await game()
+			if (g && done(g)) return g
+		}
+		const g = await game()
+		throw new Error(`Couch from the game : ${label} never came (${g?.screen}, ${g?.menu?.label}, ${g?.sub?.title}/${g?.sub?.label}, netplay ${JSON.stringify(g?.netplay)})`)
+	}
+	const press = async (key, label, done) => {
+		for (let i = 0; i < 6; i++) {
+			await ctx.press(key)
+			const g = await until(label, done, 1500).catch(() => null)
+			if (g) return g
+		}
+		return until(label, done, 100)
+	}
+	if (!(await game())?.netplay) {
+		await ctx.js(`const set = (id, v) => { document.getElementById(id).value = v }
+			set('share-relay', ${JSON.stringify(relay)}); set('share-rk', ${JSON.stringify(rk)})
+			document.getElementById('share-start').click(); return true`)
+	} else {
+		// one relay, one key : the Netplay settings'
+		await ctx.js(`for (const [id, v] of [['online-relay', ${JSON.stringify(relay)}], ['online-rk', ${JSON.stringify(rk)}]]) {
+			const e = document.getElementById(id); if (e && e.value !== v) { e.value = v; e.dispatchEvent(new Event('input', { bubbles: true })) } } return true`)
+		if (!(await game()).charSelect) {
+			await menuTo(ctx, 'VS.', dir => ctx.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
+			await press('c', 'VS\'s race type', g => g.sub?.title === 'RACE TYPE')
+			await press('c', 'the character select', g => !!g.charSelect)
+			await new Promise(r => setTimeout(r, 1500))
+		}
+		// Select : Couch's help page ; Cross opens the room, INVITE comes by itself
+		await press(' ', 'Couch\'s help page', g => g.netplay.screen === 'help')
+		await ctx.press('c')
+		await until('INVITE, by itself', g => g.netplay.screen === 'invite' && g.netplay.share)
+		await press('c', 'INVITE closed by BACK', g => g.netplay.screen === 'none')
+	}
 	const link = await waitIn(ctx.js, 'the share link', "window.__ctrShare.state().link || null", 15_000)
 	if (/[?&](key|rk)=/.test(link.split('#')[0])) throw new Error('a secret left the # part of the link')
 	return link
@@ -230,7 +268,8 @@ export default async ctx => {
 	await ctx.scenario('SHARE-2TAB', async () => {
 		const out = ctx.args.out ? join(ctx.args.out, `share-${new Date().toISOString().replace(/[:.]/g, '-')}`) : null
 		if (out && !release) mkdirSync(out, { recursive: true }) // a release run files its own (releaseTwoTab)
-		if (!release) await until(ctx, 'the main menu', s => s.menu?.input, { timeout: 10_000 })
+		// the main menu, or the character select an earlier scenario left Couch on (the Netplay build)
+		if (!release) await until(ctx, 'the main menu, or the select Couch is on', s => s.menu?.input || s.charSelect, { timeout: 10_000 })
 		const link = await share(ctx)
 		const g = await guestWindow(ctx, link)
 		try {
@@ -269,15 +308,19 @@ export default async ctx => {
 			if (release) return await releaseTwoTab(ctx, g, gs, b, fps)
 
 			// P2's pad : the VS. menu offers 2 players only with pad 2 plugged in
-			const path = await menuTo(ctx, 'VS.', dir => ctx.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
-			// VS. → race type (single race) → player count (2 players) : child boxes of the main
-			// menu (__ctr.menu stays the main menu) ; the 2-player row is locked unless pad 2 is
-			// plugged in (MM_ToggleRows_PlayerCount)
-			for (let i = 0; i < 3; i++) {
-				await ctx.press('c')
-				await ctx.frames(15)
+			// The Netplay build started Couch on VS's character select (share()) : the guest is a
+			// player there at once. A build without Netplay : VS. → race type (single race) → player
+			// count (2 players), child boxes of the main menu (__ctr.menu stays the main menu) ; the
+			// 2-player row is locked unless pad 2 is plugged in (MM_ToggleRows_PlayerCount)
+			let path = ['VS.']
+			if (!(await state(ctx)).charSelect) {
+				path = await menuTo(ctx, 'VS.', dir => ctx.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
+				for (let i = 0; i < 3; i++) {
+					await ctx.press('c')
+					await ctx.frames(15)
+				}
 			}
-			const select = await until(ctx, 'the character select (the 2-player row taken)', s => s.menu?.label !== 'VS.', { timeout: 8000 })
+			const select = await until(ctx, 'the character select, the guest in it', s => s.charSelect ? s.charSelect.players === 2 : s.menu?.label !== 'VS.', { timeout: 8000 })
 			await sleep(1500)
 
 			// The guest moves P2's cursor : keyboard Right, then the virtual pad's d-pad

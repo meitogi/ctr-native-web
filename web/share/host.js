@@ -86,7 +86,7 @@ export function createShareHost({ room, stream, maxBitrate = BITRATE.default, sc
     const media = link.backend === 'webrtc' && !!link.pc;
     if (!media && !relayGuests) return refuse(link, 'online-mode', ONLINE_MODE);
     const slot = slots.take(link.peerId);
-    if (!slot) return whenListening(link, () => refuse(link, 'full', 'Three guests are already playing : Share drives P2 to P4.'));
+    if (!slot) return whenListening(link, () => refuse(link, 'full', 'Three guests are already playing : Couch drives P2 to P4.'));
     const guest = { slot, name: null, path: link.path, backend: link.backend, state: 'joining', link };
     host.guests[link.peerId] = guest;
     link.on('message', (bytes) => {

@@ -294,6 +294,26 @@ test('32f : a Netplay race keeps a leaver\'s slot a hole — nobody moves, the l
   assert.deepEqual(host.compactHoles(), [], 'nothing more');
 });
 
+test('Couch : a local seat is no guest ; closing a gap moves it and the guest above it, the guest told so', async () => {
+  const room = hostRoom();
+  const host = createShareHost({ room, stream: fakeStream() });
+  const a = await joined(room, 'a');
+  assert.equal(host.slots.take('local:1'), 2);
+  const c = await joined(room, 'c');
+  assert.equal(c.guest.slot, 3);
+  assert.deepEqual(host.players().map((p) => p.slot), [0, 1, 3], 'the local seat is not in the guests\' list');
+  a.p.host.close();
+  await tick(20);
+  assert.equal(c.guest.slot, 3, 'plain Share : nobody moves on a leave');
+  assert.deepEqual(host.compactHoles(), [1]);
+  await tick(20);
+  assert.equal(host.slots.slotOf('local:1'), 1);
+  assert.equal(c.guest.slot, 2);
+  assert.equal(host.guests.c.slot, 2);
+  host.close();
+  assert.equal(host.slots.slotOf('local:1'), 1, 'the local seat outlives the room');
+});
+
 test('32f : a guest\'s page says it watches (LOBBY {watching}) ; the host keeps its picture coming while one does', async () => {
   const room = hostRoom();
   const host = createShareHost({ room, stream: fakeStream() });

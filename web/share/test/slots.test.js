@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { PAD_ID, encodePad } from '../protocol.js';
-import { PACKET_BYTES, createSlots } from '../slots.js';
+import { PACKET_BYTES, createSlots, isLocal } from '../slots.js';
 
 const clock = () => {
   let t = 0;
@@ -76,4 +76,39 @@ test('a released slot disappears from the mask', () => {
   s.take('a');
   s.release('a');
   assert.equal(s.read(new Uint8Array(24), 0), 0);
+});
+
+test('a local owner reads as the marker packet carrying its id, its bit set in the mask', () => {
+  const s = createSlots({ now: clock() });
+  s.take('a');
+  assert.equal(s.take('local:258'), 2);
+  assert.equal(s.take('local:258'), 2, 'its own slot again');
+  assert.equal(s.take('local:-2'), 3);
+  assert.equal(isLocal(s.get(2).peerId), true);
+  assert.equal(isLocal(s.get(1).peerId), false);
+  const heap = new Uint8Array(24).fill(0xee);
+  assert.equal(s.read(heap, 0), 0b1110);
+  assert.deepEqual([...heap.subarray(0, 8)], [0, 0x41, 0xff, 0xff, 0x80, 0x80, 0x80, 0x80], 'slot 1 : the guest, first byte 0');
+  assert.deepEqual([...heap.subarray(8, 16)], [0xff, 0, 0xff, 0xff, 2, 1, 0, 0], 'slot 2 : local 258');
+  assert.deepEqual([...heap.subarray(16, 24)], [0xff, 0, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xff], 'slot 3 : local -2');
+  // a pad message under a local owner's name changes nothing
+  s.receive('local:258', encodePad(1, { id: PAD_ID.digital, buttons: 0xbfff, analog: [1, 2, 3, 4] }));
+  s.read(heap, 0);
+  assert.deepEqual([...heap.subarray(8, 16)], [0xff, 0, 0xff, 0xff, 2, 1, 0, 0]);
+});
+
+test('compact moves a local owner down like a guest, its packet follows', () => {
+  const s = createSlots({ now: clock() });
+  s.take('a');
+  s.take('local:7');
+  s.take('b');
+  s.release('a');
+  assert.deepEqual(s.compact(), [{ peerId: 'local:7', from: 2, to: 1 }, { peerId: 'b', from: 3, to: 2 }]);
+  assert.equal(s.slotOf('local:7'), 1);
+  const heap = new Uint8Array(24).fill(0xee);
+  assert.equal(s.read(heap, 0), 0b0110);
+  assert.deepEqual([...heap.subarray(0, 8)], [0xff, 0, 0xff, 0xff, 7, 0, 0, 0]);
+  assert.equal(heap[8], 0, 'slot 2 : the guest');
+  assert.deepEqual([...heap.subarray(16, 24)], new Array(8).fill(0xee), 'slot 3 free : untouched');
+  assert.deepEqual(s.compact(), [], 'no gap left');
 });

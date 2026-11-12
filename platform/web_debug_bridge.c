@@ -153,8 +153,15 @@ EM_JS(void, WebDebugBridge_PushPathJS, (int levelID, const s16 *frames, int coun
 EM_JS(void, WebDebugBridge_PushNetplayJS, (const s32 *n), {
 	const c = globalThis.__ctr;
 	if (!c) return;
-	const v = HEAP32.subarray(n >> 2, (n >> 2) + 12);
-	c.netplay = { screen: (['none', 'opening', 'join', 'joining', 'invite', 'ask'])[v[0]], dials: Array.from(v.subarray(4, 4 + v[1])), at: v[2], said: v[3], waiting: !!v[9], doorLine: !!v[10], share: !!v[11] };
+	const v = HEAP32.subarray(n >> 2, (n >> 2) + 20);
+	// seats : the players in (session 29) — per player 'pad' / 'keys' (this machine) or 'guest' (Couch)
+	const seats = [];
+	for (let p = 0; p < 4; p++) {
+		const kind = (v[15] >> (p * 4)) & 0xf;
+		if (kind & 1) seats.push((kind & 2) ? 'guest' : (kind & 4) ? 'keys' : 'pad');
+	}
+	c.netplay = { screen: (['none', 'opening', 'join', 'joining', 'invite', 'ask', 'couch-no', 'help'])[v[0]], dials: Array.from(v.subarray(4, 4 + v[1])), at: v[2], said: v[3], waiting: !!v[9], doorLine: !!v[10], share: !!v[11],
+		row: v[12], error: v[13], seats, panel: !!v[16], joinable: v[17], couchSaid: !!v[18], couch: !!(v[19] & 1), help: v[0] === 7 ? ((v[19] & 2) ? 'couch' : 'netplay') : null };
 });
 #endif
 
@@ -848,7 +855,7 @@ internal void WebDebugBridge_Publish(void)
 #ifdef USE_ONLINE
 	{
 		// NETPLAY's own screens (game/230/MM_MenuFlow.c, session 28)
-		s32 netplay[12];
+		s32 netplay[20];
 
 		OnlineNetplay_Debug(netplay);
 		WebDebugBridge_PushNetplayJS(netplay);

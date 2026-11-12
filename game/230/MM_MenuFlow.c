@@ -155,11 +155,15 @@ enum NetplayScreen
 	NETPLAY_SCREEN_JOINING, // the dials sent : the room, then the host's yes
 	NETPLAY_SCREEN_INVITE,  // the room's code, large
 	NETPLAY_SCREEN_ASK,     // a guest who typed the code : ACCEPT / REFUSE
+	NETPLAY_SCREEN_COUCH_NO, // Couch did not open : why, and what to do
+	NETPLAY_SCREEN_HELP,     // what NETPLAY or Couch is and its limits, before it is launched
 };
 static int netplayScreen;
 static int netplayRow;    // the mode whose room is opening
 static int netplayFrames; // left for that room
 static int netplayError;  // the box's reason (enum NetplayStatus)
+static int netplayCouch;  // the room on its way is Couch's (session 29), not a NETPLAY mode's
+static int netplayHelp;   // the help page up : 0 NETPLAY's, 1 Couch's
 static struct MenuRow onlineRowsNoKey[3] =
 {
 	{ONLINE_LNG_OPEN_SETTINGS, 0, 1, 0, 0},
@@ -220,10 +224,50 @@ static int OnlineRoom_Humans(void)
 	return n;
 }
 
+// Local play on the web (session 29) : a mode's players are the players who are in — P1, who
+// navigates, and the seats P2-P4, held by a device that pressed Start on the character select or
+// by a Couch guest (platform/native_input.c). No players menu : VS, BATTLE and ARCADE go to the
+// select with whoever is in, and it follows who comes and goes as a Netplay room's does.
+static int LocalSeats_On(void)
+{
+#if defined(__EMSCRIPTEN__)
+	return !octrBootOnline && !ONLINE_ROOM;
+#else
+	return 0;
+#endif
+}
+
+// ARCADE, VS or BATTLE : TIME TRIAL and ADVENTURE are P1's
+static int Local_Multi(void)
+{
+	return (GAME_TRACKER->gameMode1 & (TIME_TRIAL | ADVENTURE_MODE | ADVENTURE_ARENA | ADVENTURE_CUP)) == 0;
+}
+
+static int Local_Humans(void)
+{
+	int max = ((GAME_TRACKER->gameMode1 & ARCADE_MODE) != 0) ? 2 : 4;
+	int n = 1;
+
+	if (!Local_Multi())
+		return 1;
+	while ((n < max) && (NativeWeb_SeatMask() & (1 << n)))
+		n++;
+	return n;
+}
+
+// the humans of the screen at hand : a room's, or local play's
+static int Menu_Humans(void)
+{
+	return LocalSeats_On() ? Local_Humans() : OnlineRoom_Humans();
+}
+
 // A Netplay VS or BATTLE opens alone and does not start alone (session 28) : its character
-// select holds the lock until a second human is there. ARCADE has its bots.
+// select holds the lock until a second human is there. ARCADE has its bots. A local VS or BATTLE
+// on the web waits the same way (session 29).
 static int OnlineRoom_NeedsPlayer(void)
 {
+	if (LocalSeats_On())
+		return Local_Multi() && ((GAME_TRACKER->gameMode1 & ARCADE_MODE) == 0) && (Local_Humans() < 2);
 	return ONLINE_ROOM && octrOnlineMenuPath && !octrOnlineArcade && (OnlineRoom_Humans() < 2);
 }
 
@@ -273,7 +317,7 @@ static void OnlineMenus_Fresh(void)
 // as MM_MenuProc_2p3p4p's exit
 static void OnlineMenu_ToCharacters(struct RectMenu *menu)
 {
-	GAME_TRACKER->numPlyrNextGame = OnlineRoom_Humans();
+	GAME_TRACKER->numPlyrNextGame = Menu_Humans();
 	MM_TITLE_MENU_STATE = TITLE_MENU_STATE_EXITING;
 	MM_DESIRED_MENU_INDEX = MM_EXIT_ROUTE_CHARACTER_SELECT;
 	menu->state = (menu->state & ~DRAW_NEXT_MENU_IN_HIERARCHY) | ONLY_DRAW_TITLE;
@@ -319,7 +363,9 @@ static int joinCount = NETPLAY_CODE_MIN; // dials in use
 static int joinAt;                       // the dial the pad turns
 static int joinSlide;                    // frames left of its picture sliding, signed by the way it turned
 static int joinSaid;                     // the red line (enum NetplayStatus), 0 : none
-static int askRow;                       // ACCEPT / REFUSE
+static int askRow;                       // ACCEPT / REFUSE ; INVITE's and the Couch box's rows
+static int couchPanel;                   // for the debug bridge : the players' panel is on screen
+static int couchSaid;                    // for the debug bridge : the page's line is on screen
 
 static void OnlineMenu_Host(int row)
 {
@@ -613,26 +659,274 @@ static void NetplayOpening_Frame(int tap)
 	DecalFont_DrawLine("OPENING ROOM...", 0x100, 0xb8, FONT_BIG, NETPLAY_CENTER | ORANGE);
 }
 
-// INVITE : the room's code, large ; any button closes it
+// INVITE : the room's code, large ; any button closes it. A Couch room's (session 29) has two
+// rows : BACK, and STOP COUCH, which closes the room where the host stands.
 static void NetplayInvite_Frame(int tap)
 {
 	s8 code[NETPLAY_CODE_MAX];
-	// a Share room's guest has no game : its code is typed on the page (28b)
-	const char *where = ONLINE_ROOM ? "NETPLAY - JOIN" : "HOME PAGE - JOIN A ROOM";
+	int couch = !ONLINE_ROOM;
 	int count = Netplay_RoomCode(code);
 
+	if (couch && count && (tap & (BTN_UP | BTN_DOWN)))
+	{
+		askRow ^= 1;
+		OtherFX_Play(0, 1);
+		tap = 0;
+	}
+	if (couch && count && (tap & BTN_CROSS_one) && (askRow == 1))
+	{
+		OtherFX_Play(2, 1);
+		NativeWeb_CouchStop();
+		netplayScreen = NETPLAY_SCREEN_NONE;
+		return;
+	}
 	if (!count || (tap & (BTN_TRIANGLE | BTN_CIRCLE | BTN_CROSS_one | BTN_SQUARE_one | BTN_SELECT | BTN_START)))
 	{
 		OtherFX_Play(2, 1);
 		netplayScreen = NETPLAY_SCREEN_NONE;
 		return;
 	}
+	if (couch)
+	{
+		DecalFont_DrawLine("INVITE", 0x100, 0x16, FONT_BIG, NETPLAY_CENTER | ORANGE);
+		DecalFont_DrawLine("ROOM CODE", 0x100, 0x2a, FONT_SMALL, NETPLAY_CENTER | WHITE);
+		Netplay_DrawCode(code, count, 0x38, -1);
+		// a Share room's guest has no game : its code is typed on the page (28b)
+		DecalFont_DrawLine("HOME PAGE - JOIN A ROOM", 0x100, 0x76, FONT_SMALL, NETPLAY_CENTER | WHITE);
+		DecalFont_DrawLine("BACK", 0x100, 0x8e, FONT_BIG, NETPLAY_CENTER | ((askRow == 0) ? WHITE : GRAY));
+		DecalFont_DrawLine("STOP COUCH", 0x100, 0xa2, FONT_BIG, NETPLAY_CENTER | ((askRow == 1) ? WHITE : GRAY));
+		Netplay_DrawPanel(0x20, 0x10, 0x1c0, 0xac, 3);
+		return;
+	}
 	DecalFont_DrawLine("INVITE", 0x100, 0x1c, FONT_BIG, NETPLAY_CENTER | ORANGE);
 	DecalFont_DrawLine("ROOM CODE", 0x100, 0x34, FONT_SMALL, NETPLAY_CENTER | WHITE);
 	Netplay_DrawCode(code, count, 0x48, -1);
-	DecalFont_DrawLine((char *)where, 0x100, 0x8c, FONT_SMALL, NETPLAY_CENTER | WHITE);
+	DecalFont_DrawLine("NETPLAY - JOIN", 0x100, 0x8c, FONT_SMALL, NETPLAY_CENTER | WHITE);
 	DecalFont_DrawLine("TRIANGLE - BACK", 0x100, 0xae, FONT_SMALL, NETPLAY_CENTER | GRAY);
 	Netplay_DrawPanel(0x20, 0x12, 0x1c0, 0xaa, 3);
+}
+
+// ---- Couch from the game, and the players who are in (session 29) ----
+// On the character select of ARCADE, VS and BATTLE the pad's Select opens a Couch room (Share :
+// the host's screen streamed to guests with no disc), on the relay and key of the page's Netplay
+// settings ; once it is on, Select is INVITE, as in a Netplay room.
+static void Couch_Start(void)
+{
+	askRow = 0;
+	if (!NativeWeb_CouchStart())
+	{
+		netplayError = NETPLAY_NO_KEY;
+		netplayScreen = NETPLAY_SCREEN_COUCH_NO;
+		return;
+	}
+	netplayCouch = 1;
+	netplayScreen = NETPLAY_SCREEN_OPENING;
+	netplayFrames = NETPLAY_OPEN_FRAMES;
+}
+
+// Couch's room on its way : INVITE by itself once it is on, the reason in a box if not
+static void CouchOpening_Frame(int tap)
+{
+	int status = NativeWeb_CouchStatus();
+
+	if ((status == NETPLAY_IN_ROOM) && NativeWeb_ShareHost())
+	{
+		netplayCouch = 0;
+		netplayScreen = NETPLAY_SCREEN_INVITE;
+		OtherFX_Play(1, 1);
+		return;
+	}
+	if ((tap & BTN_TRIANGLE) || (status >= NETPLAY_NO_KEY) || (--netplayFrames <= 0))
+	{
+		netplayCouch = 0;
+		netplayScreen = NETPLAY_SCREEN_NONE;
+		NativeWeb_CouchStop();
+		if (tap & BTN_TRIANGLE)
+		{
+			OtherFX_Play(2, 1);
+			return;
+		}
+		netplayError = (status >= NETPLAY_NO_KEY) ? status : NETPLAY_OFFLINE;
+		netplayScreen = NETPLAY_SCREEN_COUCH_NO;
+		return;
+	}
+	DecalFont_DrawLine("OPENING ROOM...", 0x100, 0x84, FONT_BIG, NETPLAY_CENTER | ORANGE);
+	Netplay_DrawPanel(0x40, 0x7c, 0x180, 0x20, 3);
+}
+
+// Before NETPLAY's menu, and before a Couch room opens (the user, session 29) : what it is and
+// its limits, said every time — NETPLAY is one player per browser, each with their own disc ;
+// Couch streams the host's screen, so some delay, and takes several players on the host's
+// machine but one per guest. Cross goes on, Triangle goes back with nothing launched.
+static void NetplayHelp_Open(int couch)
+{
+	netplayHelp = couch;
+	netplayScreen = NETPLAY_SCREEN_HELP;
+}
+
+static void NetplayHelp_Frame(int tap)
+{
+	// a line holds about 36 of the small font's characters ; the last one is the « next »
+	static const char *const lines[2][6] = {
+		{"EVERYONE ON THEIR OWN SCREEN", "EACH PLAYER NEEDS THEIR OWN DISC", "ONE PLAYER PER BROWSER", "UP TO 4 PLAYERS IN A ROOM", "NEXT - SEVERAL PER BROWSER", NULL},
+		{"YOUR SCREEN IS STREAMED", "GUESTS NEED NO DISC", "THEY MAY SEE SOME DELAY", "SEVERAL HERE, ONE PER GUEST", "UP TO 4 PLAYERS IN ALL", "NEXT - SEVERAL PER GUEST"},
+	};
+	int count = (lines[netplayHelp][5] != NULL) ? 6 : 5;
+
+	if (tap & (BTN_CROSS_one | BTN_START))
+	{
+		OtherFX_Play(1, 1);
+		netplayScreen = NETPLAY_SCREEN_NONE;
+		if (netplayHelp)
+			Couch_Start();
+		return;
+	}
+	if (tap & BTN_TRIANGLE)
+	{
+		OtherFX_Play(2, 1);
+		netplayScreen = NETPLAY_SCREEN_NONE;
+		// NETPLAY's menu opened under the page : closed, the main menu again
+		if (!netplayHelp)
+			MM_MENU_MAIN.state &= ~(ONLY_DRAW_TITLE | DRAW_NEXT_MENU_IN_HIERARCHY);
+		return;
+	}
+	DecalFont_DrawLine(netplayHelp ? "COUCH" : "NETPLAY", 0x100, 0x1a, FONT_BIG, NETPLAY_CENTER | ORANGE);
+	for (int i = 0; i < count; i++)
+		DecalFont_DrawLine((char *)lines[netplayHelp][i], 0x100, 0x34 + i * 0x0c, FONT_SMALL, NETPLAY_CENTER | ((i == count - 1) ? GRAY : WHITE));
+	DecalFont_DrawLine(netplayHelp ? "OPEN THE ROOM" : "CONTINUE", 0x100, 0x88, FONT_BIG, NETPLAY_CENTER | WHITE);
+	DecalFont_DrawLine("TRIANGLE - BACK", 0x100, 0xa6, FONT_SMALL, NETPLAY_CENTER | GRAY);
+	Netplay_DrawPanel(0x20, 0x12, 0x1c0, 0xaa, 3);
+}
+
+// Couch did not open : NETPLAY's words (no key, a key refused, a silent relay), the page's
+// Netplay settings or another try, or BACK (Triangle too)
+static void CouchNo_Frame(int tap)
+{
+	int offline = netplayError == NETPLAY_OFFLINE;
+
+	if (tap & (BTN_UP | BTN_DOWN))
+	{
+		askRow ^= 1;
+		OtherFX_Play(0, 1);
+	}
+	if (tap & (BTN_CROSS_one | BTN_TRIANGLE))
+	{
+		int go = ((tap & BTN_TRIANGLE) == 0) && (askRow == 0);
+
+		OtherFX_Play(go ? 1 : 2, 1);
+		netplayScreen = NETPLAY_SCREEN_NONE;
+		if (go && offline)
+			Couch_Start();
+		else if (go)
+			NativeWeb_OpenMultiplayer();
+		return;
+	}
+	DecalFont_DrawLine(offline ? "RELAY OFFLINE" : (netplayError == NETPLAY_KEY_REFUSED) ? "KEY REFUSED" : "NO RELAY KEY", 0x100, 0x40, FONT_BIG,
+	                   NETPLAY_CENTER | ORANGE);
+	DecalFont_DrawLine(offline ? "TRY AGAIN" : "OPEN SETTINGS", 0x100, 0x60, FONT_BIG, NETPLAY_CENTER | ((askRow == 0) ? WHITE : GRAY));
+	DecalFont_DrawLine("BACK", 0x100, 0x74, FONT_BIG, NETPLAY_CENTER | ((askRow == 1) ? WHITE : GRAY));
+	Netplay_DrawPanel(0x50, 0x36, 0x160, 0x58, 3);
+}
+
+// The two small pictures of a player in the panel : where it plays from, with what. 9 x 7, a
+// row per word, drawn as runs of two-unit squares (the game has no such icons).
+static const u16 couchIcons[4][7] = {
+	{0x010, 0x038, 0x07c, 0x0fe, 0x06c, 0x06c, 0x07c}, // a house : this machine
+	{0x07c, 0x092, 0x111, 0x1ff, 0x111, 0x092, 0x07c}, // a globe : a Couch guest
+	{0x000, 0x0fe, 0x1bb, 0x1ff, 0x1c7, 0x183, 0x000}, // a pad
+	{0x1ff, 0x155, 0x1ff, 0x155, 0x1ff, 0x139, 0x1ff}, // a keyboard
+};
+
+static void Couch_DrawIcon(int which, int x, int y)
+{
+	struct GameTracker *gGT = GAME_TRACKER;
+	Color white = MakeColor(0xe0, 0xe0, 0xe0);
+
+	for (int row = 0; row < 7; row++)
+	{
+		u16 bits = couchIcons[which][row];
+
+		for (int col = 0; col < 9; col++)
+		{
+			int run = col;
+
+			if ((bits & (0x100 >> col)) == 0)
+				continue;
+			while ((run < 8) && (bits & (0x100 >> (run + 1))))
+				run++;
+			{
+				RECT r = {.x = x + col * 2, .y = y + row, .w = (run - col + 1) * 2, .h = 1};
+
+				CTR_Box_DrawSolidBox(&r, &white, gGT->pushBuffer_UI.ptrOT, &gGT->backBuffer->primMem);
+			}
+			col = run;
+		}
+	}
+}
+
+// Who is in, while P1 holds L1 and R1 on the menus : each player's number, this machine or
+// Couch, a keyboard or a pad, and its character
+static void Couch_DrawPlayers(void)
+{
+	int n = 1;
+
+	while ((n < 4) && (NativeWeb_SeatMask() & (1 << n)))
+		n++;
+	DecalFont_DrawLine("PLAYERS", 0x194, 0x30, FONT_BIG, NETPLAY_CENTER | ORANGE);
+	for (int p = 0; p < n; p++)
+	{
+		int kind = NativeWeb_PlayerKind(p);
+		int y = 0x48 + p * 0x16;
+		char tag[4] = {'P', (char)('1' + p), 0, 0};
+
+		DecalFont_DrawLine(tag, 0x140, y + 2, FONT_SMALL, WHITE);
+		Couch_DrawIcon((kind & 2) ? 1 : 0, 0x158, y + 2);
+		Couch_DrawIcon((kind & 4) ? 3 : 2, 0x170, y + 2);
+		Netplay_DrawCharacter(GAME_CHARACTER_IDS[p], 0x196, y - 2, FP(0.6));
+		DecalFont_DrawLine(GAME_LANGUAGE_STRINGS[GAME_CHARACTER_METADATA[GAME_CHARACTER_IDS[p]].name_LNG_short], 0x1a6, y + 2, FONT_SMALL, ORANGE);
+	}
+	Netplay_DrawPanel(0x134, 0x28, 0xc4, 0x24 + n * 0x16, 3);
+}
+
+// The page's line for the host (a guest with no direct connection), top of the screen
+static int Couch_DrawSaid(void)
+{
+	char line[40];
+
+	if (!NativeWeb_CouchSaid(line, sizeof(line)))
+		return 0;
+	DecalFont_DrawLine(line, 0x100, 0x2c, FONT_SMALL, NETPLAY_CENTER | ORANGE);
+	return 1;
+}
+
+// Local play's own hints on the character select : Couch bottom left ; bottom right, in turn
+// (the line holds two of them, not four), who may join, how to leave, and the players' panel
+static void Couch_DrawHints(int share)
+{
+	static int frames;
+	char join[40], key[16];
+	const char *hints[3];
+	int count = 0;
+	int joinable = NativeWeb_Joinable();
+	int local = 0;
+
+	for (int p = 1; p < 4; p++)
+		local |= (NativeWeb_PlayerKind(p) & 3) == 1;
+	if (!share)
+		DecalFont_DrawLine("SELECT - COUCH", 0x14, 0xcc, FONT_SMALL, GRAY);
+	if (joinable && (Local_Humans() < (((GAME_TRACKER->gameMode1 & ARCADE_MODE) != 0) ? 2 : 4)))
+	{
+		key[0] = 0;
+		if (joinable & 2)
+			NativeWeb_JoinKey(key, sizeof(key));
+		snprintf(join, sizeof(join), "%s%s%s - JOIN", (joinable & 1) ? "START" : "", ((joinable & 1) && key[0]) ? " OR " : "", key);
+		hints[count++] = join;
+	}
+	if (local)
+		hints[count++] = "HOLD SELECT - LEAVE";
+	hints[count++] = "L1 R1 - PLAYERS";
+	frames++;
+	DecalFont_DrawLine((char *)hints[(frames / FPS_DOUBLE(90)) % count], 0x1f6, 0xcc, FONT_SMALL, JUSTIFY_RIGHT | GRAY);
 }
 
 // A guest who typed the code waits at the door : ACCEPT lets it in, REFUSE (or Triangle) does not
@@ -676,16 +970,39 @@ int OnlineNetplay_Frame(void)
 {
 	char name[20];
 	int tap = sdata->buttonTapPerPlayer[0];
+	int local = LocalSeats_On();
+	int onSelect = (sdata->ptrActiveMenu == &MM_MENU_CHARACTER_SELECT) && (MM_CHARACTER_SELECT_MENU_STATE == IN_MENU);
+	// local play's character select of ARCADE, VS or BATTLE (session 29) : Couch, and who joins
+	int couchSelect = local && onSelect && Local_Multi();
 	// a Share room under a code (28b) : the same tag, INVITE and door, on the game's own menus
 	int share = !ONLINE_ROOM && NativeWeb_ShareHost();
 	int host = share || (ONLINE_ROOM && (octr->DriverID == 0) && (NativeWeb_NetplayStatus() == NETPLAY_IN_ROOM));
 
+	NativeWeb_SeatsOpen(couchSelect && (netplayScreen == NETPLAY_SCREEN_NONE), local);
+	couchPanel = 0;
+	couchSaid = 0;
 	if (netplayScreen == NETPLAY_SCREEN_NONE)
 	{
+		if (local)
+		{
+			couchSaid = Couch_DrawSaid();
+			if ((sdata->buttonHeldPerPlayer[0] & (BTN_L1 | BTN_R1)) == (BTN_L1 | BTN_R1))
+			{
+				Couch_DrawPlayers();
+				couchPanel = 1;
+			}
+			if (couchSelect)
+				Couch_DrawHints(share);
+		}
 		if (!host)
-			return 0;
+		{
+			if (!couchSelect || ((tap & BTN_SELECT) == 0))
+				return 0;
+			NetplayHelp_Open(1);
+			OtherFX_Play(1, 1);
+		}
 		// a guest at the door comes first ; then INVITE on the pad's Select
-		if (NativeWeb_AskName(name, sizeof(name)))
+		else if (NativeWeb_AskName(name, sizeof(name)))
 		{
 			netplayScreen = NETPLAY_SCREEN_ASK;
 			askRow = 0;
@@ -693,6 +1010,7 @@ int OnlineNetplay_Frame(void)
 		else if (tap & BTN_SELECT)
 		{
 			netplayScreen = NETPLAY_SCREEN_INVITE;
+			askRow = 0;
 			NativeWeb_Invite();
 			OtherFX_Play(1, 1);
 		}
@@ -705,8 +1023,7 @@ int OnlineNetplay_Frame(void)
 			if ((sdata->ptrActiveMenu != &MM_MENU_TRACK_SELECT) && (sdata->ptrActiveMenu != &MM_MENU_CUP_SELECT))
 				DecalFont_DrawLine("SELECT - INVITE", 0x14, 0xcc, FONT_SMALL, GRAY);
 			// a VS or BATTLE select whose only player locked : it waits here
-			if ((sdata->ptrActiveMenu == &MM_MENU_CHARACTER_SELECT) && (MM_CHARACTER_SELECT_MENU_STATE == IN_MENU) && OnlineRoom_NeedsPlayer() &&
-			    (MM_CHARACTER_SELECT_FLAGS & 1))
+			if (onSelect && OnlineRoom_NeedsPlayer() && (MM_CHARACTER_SELECT_FLAGS & 1))
 			{
 				// a banner over the icons : the character is picked
 				DecalFont_DrawLine("WAITING FOR PLAYER 2", 0x100, 0x84, FONT_BIG, NETPLAY_CENTER | ORANGE);
@@ -720,7 +1037,10 @@ int OnlineNetplay_Frame(void)
 	switch (netplayScreen)
 	{
 	case NETPLAY_SCREEN_OPENING:
-		NetplayOpening_Frame(tap);
+		if (netplayCouch)
+			CouchOpening_Frame(tap);
+		else
+			NetplayOpening_Frame(tap);
 		return 0;
 	case NETPLAY_SCREEN_JOIN:
 		NetplayJoin_Frame(tap);
@@ -734,8 +1054,17 @@ int OnlineNetplay_Frame(void)
 	case NETPLAY_SCREEN_ASK:
 		NetplayAsk_Frame(tap);
 		break;
+	case NETPLAY_SCREEN_COUCH_NO:
+		CouchNo_Frame(tap);
+		break;
+	case NETPLAY_SCREEN_HELP:
+		NetplayHelp_Frame(tap);
+		break;
 	}
-	return 1;
+	// Couch's room asked for from the help page or the box : its line is over the select
+	if (netplayScreen == NETPLAY_SCREEN_OPENING)
+		return 0;
+	return netplayScreen != NETPLAY_SCREEN_NONE;
 }
 
 // Off the menus (a race, its results) the door's box does not come : one line says a guest
@@ -748,7 +1077,11 @@ void OnlineDoor_DrawLine(void)
 
 	doorLine = NativeWeb_AskName(name, sizeof(name));
 	if (!doorLine)
+	{
+		// the page's own line (a Couch guest with no direct connection, session 29)
+		couchSaid = LocalSeats_On() && Couch_DrawSaid();
 		return;
+	}
 	for (char *c = name; *c; c++)
 		if ((*c >= 'a') && (*c <= 'z'))
 			*c -= 'a' - 'A';
@@ -769,6 +1102,17 @@ void OnlineNetplay_Debug(s32 *out)
 	out[11] = ONLINE_ROOM ? 0 : NativeWeb_ShareHost();
 	out[9] = (sdata->ptrActiveMenu == &MM_MENU_CHARACTER_SELECT) && (MM_CHARACTER_SELECT_MENU_STATE == IN_MENU) && OnlineRoom_NeedsPlayer() &&
 	         ((MM_CHARACTER_SELECT_FLAGS & 1) != 0);
+	// Couch and the players who are in (session 29)
+	out[12] = askRow;
+	out[13] = netplayError;
+	out[14] = NativeWeb_SeatMask();
+	out[15] = 0;
+	for (int p = 0; p < 4; p++)
+		out[15] |= NativeWeb_PlayerKind(p) << (p * 4);
+	out[16] = couchPanel;
+	out[17] = NativeWeb_Joinable();
+	out[18] = couchSaid;
+	out[19] = netplayCouch | ((netplayScreen == NETPLAY_SCREEN_HELP) ? (netplayHelp << 1) : 0);
 }
 
 static void OnlineMenu_Proc(struct RectMenu *menu)
@@ -906,6 +1250,9 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 				NativeWeb_LeaveRoom();
 				OnlineMenus_Fresh();
 			}
+			// Couch's room closes here too (the user, session 29) : STOP COUCH, or the main menu
+			if (!ONLINE_ROOM && NativeWeb_ShareHost())
+				NativeWeb_CouchStop();
 			if (ONLINE_ROOM)
 				GAME_TRACKER->demoCountdownTimer = TITLE_DEMO_IDLE_FRAMES;
 #endif
@@ -1076,6 +1423,10 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 		octrFreshMenu = 1;
 		mainMenu->ptrNextBox_InHierarchy = &onlineMenu;
 		mainMenu->state |= DRAW_NEXT_MENU_IN_HIERARCHY;
+		// what NETPLAY is and its limits first, over its menu (the user, session 29) ; a guest
+		// resting here in its room has read it
+		if (!ONLINE_ROOM)
+			NetplayHelp_Open(0);
 		return;
 	}
 #endif
@@ -1087,6 +1438,15 @@ void MM_MenuProc_Main(struct RectMenu *menu)
 
 		// set game mode to Battle Mode
 		GAME_TRACKER->gameMode1 |= BATTLE_MODE;
+
+#ifdef USE_ONLINE
+		// ctr-native web: no players menu (session 29), the players who are in
+		if (LocalSeats_On())
+		{
+			OnlineMenu_ToCharacters(mainMenu);
+			return;
+		}
+#endif
 
 		// set next menu to 2P,3P,4P
 		mainMenu->ptrNextBox_InHierarchy = &MM_MENU_PLAYERS_2P3P4P;
@@ -1368,8 +1728,8 @@ void MM_MenuProc_Difficulty(struct RectMenu *menu)
 	GAME_TRACKER->arcadeDifficulty = MM_CUP_DIFFICULTY_SPEED[row];
 #ifdef USE_ONLINE
 	// ctr-native: ONLINE > ARCADE has no players menu, the room's humans play (session 32b)
-	if (ONLINE_ROOM && octrOnlineArcade)
-		GAME_TRACKER->numPlyrNextGame = OnlineRoom_Humans();
+	if ((ONLINE_ROOM && octrOnlineArcade) || LocalSeats_On())
+		GAME_TRACKER->numPlyrNextGame = Menu_Humans();
 #endif
 
 	MM_TITLE_MENU_STATE = TITLE_MENU_STATE_EXITING;
@@ -1421,6 +1781,15 @@ void MM_MenuProc_SingleCup(struct RectMenu *menu)
 	// if mode is Arcade
 	if ((GAME_TRACKER->gameMode1 & ARCADE_MODE) != 0)
 	{
+#ifdef USE_ONLINE
+		// ctr-native web: no players menu (session 29) : the difficulty, then the players who are in
+		if (LocalSeats_On())
+		{
+			menu->ptrNextBox_InHierarchy = &MM_MENU_DIFFICULTY;
+			MM_CHARACTER_SELECT_TRANSITION_STATE = IN_MENU;
+			return;
+		}
+#endif
 		// set next menu to 1P+2P select
 		menu->ptrNextBox_InHierarchy = &MM_MENU_PLAYERS_1P2P;
 		MM_CHARACTER_SELECT_TRANSITION_STATE = IN_MENU;
@@ -1431,8 +1800,9 @@ void MM_MenuProc_SingleCup(struct RectMenu *menu)
 
 #ifdef USE_ONLINE
 	// ctr-native: ONLINE > VS has no players menu, the room's humans play (session 32b) — one
-	// alone too (session 28 : its character select waits for a second)
-	if (ONLINE_ROOM && octrOnlineMenuPath)
+	// alone too (session 28 : its character select waits for a second) ; local play on the web
+	// has none either (session 29)
+	if ((ONLINE_ROOM && octrOnlineMenuPath) || LocalSeats_On())
 	{
 		OnlineMenu_ToCharacters(menu);
 		return;

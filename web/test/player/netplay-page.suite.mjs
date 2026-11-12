@@ -443,10 +443,18 @@ async function pick(tab, press, label) {
 	await sleep(600)
 }
 const ONLINE_ROWS = g => !g?.charSelect && /VS|BATTLE|ARCADE/.test(cur(g)?.label ?? '')
+/** NETPLAY's help page (session 29), up over its menu with no room joined : Cross goes on. */
+async function pastHelp(tab, press) {
+	await sleep(500)
+	if ((await game(tab))?.netplay?.screen !== 'help') return
+	await press('cross')
+	await untilGame(tab, 'the help page closed', g => g.netplay?.screen === 'none', 5000)
+}
 /** NETPLAY on the main menu, then Cross : the ONLINE menu. */
 async function openOnlineMenu(ctx, tab, press) {
 	await menuTo(ctx, 'NETPLAY', press)
 	await press('cross')
+	await pastHelp(tab, press)
 	return untilGame(tab, 'the ONLINE menu', ONLINE_ROWS, 8000)
 }
 /**
@@ -574,6 +582,7 @@ async function arcadeGuestBack(ctx) {
 		if (out.role && out.role !== 'none') throw new Error(`still in the room on the main menu (${out.role}) || ${steps.join(' | ')}`)
 		await menuTo(ctx, 'NETPLAY', press)
 		await press('cross')
+		await pastHelp(host, press)
 		const g = await untilGame(host, 'the NETPLAY menu again', ONLINE_ROWS, 20_000)
 		await sleep(500)
 		await note('NETPLAY again')
@@ -722,6 +731,7 @@ async function selectGuestBack(ctx) {
 		await wait('the main menu', g => !g.charSelect && !g.sub && g.menu?.input, 10_000)
 		await menuTo(ctx, 'NETPLAY', press)
 		await press('cross')
+		await pastHelp(host, press)
 		await sleep(2000)
 		const g = await note('NETPLAY again')
 		if (g?.charSelect || cur(g)?.label !== 'VS.') throw new Error(`NETPLAY again not on a fresh ONLINE menu || ${steps.join(' | ')}`)
@@ -997,7 +1007,11 @@ async function linkFail(ctx) {
 		const t0 = Date.now()
 		let state
 		while ((state = await guest.js("return document.getElementById('joining')?.dataset.state ?? null").catch(() => null)) !== 'failed') {
-			if (Date.now() - t0 > 90_000) throw new Error(`no failure on the joining screen in 90 s (state ${state})`)
+			if (Date.now() - t0 > 90_000) {
+				// what the guest's page and game saw, for the report
+				const saw = await guest.js("const s = window.__ctrOnline?.state(), c = window.__ctr; return JSON.stringify({ role: s?.role, room: s?.room, lastError: s?.lastError, error: s?.error, lobby: s?.lobby, links: s?.links, game: c && { screen: c.screen, menu: c.menu?.label, netplay: c.netplay?.screen } })").catch(e => e.message)
+				throw new Error(`no failure on the joining screen in 90 s (state ${state}) : ${saw}`)
+			}
 			await sleep(500)
 		}
 		const reason = await guest.js("return document.getElementById('joining-reason')?.textContent")

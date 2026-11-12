@@ -44,7 +44,7 @@ const TOASTS = `(() => {
 })()`
 
 /** Waits for `expr` (page JS, truthy) on a page ; the last value seen in the failure. */
-async function page(tab, label, expr, timeout = 30_000) {
+export async function page(tab, label, expr, timeout = 30_000) {
 	const deadline = Date.now() + timeout
 	let beat = Date.now() + 10_000
 	let last = null
@@ -59,10 +59,10 @@ async function page(tab, label, expr, timeout = 30_000) {
 }
 const click = (tab, id) => tab.js(`const e = document.getElementById(${JSON.stringify(id)}); if (!e) throw new Error('no #${id}'); e.click(); return true`)
 /** The home page's dials : { code: number[], at, said } or null when they are not up. */
-const dials = tab => tab.js(`const e = document.getElementById('join-code'); return e ? { code: e.dataset.code.split(',').map(Number), at: Number(e.dataset.at), said: document.getElementById('join-said').textContent.trim(), names: [...e.querySelectorAll('.name')].map(n => n.textContent) } : null`)
+export const dials = tab => tab.js(`const e = document.getElementById('join-code'); return e ? { code: e.dataset.code.split(',').map(Number), at: Number(e.dataset.at), said: document.getElementById('join-said').textContent.trim(), names: [...e.querySelectorAll('.name')].map(n => n.textContent) } : null`)
 
 /** The index page loaded with these Netplay settings ; `disc: false` empties the browser's stored disc first. */
-async function home(tab, origin, { relay, rk, disc = true, hash = '' }) {
+export async function home(tab, origin, { relay, rk, disc = true, hash = '' }) {
 	await tab.navigate(`${origin}/preload-flag.js`)
 	await sleep(800)
 	await tab.js(`localStorage.setItem('ctr-online.relay', ${JSON.stringify(relay)}); localStorage.setItem('ctr-online.rk', ${JSON.stringify(rk)})
@@ -97,7 +97,7 @@ async function dial(tab, code) {
 	return d
 }
 /** « or join a room », the dials on `code`, Enter. */
-async function joinFromHome(tab, code) {
+export async function joinFromHome(tab, code) {
 	if (!(await dials(tab))) await click(tab, 'or-join')
 	await dial(tab, code)
 	await tab.press(START)
@@ -107,7 +107,7 @@ async function joinFromHome(tab, code) {
  * again, and a load over the port forward can stall with nothing on screen : the same address
  * again — it still carries the dials and the reason.
  */
-async function said(tab, text) {
+export async function said(tab, text) {
 	const shown = `document.getElementById('join-said')?.textContent.trim() === ${JSON.stringify(text)}`
 	for (let attempt = 1; ; attempt++) {
 		try {
@@ -123,11 +123,11 @@ async function said(tab, text) {
 		}
 	}
 }
-const onGuestPage = (tab, label, expr, timeout = 40_000) => page(tab, label, `location.pathname.endsWith('/share/guest.html') && window.__ctrShareGuest && (${expr})`, timeout)
-const guestState = tab => tab.js('return window.__ctrShareGuest.state()')
+export const onGuestPage = (tab, label, expr, timeout = 40_000) => page(tab, label, `location.pathname.endsWith('/share/guest.html') && window.__ctrShareGuest && (${expr})`, timeout)
+export const guestState = tab => tab.js('return window.__ctrShareGuest.state()')
 
 /** The second browser's page, or a skip : the no-disc scenarios empty its storage. */
-async function secondBrowser(ctx, origin, o = {}) {
+export async function secondBrowser(ctx, origin, o = {}) {
 	const opened = await openGuestPage(ctx, origin, { name: 'Bee', ...o })
 	if (!opened.guest.own) {
 		await opened.guestBrowser.close()
@@ -254,12 +254,22 @@ async function homeErrors(ctx) {
 	return steps.join(' · ')
 }
 
-/** The Share host : the game booted, Share on from its panel. */
-async function shareHost(ctx) {
+/**
+ * The Share host : the game booted, Couch on from the game (session 29 : Select on a character
+ * select — VS's, or with `arcade` ARCADE's, which can race alone). The host is left on that select.
+ */
+async function shareHost(ctx, { arcade = false } = {}) {
 	const origin = new URL(ctx.args.url).origin
 	const host = tabOf(ctx)
 	await ctx.conn.send('Page.addScriptToEvaluateOnNewDocument', { source: TOASTS }, ctx.sid)
 	await bootWith(host, origin, { relay: ctx.args.relay, rk: ctx.args.rk, name: 'Host' })
+	if (arcade) {
+		await menuTo(host, 'ARCADE', dir => host.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
+		await pressUntil(host, CROSS, 'ARCADE\'s race type', s => s.sub?.title === 'RACE TYPE')
+		await pressUntil(host, CROSS, 'the difficulty', s => s.sub?.title === 'DIFFICULTY')
+		await pressUntil(host, CROSS, 'ARCADE\'s character select', s => !!s.charSelect)
+		await sleep(1500)
+	}
 	const link = await share(ctx)
 	const s = await ctx.js('return window.__ctrShare.state()')
 	if (!/^[0-9a-e]{3,5}$/.test(s.code)) throw new Error(`the Share room has no code : ${JSON.stringify(s.code)}`)
@@ -273,7 +283,7 @@ async function shareHostCode(ctx) {
 	try {
 		const names = code.map(id => NAMES[id]).join(' · ')
 		const toasts = await ctx.js('return globalThis.__toasts ?? []')
-		if (!toasts.some(t => /Sharing — the link is copied|Click here to copy the link/.test(t) && t.includes(names))) throw new Error(`no toast naming ${names} : ${JSON.stringify(toasts)}`)
+		if (!toasts.some(t => /Couch on — the link is copied|Click here to copy the link/.test(t) && t.includes(names))) throw new Error(`no toast naming ${names} : ${JSON.stringify(toasts)}`)
 		if (!/[#&]c=[0-9a-e]{3,5}/.test(link) || !/[#&]t=/.test(link)) throw new Error(`the link carries no code or no pass : ${link.replace(/key=[^&]+/, 'key=…')}`)
 		const g = await untilGame(host, 'the game showing the Share room', s => s.netplay?.share, 10_000)
 		await shot(ctx, 'share-host-tag')
@@ -356,12 +366,12 @@ async function shareCode(ctx) {
 /** Item 5 : the host in a race — one line in the game, nothing on the page ; the box with the next menu. */
 async function shareDoorRace(ctx) {
 	needRelay(ctx)
-	const { origin, host, code } = await shareHost(ctx)
+	const { origin, host, code } = await shareHost(ctx, { arcade: true })
 	const { guest, guestBrowser } = await secondBrowser(ctx, origin)
 	try {
-		// a Time Trial : Cross through every menu until the level runs
-		await menuTo(host, 'TIME TRIAL', dir => host.press(dir === 'down' ? 'ArrowDown' : 'ArrowUp'))
-		for (let i = 0; i < 10 && (await game(host)).screen === 'menu'; i++) {
+		// an Arcade race from the select Couch was started on (the main menu would close the room) :
+		// Cross through every menu until the level runs
+		for (let i = 0; i < 12 && (await game(host)).screen === 'menu'; i++) {
 			await host.press(CROSS)
 			await sleep(1200)
 		}
@@ -376,28 +386,20 @@ async function shareDoorRace(ctx) {
 		if (line.netplay.screen !== 'none') throw new Error(`the box came up in the race : ${line.netplay.screen}`)
 		const toasts = await ctx.js('return globalThis.__toasts')
 		if (toasts.some(t => /wants/i.test(t))) throw new Error(`the page said it too : ${JSON.stringify(toasts)}`)
-		// the pause menu's QUIT : the main menu, and the box
+		// the pause menu's CHANGE CHARACTER : a menu again, and the box (QUIT would close the room)
 		await host.press(START)
-		for (let i = 0; i < 10; i++) {
+		for (let i = 0; i < 12; i++) {
 			const s = await game(host)
-			if (s.menu?.label === 'QUIT') break
+			if (/CHARACTER/.test(s.menu?.label ?? '')) break
 			await host.press(s.menu ? 'ArrowDown' : START)
 			await host.frames(10)
 		}
 		await host.press(CROSS)
-		// its confirmation : QUIT — YES / NO, the cursor on NO
-		for (let i = 0; i < 10; i++) {
-			await host.frames(10)
-			const s = await game(host)
-			if (s.menu?.title !== 'QUIT') { if (i > 2) break; continue }
-			if (s.menu.label === 'YES') { await host.press(CROSS); break }
-			await host.press('ArrowUp')
-		}
-		const ask = await untilGame(host, 'the box on the main menu', s => s.netplay?.screen === 'ask', 90_000, 500)
+		const ask = await untilGame(host, 'the box on the next menu', s => s.netplay?.screen === 'ask', 90_000, 500)
 		await shot(ctx, 'share-door-race-box')
 		await pressUntil(host, CROSS, 'ACCEPT', s => s.netplay?.screen === 'none')
 		const g = await onGuestPage(guest, 'the guest on the host\'s screen', "(() => { const s = window.__ctrShareGuest.state(); return s.state === 'connected' && s.tracks.length === 2 ? s : null })()", 60_000)
-		return `in the race : the line (screen ${line.netplay.screen}), no toast ; QUIT → the box (${ask.netplay.screen}) → ACCEPT → P${g.slot + 1}`
+		return `in the race : the line (screen ${line.netplay.screen}), no toast ; CHANGE CHARACTER → the box (${ask.netplay.screen}) → ACCEPT → P${g.slot + 1}`
 	} finally {
 		await ctx.js("window.ctrShareApi?.stopOn(); return true").catch(() => {})
 		await guestBrowser.close()

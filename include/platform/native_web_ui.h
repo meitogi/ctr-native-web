@@ -31,6 +31,17 @@
 // session 28b) — the menus show its tag, INVITE and its door as a Netplay room's.
 // NativeWeb_RoomGuestMask() : the slots a room's guests hold (bit n = slot n, the share pads of
 // platform/native_input.c) — a room's humans are the host and these, never a pad of the host's.
+// Couch (session 29) — Share switched on and off from the game, on the relay and key of Settings ›
+// Netplay : NativeWeb_CouchStart() is 0 with no relay key ; NativeWeb_CouchStatus() says where its
+// room is, as NativeWeb_NetplayStatus() does ; NativeWeb_CouchStop() closes it ;
+// NativeWeb_CouchSaid(buf, size) : a line the page has for the host (a guest with no direct
+// connection), 0 with none.
+// The players who are in (platform/native_input.c, session 29) : NativeWeb_SeatsOpen(join, leave),
+// once a frame — the game takes a Start as « join » now, and is on its menus (a held Select
+// leaves) ; NativeWeb_SeatMask() : the seats P2-P4 held, by a local device or a guest (bit n) ;
+// NativeWeb_SeatGone() : a seat that closed since the last call, the ones above it moved down ;
+// NativeWeb_PlayerKind(p) : bit 0 in, bit 1 a guest, bit 2 on a keyboard ; NativeWeb_Joinable() :
+// bit 0 a pad, bit 1 a keyboard could join ; NativeWeb_JoinKey(buf, size) : that keyboard's Start key.
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/em_macros.h>
 // declared as the EM_JS import it is : the game's files see this before the EM_JS (unity build)
@@ -50,6 +61,16 @@ void NativeWeb_RoomQuit(void) EM_IMPORT(NativeWeb_RoomQuit);
 int NativeWeb_RoomTag(char *buf, int size) EM_IMPORT(NativeWeb_RoomTag);
 int NativeWeb_ShareHost(void) EM_IMPORT(NativeWeb_ShareHost);
 int NativeWeb_RoomGuestMask(void);
+int NativeWeb_CouchStart(void) EM_IMPORT(NativeWeb_CouchStart);
+int NativeWeb_CouchStatus(void) EM_IMPORT(NativeWeb_CouchStatus);
+void NativeWeb_CouchStop(void) EM_IMPORT(NativeWeb_CouchStop);
+int NativeWeb_CouchSaid(char *buf, int size);
+void NativeWeb_SeatsOpen(int join, int leave);
+int NativeWeb_SeatMask(void);
+int NativeWeb_SeatGone(void);
+int NativeWeb_PlayerKind(int player);
+int NativeWeb_Joinable(void);
+int NativeWeb_JoinKey(char *buf, int size);
 #endif
 #else
 #define NativeWeb_IntroSkip() 0
@@ -66,6 +87,16 @@ int NativeWeb_RoomGuestMask(void);
 #define NativeWeb_RoomQuit() ((void)0)
 #define NativeWeb_RoomTag(buf, size) 0
 #define NativeWeb_ShareHost() 0
+#define NativeWeb_CouchStart() 0
+#define NativeWeb_CouchStatus() 0
+#define NativeWeb_CouchStop() ((void)0)
+#define NativeWeb_CouchSaid(buf, size) 0
+#define NativeWeb_SeatsOpen(join, leave) ((void)0)
+#define NativeWeb_SeatMask() 0
+#define NativeWeb_SeatGone() 0
+#define NativeWeb_PlayerKind(player) 0
+#define NativeWeb_Joinable() 0
+#define NativeWeb_JoinKey(buf, size) 0
 #endif
 
 #endif

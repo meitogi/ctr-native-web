@@ -1639,3 +1639,70 @@ the same box as a Netplay room's. Off the menus — a race, its results — the 
 one line in the game's font says « BEE WANTS IN » (`OnlineDoor_DrawLine`), and the box is there
 with the next menu. A Netplay host's mid-race page toast became the same line. A build without
 Netplay has none of these screens in its game : its Share room has no code, the link alone joins.
+
+## D15 — Couch from the game, and the players who are in (session 29)
+
+Settled with the user on drawings first, over four rounds (2026-11-12). Share is named **Couch** ;
+it is switched on and off in the game, and a local mode's players are no longer « the pads plugged
+in » but the players who are in.
+
+**D15.1 — Who is in.** On the web (the Netplay build, outside a Netplay room) whatever navigates is
+P1 : every keyboard and pad that holds no seat drives it. A second device takes a seat — P2, then
+P3, P4 — by pressing Start on the character select of ARCADE, VS or BATTLE, unless it is the device
+that navigated last (that one is P1's) ; it gives the seat back by holding Select alone for a
+second, anywhere on the menus. The press that took or gave back a seat is nobody's. The seats are
+the page's (`web/share/slots.js`) : a local device holds one as `local:<id>`, a Couch guest as its
+peer, so the players are one run in the order they came, and a gap closes on the menus (the ones
+above move down ; the select moves their character and lock with them, as a Netplay room's does —
+`NativeWeb_SeatGone`). `platform/native_input.c` (`NativeInput_WebSeatPlayers`) composes the four
+pads the game reads from the devices and the seats, once per input update. Settings › Players
+still lists the devices in the order they were plugged : it says who may play on this page, the
+game says who does.
+
+**D15.2 — No players menu.** VS and BATTLE go straight to the character select, ARCADE through its
+difficulty, with whoever is in : the 2P / 3P / 4P and 1P / 2P boxes are not shown on the web
+(`LocalSeats_On`, `game/230/MM_MenuFlow.c`). The select follows who comes and goes
+(`OnlineCharacters_Follow`, now local play's too) — ARCADE up to 2 players, VS and BATTLE up to 4.
+A VS or BATTLE alone locks and waits : WAITING FOR PLAYER 2. TIME TRIAL and ADVENTURE are P1's.
+The native build keeps the retail boxes.
+
+**D15.3 — Couch on.** On that select the pad's Select (the Space key) opens a Couch room, on the
+relay and key of Settings › Netplay — one relay, one key for Netplay and Couch
+(`NativeWeb_CouchStart`, the page's `couchStart`) — after its help page (D15.8). OPENING ROOM...
+until it is on (Triangle cancels), then INVITE by itself : the code and HOME PAGE - JOIN A ROOM.
+With no key : NO RELAY KEY (OPEN SETTINGS /
+BACK) ; a refused key : KEY REFUSED ; a relay that does not answer : RELAY OFFLINE (TRY AGAIN /
+BACK) — a box over the select, Triangle is BACK. Once on, the menus show the room's tag and Select
+is INVITE (D14.5) ; a guest let in is a player more, with a cursor on the select at once.
+
+**D15.4 — Couch off.** A Couch room's INVITE has two rows : BACK (Cross, Triangle or Select again)
+and STOP COUCH (Down, Cross), which closes the room where the host stands. Going back to the main
+menu closes it too, as it closes a Netplay room — a race's QUIT included. The guests are told : one
+who came by code is back on its dials under THE HOST LEFT, a link's guest reads its page's own
+line.
+
+**D15.5 — Who is connected by what.** While P1 holds L1 and R1 on the menus, a panel on the right
+lists the players : the number, a house (this machine) or a globe (a Couch guest), a pad or a
+keyboard, the character's icon and name. The four small pictures are drawn for it, as runs of
+squares (`Couch_DrawIcon`) : the game has none. The select's bottom line says the rest : SELECT -
+COUCH (or INVITE), L1 R1 - PLAYERS, and START - JOIN (with the keyboard's Start key when the
+keyboard may join) or HOLD SELECT - LEAVE.
+
+**D15.6 — No direct connection.** Couch streams peer to peer : a guest whose link is the relay's
+is refused, and reads NO DIRECT CONNECTION on its dials. The host's game says it too, one line for
+a few seconds (`NativeWeb_CouchSaid`), on the menus or in a race.
+
+**D15.7 — The page.** Settings › Multiplayer › Couch : the room's code (read only), Stop, the relay
+and its key — the Netplay tab's own, typed in either —, the video bitrate, who is in. No start
+button : Couch starts in the game. A build without Netplay has none of these screens in its game :
+its panel keeps its own relay, key and buttons, and the link alone joins. The relay is not changed.
+
+**D15.8 — The limits, said before the launch.** Picking NETPLAY in the main menu, and Select on
+the select before a Couch room opens, show a page first, every time (`NetplayHelp_Frame`) : what
+the mode is and what it cannot do. NETPLAY : everyone on their own screen, each with their own
+disc, one player per browser, up to four in a room. Couch : the host's screen is streamed — no disc
+needed, some delay for the guests —, several players on the host's machine and one per guest, four
+in all. Cross goes on, Triangle goes back with nothing launched ; a guest resting on the main menu
+in its room is not shown NETPLAY's again. The page's Settings › Help says the same, with how a
+player joins and leaves, while the game runs. « Several players per guest, per Netplay browser »
+is a next, said on both.

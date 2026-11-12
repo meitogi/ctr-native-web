@@ -841,7 +841,8 @@ static inline u8 MM_Characters_ScaleColor(u8 color)
 }
 
 #ifdef USE_ONLINE
-// ctr-native: a Netplay room's character select follows its humans (session 32e, D12.7) : a
+// ctr-native: a Netplay room's character select — and local play's on the web, whose players
+// are the ones who are in (session 29) — follows its humans (session 32e, D12.7) : a
 // guest arriving gets a cursor, one leaving loses it, and the screen stays. Everyone keeps the
 // character they hover and their lock. A guest leaving moves the ones above it down a slot (the
 // page's web/share/slots.js compact, told by octrSlotGone) : their state moves with them. The
@@ -855,6 +856,10 @@ static void OnlineCharacters_Follow(void)
 	int was = gGT->numPlyrNextGame;
 	int now, p, iconIndex, gone;
 	u16 flags;
+
+	// local play on the web (session 29) : the seats' own word of one that closed
+	if (LocalSeats_On() && ((gone = NativeWeb_SeatGone()) != 0))
+		octrSlotGone = gone;
 
 	if ((sdata->Loading.stage != LOAD_IDLE) || (MM_CHARACTER_SELECT_MENU_STATE != IN_MENU))
 	{
@@ -872,7 +877,7 @@ static void OnlineCharacters_Follow(void)
 		octrSlotGone = 0;
 	if (!octrSlotGone)
 		goneFrames = 0;
-	now = OnlineRoom_Humans();
+	now = Menu_Humans();
 	if ((now == was) || (++settling < ONLINE_SELECT_SETTLE_FRAMES))
 	{
 		if (now == was)
@@ -950,7 +955,7 @@ void MM_Characters_MenuProc(struct RectMenu *unused)
 	(void)unused;
 
 #ifdef USE_ONLINE
-	if (ONLINE_ROOM)
+	if (ONLINE_ROOM || LocalSeats_On())
 		OnlineCharacters_Follow();
 #endif
 

@@ -1,10 +1,16 @@
 // The Share panel of the game page (web/index.html loads this module ; nothing else of the page
-// knows about it). On the right of the 4:3 canvas ; in the CTR_ONLINE build, beside the Online
-// sidebar. « Share » opens a room on the relay, streams the game to each guest that reaches this tab
-// directly (WebRTC) and plugs their pads in as P2–P4.
+// knows about it) ; the player reads « Couch ». On the right of the 4:3 canvas ; in the CTR_ONLINE
+// build, beside the Online sidebar. Sharing opens a room on the relay, streams the game to each
+// guest that reaches this tab directly (WebRTC) and plugs their pads in as P2–P4.
+//
+// In the Netplay build the game starts and stops it (Select on the character select :
+// `Module.ctrInput.couchStart`, web/online/page.js), on the relay and key of Settings › Netplay ;
+// the panel then shows the room and has no start button. A build without Netplay keeps its own
+// fields and buttons.
 //
 // The game calls `Module.ctrShare.present()` after each present and `readPads()` once per input
 // update (platform/native_renderer.c, platform/native_input.c) ; both only touch JS state.
+// `localJoin()` / `localLeave()` seat a player of the host's own machine in P2–P4 (slots.js).
 // window.__ctrShare.state() / .stats() are for the player suites.
 //
 // The room has a code (session 28b), as a Netplay room's : a few of the game's characters, said
@@ -25,7 +31,7 @@ import { openRoom, peersOf } from '../net/room.js';
 import { createCapture } from './capture.js';
 import { BITRATE, createShareHost } from './host.js';
 import { nameOf } from './protocol.js';
-import { createSlots } from './slots.js';
+import { FIRST_SLOT, LOCAL, SLOT_COUNT, createSlots, isLocal } from './slots.js';
 
 const DEFAULT_RELAY = 'wss://ctr-relay.suuuper.app';
 const STORE = 'ctr-share.';
@@ -35,6 +41,7 @@ const CSS = `
   background: #111; border: 1px solid #333; color: #ccc; font: 12px/1.4 monospace; }
 #share h2 { margin: 0 0 6px; font-size: 13px; color: #eee; }
 #share label { display: block; margin: 4px 0; }
+#share [hidden] { display: none; }
 #share input[type=text], #share input[type=password] { width: 100%; box-sizing: border-box; font: inherit;
   background: #000; color: #ccc; border: 1px solid #444; }
 #share input[type=range] { width: 100%; }
@@ -74,6 +81,10 @@ fetch(new URL('../online/config.json', import.meta.url)).then((r) => r.json()).t
 }).catch(() => { /* no file (a build without Netplay) : the shortest code */ });
 // slot → {buttons, at} : when the game first read a new button word (input-latency probe)
 const seen = [null, null, null, null];
+const gone = []; // the slots a closed gap freed, for the game : one per readPads()
+let starting = null; // start() on its way
+let noDirect = null; // {name, until} : the last guest refused for want of a direct connection
+let lastRefusal = null;
 
 let owner = 'share'; // who started the host : 'share' (the panel) or 'online' (the Online room)
 /** An Online room's race runs : the lobby's capture and pads pause (phase 1 = the menus). */
@@ -83,7 +94,18 @@ const racing = () => {
 };
 let audioOn = true;
 
-// The game's two calls. Until « Share », no capture and no guest : both are no-ops.
+/** The seats P2–P4 as a run with no hole : the slots freed (the holes, highest first). */
+function closeGaps() {
+  if (host) return host.compactHoles(); // each moved guest is told its new slot
+  const holes = [];
+  let top = 0;
+  for (let s = FIRST_SLOT; s < SLOT_COUNT; s++) if (slots.get(s)) top = s;
+  for (let s = top - 1; s >= FIRST_SLOT; s--) if (!slots.get(s)) holes.push(s);
+  if (holes.length) slots.compact();
+  return holes;
+}
+
+// The game's calls. Until sharing starts, no capture and no guest : only local seats are read.
 Module.ctrShare = {
   present(displayW, displayH, viewportW, viewportH) {
     const paused = racing();
@@ -95,24 +117,38 @@ Module.ctrShare = {
     }
     host?.frame(); // a bot guest's own kart (debug builds : window.__ctr)
   },
-  readPads(heap, dst) {
+  /**
+   * `menus` : the game is on its menus, where a seat left free is closed (an Online room closes
+   * its own). Returns the mask of held slots, and in bits 8+ one slot a closed gap freed (0 = none).
+   */
+  readPads(heap, dst, menus) {
     if (racing()) return 0;
+    // a Netplay room is one player per browser : its seats are its guests', none a local device's
+    if (Module.ctrOnlineLobby?.()?.active) {
+      for (let s = 1; s < 4; s++) if (isLocal(slots.get(s)?.peerId)) slots.release(slots.get(s).peerId);
+    }
+    if (menus && owner !== 'online') gone.push(...closeGaps());
     const mask = slots.read(heap, dst);
     for (let s = 1; s < 4; s++) {
-      if (!(mask & (1 << s))) { seen[s] = null; continue; }
       const o = dst + (s - 1) * 8;
+      // a local seat's packet is a marker, not a pad
+      if (!(mask & (1 << s)) || heap[o] === 0xff) { seen[s] = null; continue; }
       const buttons = heap[o + 2] | (heap[o + 3] << 8);
       if (seen[s]?.buttons !== buttons) seen[s] = { buttons, at: wall() };
     }
-    return mask;
+    return mask | ((gone.shift() ?? 0) << 8);
   },
+  /** A player of this machine takes a seat : its slot (1–3), or 0 when all three are taken. */
+  localJoin: (id) => slots.take(LOCAL + id),
+  /** …and leaves it : the slot, or 0. The next readPads() on the menus closes the gap. */
+  localLeave: (id) => slots.release(LOCAL + id),
 };
 
 const query = new URLSearchParams(location.search);
 document.head.append(el('style', { textContent: CSS }));
 const relay = el('input', { type: 'text', id: 'share-relay', value: query.get('relay') || load('relay') || DEFAULT_RELAY });
 const rk = el('input', { type: 'password', id: 'share-rk', value: query.get('rk') || load('rk') || '', autocomplete: 'off' });
-const startButton = el('button', { type: 'button', id: 'share-start', textContent: 'Share' });
+const startButton = el('button', { type: 'button', id: 'share-start', textContent: 'Couch' });
 const stopButton = el('button', { type: 'button', id: 'share-stop', textContent: 'Stop', disabled: true });
 const copyButton = el('button', { type: 'button', id: 'share-copy', textContent: 'Copy guest link', disabled: true });
 const bitrate = el('input', { type: 'range', id: 'share-bitrate', min: BITRATE.min, max: BITRATE.max, step: 250_000,
@@ -120,19 +156,42 @@ const bitrate = el('input', { type: 'range', id: 'share-bitrate', min: BITRATE.m
 const bitrateLabel = el('span');
 const status = el('div', { className: 'status', id: 'share-status' });
 const errorLine = el('div', { className: 'error', id: 'share-error' });
+// the Netplay build : the room's code, read only (its characters' names)
+const codeLine = el('span', { id: 'share-code' });
+const codeRow = el('label', {}, 'Room code ', codeLine);
+const hint = el('div', { className: 'hint' });
+const HINT = 'Guests open the link : they see and hear this game and play as P2–P4, no disc needed. Direct connections only.';
+const HINT_IN_GAME = 'Started and stopped in the game : Select on the character select. Guests need no disc ; your screen is streamed to them, so they may see some delay. Direct connections only.';
 const panel = el('div', { id: 'share' },
-  el('h2', {}, 'Share'),
+  el('h2', {}, 'Couch'),
+  codeRow,
   el('label', {}, 'Relay', relay),
   el('label', {}, 'Relay key', rk),
   startButton, stopButton, copyButton,
   el('label', {}, 'Video bitrate ', bitrateLabel, bitrate),
   status, errorLine,
-  el('div', { className: 'hint' }, 'Guests open the link : they see and hear this game and play as P2–P4, no disc needed. Direct connections only.'));
+  hint);
 // keys typed in the panel are not the game's
 panel.addEventListener('keydown', (e) => e.stopPropagation());
 panel.addEventListener('keyup', (e) => e.stopPropagation());
-// In the page's Settings (web/ui, session 12) when it is there : the « Share » tab ; else floating.
-if (!globalThis.ctrUI?.adopt('share', 'Share', panel)) document.body.append(panel);
+// In the page's Settings (web/ui, session 12) when it is there : the « Couch » tab ; else floating.
+if (!globalThis.ctrUI?.adopt('share', 'Couch', panel)) document.body.append(panel);
+
+// The Netplay build (web/online/page.js set its hooks, maybe after this module ran) : the game
+// starts Couch, on the relay and key of Settings › Netplay. Asked at each render.
+const inGame = () => typeof Module.ctrInput?.couchStart === 'function';
+// one relay, one key : these two fields are the Netplay tab's, which saves and checks them
+const mirrored = [[relay, 'online-relay'], [rk, 'online-rk']];
+for (const [field, id] of mirrored) {
+  for (const type of ['input', 'focusout']) {
+    field.addEventListener(type, () => {
+      const theirs = inGame() && document.getElementById(id);
+      if (!theirs) return;
+      theirs.value = field.value;
+      theirs.dispatchEvent(new Event(type, { bubbles: true }));
+    });
+  }
+}
 
 /** Waits up to `ms` for the game's audio output, so the guests' stream carries sound from the start. */
 async function tapAudio(ms) {
@@ -152,7 +211,14 @@ async function startOn(room, { relayGuests = false, by = 'share' } = {}) {
   room.on('close', () => { error = 'relay: the relay closed the room'; render(); });
   host = createShareHost({ room, stream: capture.stream, maxBitrate: Number(bitrate.value), scale: capture.scale, slots, hostName: hostName(),
     game: () => globalThis.__ctr ?? null, relayGuests, compact: by === 'online', compactNow: () => !racing() });
-  host.on('change', render);
+  host.on('change', () => {
+    const r = host?.refusals.at(-1);
+    if (r && r !== lastRefusal) {
+      lastRefusal = r;
+      if (r.code === 'online-mode' && by === 'share') noDirect = { name: host.guests[r.peerId]?.name ?? '', until: Date.now() + 6000 };
+    }
+    render();
+  });
   // the host is told who comes and goes, Settings open or not
   host.on('join', (g) => ui?.toast(ui.text.joined(nameOf(g.slot, g.name), g.slot + 1)));
   host.on('leave', (g) => ui?.toast(ui.text.left(nameOf(g.slot, g.name), g.slot + 1)));
@@ -170,17 +236,31 @@ function stopOn({ keepRoom = false } = {}) {
   gate = null;
   code = '';
   owner = 'share';
+  noDirect = null;
   render();
 }
 
-async function start() {
-  if (host) return;
+/**
+ * Opens the panel's own room and shares on it. `where` ({relay, rk}) : the game's start, on the
+ * relay of Settings › Netplay ; none : the panel's own fields, remembered.
+ * Resolves {ok: true} or {ok: false, code, message}.
+ */
+function start(where) {
+  if (host) return Promise.resolve({ ok: true });
+  starting ??= begin(where).finally(() => { starting = null; });
+  return starting;
+}
+
+async function begin(given) {
+  let result = { ok: true };
   error = '';
   startButton.disabled = true;
-  save('relay', relay.value.trim());
-  save('rk', rk.value.trim());
+  if (!given) {
+    save('relay', relay.value.trim());
+    save('rk', rk.value.trim());
+  }
   try {
-    const where = { relay: relay.value.trim(), rk: rk.value.trim() };
+    const where = given ?? { relay: relay.value.trim(), rk: rk.value.trim() };
     let link;
     // the relay's signaling name, in clear, says the room's kind (the home page reads it before
     // asking for a disc) — the player's name goes end to end (WELCOME)
@@ -204,7 +284,9 @@ async function start() {
     await startOn(gate);
     tellCode();
   } catch (e) {
-    error = `${e.code ? `${e.code}: ` : ''}${e.message ?? e}`;
+    const message = String(e.message ?? e);
+    error = `${e.code ? `${e.code}: ` : ''}${message}`;
+    result = { ok: false, code: e.code ?? '', message };
     capture?.stop();
     capture = null;
     host = null;
@@ -213,6 +295,7 @@ async function start() {
     code = '';
   }
   render();
+  return result;
 }
 
 function stop() {
@@ -235,12 +318,19 @@ const door = () => (host && owner === 'share' && code && gate
   ? { code, asking: () => gate.asking(), answer: (yes) => gate.answer(yes), invite: () => copyLink(ui?.text.shareCopied) }
   : null);
 
+/** A line for the host's game (upper case, ASCII), or '' : a guest was just refused, no direct connection. */
+function said() {
+  if (!noDirect || owner !== 'share' || Date.now() > noDirect.until) return '';
+  const name = noDirect.name.toUpperCase().replace(/[^\x20-\x7e]/g, '').trim().slice(0, 12).trim();
+  return `${name || 'GUEST'} - NO DIRECT CONNECTION`;
+}
+
 // start / link : the page's home hosts Share without this panel's button (ui/src/lib/home.js)
-globalThis.ctrShareApi = { slots, startOn, stopOn, host: () => host, guests, start, link: () => linkText, door };
+globalThis.ctrShareApi = { slots, startOn, stopOn, host: () => host, guests, start, link: () => linkText, door, said };
 
 ui?.settings.subscribe((s) => { if (host && s.name !== host.hostName) host.setHostName(s.name); });
 
-startButton.addEventListener('click', start);
+startButton.addEventListener('click', () => start());
 stopButton.addEventListener('click', stop);
 copyButton.addEventListener('click', () => navigator.clipboard?.writeText(linkText));
 bitrate.addEventListener('input', () => {
@@ -259,9 +349,20 @@ function guests() {
 }
 
 function render() {
-  startButton.disabled = !!host;
+  const game = inGame();
+  startButton.hidden = copyButton.hidden = game;
+  codeRow.hidden = !game;
+  startButton.disabled = game || !!host || !!starting;
   stopButton.disabled = !host || owner !== 'share';
-  copyButton.disabled = !linkText;
+  copyButton.disabled = game || !linkText;
+  hint.textContent = game ? HINT_IN_GAME : HINT;
+  if (game) {
+    codeLine.textContent = names() || '—';
+    for (const [field, id] of mirrored) {
+      const theirs = document.getElementById(id);
+      if (theirs && document.activeElement !== field && field.value !== theirs.value) field.value = theirs.value;
+    }
+  }
   bitrateLabel.textContent = `${(Number(bitrate.value) / 1e6).toFixed(2)} Mbit/s per guest`;
   const lines = [];
   if (!host) lines.push('Not sharing.');

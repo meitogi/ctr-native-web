@@ -28,13 +28,18 @@ browser now. nothing gets uploaded. next time you just press the button and send
   accelerate ? bold. respect.), the right button icons for your pad, « Skip intro »
   because we've all seen it. English or French, whatever your browser speaks.
 - **couch party** — 2 to 4 players, 1 screen, 0 friendships left. one pad each, or two
-  on one keyboard (left half WASD, right half arrows, elbows included). Settings ›
-  Players shows who's P1–P4 and swaps them. pads start in analog (ANA), Select + Start
-  flips to digital (DIG), just like the PlayStation's Analog button.
-- **Share** — send a link, your friends play as P2–P4 **with no disc**. they get your
-  game as live video + sound, you get their pads, peer to peer. they lose, it's lag.
-  they win, it's skill. classic.
-- **host your own relay** — Share rooms go through a tiny relay. the default one needs
+  on one keyboard (left half WASD, right half arrows, elbows included). whoever drives
+  the menus is P1 ; everyone else presses Start on the character select to hop in, and
+  holds Select to hop out. hold L1 + R1 in the menus to see who's who. pads start in
+  analog (ANA), Select + Start flips to digital (DIG), just like the PlayStation's
+  Analog button.
+- **Couch** — the couch, minus the couch. Select on the character select opens a room :
+  say its code out loud (three characters), your friends type it on the home page and
+  play as P2–P4 **with no disc**. they get your game as live video + sound — so a bit
+  of delay — you get their pads, peer to peer. they lose, it's lag. they win, it's
+  skill. classic. Select again to stop. the fine print : several players on the host's
+  machine, one per guest browser, four in all — the game says so before it opens the room.
+- **host your own relay** — Couch and Netplay rooms go through a tiny relay. the default one needs
   a key (slide into the DMs), or spin up yours : Docker image, a one-file setup for a
   throwaway cloud VM with auto HTTPS, or drop it behind Traefik, HAProxy or Caddy
   ([relay/README.md](relay/README.md)).
@@ -46,10 +51,10 @@ no dates. no versions. trust the process.
 | | what | why you care |
 |---|---|---|
 | cooking | **smoother racing** | keeps its pace while you alt-tab to Discord, no more stutter when the first track loads |
-| next | **Share, upgraded** | guests get the full menu (volume, settings, their own controls) ; everyone gets a name — think `Mad Roo` — so the host knows who joined (and who rammed who) ; pick keyboard *or* gamepad so a drifting stick stops speedrunning the menus |
-| in the oven | **LAN / Netplay** | netplay like Mario Kart, ported from OnlineCTR, right from the game's own multiplayer menus. everyone on their own screen, full screen, with their own disc — same house or across the internet. private room, invite by link or by a code you say out loud — three characters, « Crash, Coco, Tiny » — and the host lets you in. end-to-end encrypted, so nobody sees your skill issue. except the other racers. wifi dies, you come back, the race remembers you |
-| in the oven | **one game, one link** | one link for everything ; no disc = you land in Share automatically. no link ? « or join a room » on the home page takes the code before any disc : a Share room opens right there, a Netplay one asks for your disc first |
-| in the oven | **couch + netplay** | sofa vs. sofa. 2v2. bring snacks |
+| next | **Couch, upgraded** | guests get the full menu (volume, settings, their own controls) ; everyone gets a name — think `Mad Roo` — so the host knows who joined (and who rammed who) ; pick keyboard *or* gamepad so a drifting stick stops speedrunning the menus |
+| in the oven | **LAN / Netplay** | netplay like Mario Kart, ported from OnlineCTR, right from the game's own multiplayer menus. everyone on their own screen, full screen, with their own disc, one player per browser — same house or across the internet. private room, invite by link or by a code you say out loud — three characters, « Crash, Coco, Tiny » — and the host lets you in. end-to-end encrypted, so nobody sees your skill issue. except the other racers. wifi dies, you come back, the race remembers you |
+| in the oven | **one game, one link** | one link for everything ; no disc = you land in Couch automatically. no link ? « or join a room » on the home page takes the code before any disc : a Couch room opens right there, a Netplay one asks for your disc first |
+| in the oven | **couch + netplay** | sofa vs. sofa. 2v2. bring snacks. today a Couch guest is one player per browser (the host's sofa can seat several), and Netplay is one player per browser, four in a room — next : several players per guest, and per Netplay browser |
 | in the oven | **your screen, your shape** | full window resolution + widescreen. 240p was a vibe in 1999, it's 2026 |
 | in the oven | **race the DuckStation crowd** | public OnlineCTR servers, players on the original game. they've been grinding since 1999. gl hf |
 | in the oven | **disc from your own server** | load it from a box on your home network. drop it once per house, not once per device |
@@ -69,7 +74,7 @@ built the first time. rebuild the game with `web/dev.sh build`, then reload the 
 checks it with the guard too). in the devcontainer : `wtf ctr dev`, `wtf ctr build`, `wtf ctr prod`.
 
 testing alone ? on the debug page, from the main menu, Settings › Dev has a **second window** :
-Netplay VS, Netplay Battle, Netplay Arcade or Share. one click, a window opens beside the first, joins the room by
+Netplay VS, Netplay Battle, Netplay Arcade or Couch. one click, a window opens beside the first, joins the room by
 itself and plays as Bot ; the first window walks its menus to the race. Settings › Players has the
 Bot switch, Settings › Dev the log and the game state too. none of it ships on the site.
 
@@ -107,7 +112,7 @@ has you covered.
   code that parts of CTR Native's platform layer and PsyQ facade headers come from
 - [SDL3](https://github.com/libsdl-org/SDL) — audio, input, windows : the boring
   essentials nobody thanks
-- the browser port — WebAssembly, Share, LAN / Netplay, the whole web thing :
+- the browser port — WebAssembly, Couch, LAN / Netplay, the whole web thing :
   [Meitogi](https://github.com/meitogi)
 - Crash Team Racing is a trademark of Sony Computer Entertainment / Naughty Dog. we're
   just fans with a compiler.

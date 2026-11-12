@@ -3,12 +3,19 @@
 //
 // Slots 1–3 are the game's P2–P4 (pad slot n = player n, with or without the multitap bus).
 // Slot 0 is the host's own keyboard / gamepad and is never handed out.
+//
+// A seat can also be held by a player on the host's own machine (a second gamepad that pressed
+// Start) : owner `local:<id>`, the id being the game's. Its pad is not here : the game reads a
+// marker packet carrying the id and fills the slot itself.
 import { NEUTRAL, decodePad, isNewer } from './protocol.js';
 
 export const FIRST_SLOT = 1;
 export const SLOT_COUNT = 4;
 /** Bytes per slot that the game reads : the PSX pad packet (native_input.c WritePadPacket). */
 export const PACKET_BYTES = 8;
+/** The owner of a seat held on the host's machine : `local:<id>`. */
+export const LOCAL = 'local:';
+export const isLocal = (peerId) => typeof peerId === 'string' && peerId.startsWith(LOCAL);
 
 /**
  * @param {object} [o]
@@ -83,7 +90,8 @@ export function createSlots({ now = () => performance.now(), staleMs = 500 } = {
     },
     /**
      * Writes slots 1–3 as PSX pad packets at `heap[dst + (slot - 1) * 8]` (status, id, buttons
-     * lo / hi, analog ×4) and returns the mask of slots a guest holds (bit n = slot n).
+     * lo / hi, analog ×4) and returns the mask of slots held (bit n = slot n). A local owner's
+     * slot is the marker 0xFF, 0, 0xFF, 0xFF and its id, little endian.
      */
     read(heap, dst) {
       let mask = 0;
@@ -91,8 +99,20 @@ export function createSlots({ now = () => performance.now(), staleMs = 500 } = {
       for (let s = FIRST_SLOT; s < SLOT_COUNT; s++) {
         if (owner[s] === null) continue;
         mask |= 1 << s;
-        const p = pads[s] && t - pads[s].at <= staleMs ? pads[s] : NEUTRAL;
         const o = dst + (s - FIRST_SLOT) * PACKET_BYTES;
+        if (isLocal(owner[s])) {
+          const id = Number(owner[s].slice(LOCAL.length));
+          heap[o] = 0xff;
+          heap[o + 1] = 0;
+          heap[o + 2] = 0xff;
+          heap[o + 3] = 0xff;
+          heap[o + 4] = id & 0xff;
+          heap[o + 5] = (id >> 8) & 0xff;
+          heap[o + 6] = (id >> 16) & 0xff;
+          heap[o + 7] = (id >>> 24) & 0xff;
+          continue;
+        }
+        const p = pads[s] && t - pads[s].at <= staleMs ? pads[s] : NEUTRAL;
         heap[o] = 0;
         heap[o + 1] = p.id;
         heap[o + 2] = p.buttons & 0xff;

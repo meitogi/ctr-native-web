@@ -342,6 +342,8 @@ export function attach(Module) {
   // says why and its OPEN brings this panel
   let hosting = false; // a room on its way : a second mode picked or Create room opens no other
   let np = NP.idle; // the game's NETPLAY screens : the room they asked for (session 28)
+  let couch = NP.idle; // the same words for Couch, started in the game (web/share/panel.js's room)
+  let couchGen = 0; // a start still on its way when the game stops it : closed as it lands
   let gate = null; // host : the room's door (./admit.js)
   let hostError = null; // host() : why the room did not open
   let codeGen = 0; // JOIN by code : a newer code, or its Triangle, drops the one on its way
@@ -379,6 +381,37 @@ export function attach(Module) {
     // a Share room this page hosts under a code (web/share/panel.js, 28b) : the game shows its
     // tag, INVITE and its door as a Netplay room's
     Module.ctrInput.shareHost = () => (!link && shareDoor() ? 1 : 0);
+    // Couch, switched on in the game (Select on the character select) : the panel's own room, on
+    // the relay and key of Settings ; 0 in a Netplay room or with no key, couchStatus says why
+    Module.ctrInput.couchStart = () => {
+      if (shareDoor() || couch === NP.busy) return 1;
+      if (net.room || hosting) return 0;
+      const where = { relay: relay.value.trim(), rk: rk.value.trim() };
+      const share = globalThis.ctrShareApi;
+      if (!where.relay || !where.rk || !share?.start) {
+        couch = share?.start ? NP.noKey : NP.offline;
+        return 0;
+      }
+      const gen = ++couchGen;
+      couch = NP.busy;
+      Promise.resolve(share.start(where)).then((r) => r ?? { ok: false }, (e) => ({ ok: false, code: e?.code })).then((r) => {
+        // stopped meanwhile : the room that opened anyway closes
+        if (gen !== couchGen) return void (r.ok && couch !== NP.busy && shareDoor() && share.stopOn());
+        couch = r.ok ? NP.room : NP_OF[r.code] ?? NP.offline;
+      });
+      return 1;
+    };
+    Module.ctrInput.couchStatus = () => {
+      if (shareDoor()) return NP.room;
+      if (couch === NP.room) couch = NP.idle; // the room is gone
+      return couch;
+    };
+    Module.ctrInput.couchStop = () => {
+      couchGen++;
+      if (shareDoor()) globalThis.ctrShareApi.stopOn();
+      couch = NP.idle;
+    };
+    Module.ctrInput.couchSaid = () => globalThis.ctrShareApi?.said?.() ?? '';
     // NETPLAY > VS, BATTLE or ARCADE picked with no room (session 28) : this player hosts one, on
     // the relay and key of Settings ; 0 with no key, the game says why
     Module.ctrInput.netplayHost = () => {

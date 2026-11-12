@@ -385,7 +385,7 @@ EM_JS(int, NativeWeb_RoomTag, (char *buf, int size), {
 // number of characters written.
 EM_JS(int, NativeWeb_PageText, (int which, char *buf, int size), {
 	const input = Module.ctrInput;
-	const read = input && [input.roomCode, input.askName][which];
+	const read = input && [input.roomCode, input.askName, input.couchSaid][which];
 	const text = read ? read() : '';
 	const n = Math.min(text.length, size - 1);
 	for (let i = 0; i < n; i++) HEAPU8[buf + i] = text.charCodeAt(i) & 0x7f;
@@ -432,6 +432,26 @@ EM_JS(int, NativeWeb_ShareHost, (void), {
 	const input = Module.ctrInput;
 	return input && input.shareHost ? input.shareHost() : 0;
 });
+
+EM_JS(int, NativeWeb_CouchStart, (void), {
+	const input = Module.ctrInput;
+	return input && input.couchStart ? input.couchStart() : 0;
+});
+
+EM_JS(int, NativeWeb_CouchStatus, (void), {
+	const input = Module.ctrInput;
+	return input && input.couchStatus ? input.couchStatus() : 0;
+});
+
+EM_JS(void, NativeWeb_CouchStop, (void), {
+	const input = Module.ctrInput;
+	if (input && input.couchStop) input.couchStop();
+});
+
+int NativeWeb_CouchSaid(char *buf, int size)
+{
+	return NativeWeb_PageText(2, buf, size);
+}
 #endif
 
 EM_JS(int, NativeWeb_IntroSkip, (void), {
@@ -716,6 +736,342 @@ internal void NativeInput_WebReportPlayers(void)
 	s_reportedOnce = 1;
 	NativeInput_WebReportPlayersJS(slots, NATIVE_INPUT_MAX_CONTROLLERS);
 }
+
+#ifdef USE_ONLINE
+// The players who are in (session 29). On the web a local player is no longer « a pad plugged
+// in » : whatever navigates is P1 — every keyboard and pad that holds no seat drives it — and a
+// second device takes a seat (P2-P4) by pressing Start where the game offers it (the character
+// select of ARCADE, VS and BATTLE), and gives it back by holding Select a second on the menus.
+// The seats are the page's (web/share/slots.js) : a Couch guest holds one as a local device does,
+// so the players are one run, in the order they came. Each update the page hands the seats back
+// (Module.ctrShare.readPads) : a guest's pad as before, a local seat as a packet whose first byte
+// is 0xff and whose last four are the device's id ; its high byte, a seat that closed (the ones
+// above it moved down : the character select moves their state with them).
+#define NATIVE_INPUT_WEB_KEYBOARD_ID  0x7fff0001
+#define NATIVE_INPUT_WEB_KEYBOARD2_ID 0x7fff0002
+#define NATIVE_INPUT_WEB_LOCAL_SEAT   0xff
+#define NATIVE_INPUT_WEB_LEAVE_MS     1000
+#define NATIVE_INPUT_PSX_SELECT       0x1
+#define NATIVE_INPUT_PSX_START        0x8
+#define NATIVE_INPUT_WEB_KIND_IN       0x1
+#define NATIVE_INPUT_WEB_KIND_REMOTE   0x2
+#define NATIVE_INPUT_WEB_KIND_KEYBOARD 0x4
+
+EM_JS(int, NativeInput_WebReadSeats, (u8 *dst, int menus), {
+	const share = Module['ctrShare'];
+	return share ? share.readPads(HEAPU8, dst, menus) : 0;
+});
+
+EM_JS(int, NativeInput_WebLocalJoin, (int id), {
+	const share = Module['ctrShare'];
+	return share && share.localJoin ? share.localJoin(id) : 0;
+});
+
+EM_JS(void, NativeInput_WebLocalLeave, (int id), {
+	const share = Module['ctrShare'];
+	if (share && share.localLeave) share.localLeave(id);
+});
+
+global_variable s32 s_webSeatMask;                               // seats 1-3 held, by a guest or a local device
+global_variable s32 s_webSeatKind[NATIVE_INPUT_MAX_CONTROLLERS]; // per player, NATIVE_INPUT_WEB_KIND_*
+global_variable s32 s_webSeatDevice[NATIVE_INPUT_MAX_CONTROLLERS] = {0, 1, 2, 3}; // per player, its device's slot (rumble)
+global_variable s32 s_webSeatGone;                               // a seat that closed, until the game reads it
+global_variable s32 s_webJoinOpen;                               // updates left of the game taking a Start as « join »
+global_variable s32 s_webLeaveOpen;                              // updates left of the menus (a held Select leaves, gaps close)
+global_variable s32 s_webP1Id;                                   // the device that navigated last
+global_variable s32 s_webJoinable;                               // who could join now : bit 0 a pad, bit 1 a keyboard
+
+internal s32 NativeInput_WebDeviceId(s32 slot)
+{
+	if (s_controllers[slot].controller != NULL)
+	{
+		return (s32)s_controllers[slot].instanceId + 1;
+	}
+	if (!NativeInput_WebKeyboardPlays())
+	{
+		return 0;
+	}
+	if (slot == s_keyboardControllerSlot)
+	{
+		return NATIVE_INPUT_WEB_KEYBOARD_ID;
+	}
+	if (slot == s_keyboard2ControllerSlot)
+	{
+		return NATIVE_INPUT_WEB_KEYBOARD2_ID;
+	}
+
+	return 0;
+}
+
+void NativeWeb_SeatsOpen(int join, int leave)
+{
+	s_webJoinOpen = join ? 3 : 0;
+	s_webLeaveOpen = leave ? 3 : 0;
+}
+
+int NativeWeb_SeatMask(void)
+{
+	return s_webSeatMask;
+}
+
+int NativeWeb_SeatGone(void)
+{
+	const s32 gone = s_webSeatGone;
+
+	s_webSeatGone = 0;
+	return gone;
+}
+
+int NativeWeb_PlayerKind(int player)
+{
+	return NativeInput_IsValidControllerSlot(player) ? s_webSeatKind[player] : 0;
+}
+
+int NativeWeb_Joinable(void)
+{
+	return s_webJoinable;
+}
+
+// The keyboard's Start key, as the join hint names it
+int NativeWeb_JoinKey(char *buf, int size)
+{
+	const char *name = SDL_GetScancodeName((SDL_Scancode)((s_webP1Id == NATIVE_INPUT_WEB_KEYBOARD_ID) ? s_keyboardMapping2.kc_start : s_keyboardMapping.kc_start));
+	s32 n = 0;
+
+	for (; (name != NULL) && (name[n] != 0) && (n < size - 1); n++)
+	{
+		buf[n] = ((name[n] >= 'a') && (name[n] <= 'z')) ? (char)(name[n] - ('a' - 'A')) : name[n];
+	}
+	buf[n] = 0;
+	return n;
+}
+
+internal void NativeInput_WebSeatPlayers(void)
+{
+	local_persist s32 s_prevId[NATIVE_INPUT_MAX_CONTROLLERS];
+	local_persist u16 s_prevButtons[NATIVE_INPUT_MAX_CONTROLLERS];
+	local_persist s32 s_muted[NATIVE_INPUT_MAX_CONTROLLERS];
+	local_persist u64 s_selectSince[NATIVE_INPUT_MAX_CONTROLLERS];
+	struct PlatformInputPadSnapshot out[NATIVE_INPUT_MAX_CONTROLLERS];
+	u8 packets[(NATIVE_INPUT_MAX_CONTROLLERS - 1) * NATIVE_INPUT_PAD_PACKET_BYTES];
+	s32 ids[NATIVE_INPUT_MAX_CONTROLLERS];
+	s32 localSeat[NATIVE_INPUT_MAX_CONTROLLERS] = {0, 0, 0, 0};
+	const s32 menus = s_webLeaveOpen > 0;
+	const s32 joining = s_webJoinOpen > 0;
+	const s32 word = NativeInput_WebReadSeats(packets, menus);
+	const s32 mask = word & 0xe;
+	const u64 now = SDL_GetTicks();
+	s32 remoteMask = 0;
+	s32 p1Present = 0;
+
+	if ((word >> 8) != 0)
+	{
+		s_webSeatGone = (word >> 8) & 3;
+	}
+	if (s_webJoinOpen > 0)
+	{
+		s_webJoinOpen--;
+	}
+	if (s_webLeaveOpen > 0)
+	{
+		s_webLeaveOpen--;
+	}
+
+	// P1 is always there (as NativeInput_ResetSnapshot has it), the seats as the page says
+	out[0] = s_controllers[0].snapshot;
+	out[0].connected = 1;
+	out[0].status = 0;
+	out[0].id = NATIVE_INPUT_PAD_DIGITAL;
+	NativeInput_SetSnapshotButtons(&out[0], 0xffff);
+	memset(out[0].analog, 0x80, sizeof(out[0].analog));
+	s_webSeatKind[0] = NATIVE_INPUT_WEB_KIND_IN | ((s_webP1Id >= NATIVE_INPUT_WEB_KEYBOARD_ID) ? NATIVE_INPUT_WEB_KIND_KEYBOARD : 0);
+	for (s32 slot = 1; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+	{
+		const u8 *packet = &packets[(slot - 1) * NATIVE_INPUT_PAD_PACKET_BYTES];
+
+		NativeInput_MakeDisconnectedSnapshot(&out[slot]);
+		s_webSeatKind[slot] = 0;
+		if ((mask & (1 << slot)) == 0)
+		{
+			continue;
+		}
+		if (packet[0] == NATIVE_INPUT_WEB_LOCAL_SEAT)
+		{
+			memcpy(&localSeat[slot], &packet[4], sizeof(s32));
+			s_webSeatKind[slot] = NATIVE_INPUT_WEB_KIND_IN | ((localSeat[slot] >= NATIVE_INPUT_WEB_KEYBOARD_ID) ? NATIVE_INPUT_WEB_KIND_KEYBOARD : 0);
+			continue;
+		}
+		remoteMask |= 1 << slot;
+		s_webSeatKind[slot] = NATIVE_INPUT_WEB_KIND_IN | NATIVE_INPUT_WEB_KIND_REMOTE;
+		out[slot].connected = 1;
+		out[slot].status = packet[0];
+		out[slot].id = packet[1];
+		out[slot].buttons[0] = packet[2];
+		out[slot].buttons[1] = packet[3];
+		memcpy(out[slot].analog, &packet[4], sizeof(out[slot].analog));
+	}
+
+	for (s32 slot = 0; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+	{
+		ids[slot] = NativeInput_WebDeviceId(slot);
+		if ((ids[slot] != 0) && (ids[slot] == s_webP1Id))
+		{
+			p1Present = 1;
+		}
+	}
+	if (!p1Present)
+	{
+		s_webP1Id = 0;
+	}
+	// a seat whose device went (unplugged, switched off in Settings) : freed on the menus ; in a
+	// race it stays, unplugged, as a pad pulled out does
+	for (s32 seat = 1; menus && (seat < NATIVE_INPUT_MAX_CONTROLLERS); seat++)
+	{
+		s32 there = localSeat[seat] == 0;
+
+		for (s32 slot = 0; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+		{
+			there |= ids[slot] == localSeat[seat];
+		}
+		if (!there)
+		{
+			NativeInput_WebLocalLeave(localSeat[seat]);
+		}
+	}
+
+	s_webJoinable = 0;
+	for (s32 slot = 0; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+	{
+		struct PlatformInputPadSnapshot device = s_controllers[slot].snapshot;
+		u16 buttons = NativeInput_GetSnapshotButtons(&device);
+		u16 pressed;
+		s32 seat = 0;
+
+		if (ids[slot] == 0)
+		{
+			s_prevId[slot] = 0;
+			continue;
+		}
+		if (s_prevId[slot] != ids[slot])
+		{
+			s_prevId[slot] = ids[slot];
+			s_prevButtons[slot] = 0xffff;
+			s_muted[slot] = 0;
+			s_selectSince[slot] = 0;
+		}
+		// the press that took or gave back a seat is nobody's : nothing until it is released
+		if (s_muted[slot] != 0)
+		{
+			if (buttons == 0xffff)
+			{
+				s_muted[slot] = 0;
+			}
+			buttons = 0xffff;
+			NativeInput_SetSnapshotButtons(&device, buttons);
+			memset(device.analog, 0x80, sizeof(device.analog));
+		}
+		pressed = (u16)(s_prevButtons[slot] & ~buttons);
+		s_prevButtons[slot] = buttons;
+
+		for (s32 s = 1; s < NATIVE_INPUT_MAX_CONTROLLERS; s++)
+		{
+			if (localSeat[s] == ids[slot])
+			{
+				seat = s;
+			}
+		}
+		if (seat != 0)
+		{
+			device.connected = 1;
+			out[seat] = device;
+			s_webSeatDevice[seat] = slot;
+			// Select alone, held : this player leaves
+			if (menus && (buttons == (u16)~NATIVE_INPUT_PSX_SELECT))
+			{
+				if (s_selectSince[slot] == 0)
+				{
+					s_selectSince[slot] = now;
+				}
+				else if (now - s_selectSince[slot] >= NATIVE_INPUT_WEB_LEAVE_MS)
+				{
+					NativeInput_WebLocalLeave(ids[slot]);
+					s_muted[slot] = 1;
+					s_selectSince[slot] = 0;
+				}
+			}
+			else
+			{
+				s_selectSince[slot] = 0;
+			}
+			continue;
+		}
+
+		if (pressed != 0)
+		{
+			// Start from a device that is not the one navigating, where the game takes players
+			if (joining && ((pressed & NATIVE_INPUT_PSX_START) != 0) && (s_webP1Id != 0) && (s_webP1Id != ids[slot]) && (mask != 0xe) &&
+			    (NativeInput_WebLocalJoin(ids[slot]) != 0))
+			{
+				s_muted[slot] = 1;
+				continue;
+			}
+			s_webP1Id = ids[slot];
+		}
+		if (s_webP1Id != ids[slot])
+		{
+			s_webJoinable |= (ids[slot] >= NATIVE_INPUT_WEB_KEYBOARD_ID) ? 2 : 1;
+		}
+		// P1 : every device with no seat, in the shape of the one that navigated last
+		{
+			const u16 held = NativeInput_GetSnapshotButtons(&out[0]);
+
+			if ((s_webP1Id == ids[slot]) || (s_webP1Id == 0))
+			{
+				out[0] = device;
+				out[0].connected = 1;
+				s_webSeatDevice[0] = slot;
+				s_webSeatKind[0] = NATIVE_INPUT_WEB_KIND_IN | ((ids[slot] >= NATIVE_INPUT_WEB_KEYBOARD_ID) ? NATIVE_INPUT_WEB_KIND_KEYBOARD : 0);
+			}
+			NativeInput_SetSnapshotButtons(&out[0], (u16)(held & buttons));
+		}
+	}
+	if (mask == 0xe)
+	{
+		s_webJoinable = 0;
+	}
+
+	for (s32 slot = 0; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+	{
+		s_controllers[slot].snapshot = out[slot];
+	}
+	s_webSeatMask = mask;
+	s_webRemotePadMask = remoteMask;
+
+#if !defined(NDEBUG)
+	{
+		local_persist s32 s_loggedMask = 0;
+		local_persist u16 s_loggedButtons[NATIVE_INPUT_MAX_CONTROLLERS] = {0xffff, 0xffff, 0xffff, 0xffff};
+
+		for (s32 slot = 1; slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+		{
+			const s32 bit = 1 << slot;
+			const u16 buttons = (remoteMask & bit) ? NativeInput_GetSnapshotButtons(&s_controllers[slot].snapshot) : 0xffff;
+
+			if ((remoteMask & bit) != (s_loggedMask & bit))
+			{
+				printf("[CTR Web] remote pad slot=%d %s\n", slot, (remoteMask & bit) ? "connected" : "disconnected");
+			}
+			if (buttons != s_loggedButtons[slot])
+			{
+				printf("[CTR Web] remote pad slot=%d buttons=0x%04x\n", slot, buttons);
+				s_loggedButtons[slot] = buttons;
+			}
+		}
+		s_loggedMask = remoteMask;
+	}
+#endif
+}
+#endif
 #endif
 
 internal void NativeInput_DefaultMappings(void)
@@ -1299,7 +1655,11 @@ void Platform_InputUpdate(void)
 #if defined(__EMSCRIPTEN__)
 	NativeInput_WebReportPlayers();
 	NativeInput_WebBlockLocalInput();
+#ifdef USE_ONLINE
+	NativeInput_WebSeatPlayers();
+#else
 	NativeInput_ApplyRemotePads();
+#endif
 #endif
 	NativeInput_WritePadBus();
 
@@ -1583,6 +1943,10 @@ void Platform_InputPadVibrate(int port, unsigned char *table, int len)
 		return;
 	}
 
+#if defined(__EMSCRIPTEN__) && defined(USE_ONLINE)
+	// the device that holds this player's seat
+	slot = s_webSeatDevice[slot];
+#endif
 	struct NativeInputController *controller = &s_controllers[slot];
 	if (controller->controller == NULL)
 	{
