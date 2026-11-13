@@ -9,10 +9,12 @@
   // #or-join, under either card : « or join a room » — the page becomes the room code's dials
   // (Join.svelte, session 28b) ; a Netplay room found with no disc brings the drop zone back,
   // saying why (#join-netplay).
+  // #relay-live, under #or-join : the players and rooms of the relay the page uses (RelayLive.svelte).
   import Glyph from './Glyph.svelte'
   import Join from './Join.svelte'
   import Logo from './Logo.svelte'
   import Picto from './Picto.svelte'
+  import RelayLive from './RelayLive.svelte'
   import { codeOf } from './lib/keys.js'
   import { BUTTONS } from './lib/mappings.js'
   import { T } from './lib/strings.js'
@@ -76,6 +78,7 @@
         <button id="start-game" type="button" class="primary" onclick={startGame}>{T.play}</button>
       </section>
       <button id="or-join" type="button" class="link or-join" onclick={() => join.open()}>{T.orJoin}</button>
+      <RelayLive relay={join.where().relay} />
       <p class="dim small other">{T.otherDisc} <button id="pick-disc" type="button" class="link" onclick={() => input.click()}>{T.chooseFile}</button></p>
       <input id="disc-input" type="file" accept=".bin,.zip,application/zip" hidden bind:this={input} onchange={pick} />
     {:else}
@@ -99,6 +102,7 @@
         <button id="join-back" type="button" class="link or-join" onclick={join.toDials}>{T.joinBack} <Glyph kind="psx" value="triangle" size={18} /></button>
       {:else if ui.phase === 'boot'}
         <button id="or-join" type="button" class="link or-join" onclick={() => join.open()}>{T.orJoin}</button>
+        <RelayLive relay={join.where().relay} />
       {/if}
       <ul class="needs">
         {#each T.needs as line}<li>{line}</li>{/each}

@@ -85,7 +85,7 @@ wait_port() {
 start_relay() {
   [ -d "$tree/relay/node_modules" ] || (cd "$tree/relay" && npm ci --no-audit --no-fund --loglevel=error)
   relay_key=$(openssl rand -hex 12)
-  (cd "$tree/relay" && RELAY_KEY="$relay_key" PORT="$RELAY" exec node relay.js) > "$1.relay.log" 2>&1 &
+  (cd "$tree/relay" && RELAY_KEY="$relay_key" RELAY_LIVE=1 PORT="$RELAY" exec node relay.js) > "$1.relay.log" 2>&1 &
   servers+=($!)
   wait_port "$RELAY" "the relay did not start (log $1.relay.log)"
 }

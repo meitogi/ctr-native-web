@@ -101,6 +101,7 @@ reverse proxy ([deploy/](deploy/), next section), or give it a certificate with
 | `RELAY_ROOM_MAX` | `8` | peers per room |
 | `RELAY_ORIGINS` | empty | pages allowed to connect, comma-separated `Origin`s (`https://ctr.suuuper.app`) ; empty = any. Only fences other sites' pages off a relay : a client without an `Origin` header (not a browser) still connects, the key is what gates it |
 | `RELAY_STATS` | — | `1` answers `GET /stats` with counters (sockets, rooms, forwarded, `droppedLossy`, `closedRate`, `refusedOrigin`, and an open relay's : `peakSockets`, `peakRooms`, `refused` per reason, `kicked` per reason) |
+| `RELAY_LIVE` | — | `1` answers `GET /live` to any page (`Access-Control-Allow-Origin: *`) with what may be shown in public : `players`, `rooms`, `peakPlayers`, `peakRooms`, `since`. Never a refusal nor a kick : those stay in `/stats`, which a public relay keeps off its public route. The home page shows it under « or join a room » |
 | `RELAY_MAX_SOCKETS` | `0` | sockets open at once ; one more is closed 4503. `0` = no limit, as for every row below |
 | `RELAY_MAX_ROOMS` | `0` | rooms open at once ; a hello that would open one more is closed 4503 |
 | `RELAY_IP_MAX` | `0` | sockets open at once from one client address ; one more is closed 4430 |

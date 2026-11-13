@@ -272,6 +272,31 @@ describe('Origin allow-list and stats', () => {
     a.close();
     await on.close();
   });
+
+  test('/live answers only when enabled, to any page, with the players and rooms only', async () => {
+    const off = await createRelay({ port: 0, host: '127.0.0.1', log: quiet, stats: true });
+    assert.equal((await fetch(`http://127.0.0.1:${off.port}/live`)).status, 426);
+    await off.close();
+    const on = await createRelay({ port: 0, host: '127.0.0.1', log: quiet, live: true, maxSockets: 1 });
+    const url = `ws://127.0.0.1:${on.port}`;
+    const a = await join(url, { id: 'lv-a', room: 'lv' });
+    const refused = connect(url);
+    await refused.closed;
+    const res = await fetch(`http://127.0.0.1:${on.port}/live`);
+    assert.equal(res.headers.get('access-control-allow-origin'), '*');
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    const body = await res.json();
+    assert.deepEqual(Object.keys(body).sort(), ['peakPlayers', 'peakRooms', 'players', 'rooms', 'since']);
+    assert.deepEqual({ ...body, since: 'x' }, { players: 1, rooms: 1, peakPlayers: 1, peakRooms: 1, since: 'x' });
+    assert.equal(body.since, on.stats().since);
+    assert.equal((await fetch(`http://127.0.0.1:${on.port}/stats`)).status, 426);
+    a.close();
+    await a.closed;
+    await new Promise((r) => setTimeout(r, 20));
+    const after = await (await fetch(`http://127.0.0.1:${on.port}/live`)).json();
+    assert.deepEqual([after.players, after.rooms, after.peakPlayers, after.peakRooms], [0, 0, 1, 1]);
+    await on.close();
+  });
 });
 
 describe('TLS', () => {

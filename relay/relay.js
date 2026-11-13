@@ -71,6 +71,8 @@ function newStats() {
  *   header) ; empty = any. A client without the header (not a browser) is not refused : the
  *   key gates the relay, this only fences other sites' pages off it
  * @param {boolean} [options.stats=false] - answer `GET /stats` with the counters (JSON)
+ * @param {boolean} [options.live=false] - answer `GET /live` to any page (CORS) with what may be shown in
+ *   public : players and rooms now, their peaks, since when. Never a refusal or a kick : those stay in /stats
  * @param {number} [options.maxSockets=0] - sockets open at once ; one more is closed `full` (0 = no limit,
  *   as for every limit below : a relay started without them behaves as it always did)
  * @param {number} [options.maxRooms=0] - rooms open at once ; a hello that would open one more is closed `full`
@@ -99,6 +101,7 @@ export function createRelay({
   logData = false,
   origins = [],
   stats: statsOn = false,
+  live: liveOn = false,
   maxSockets = 0,
   maxRooms = 0,
   ipMax = 0,
@@ -124,6 +127,11 @@ export function createRelay({
     if (statsOn && req.url === '/stats') {
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(`${JSON.stringify(snapshot())}\n`);
+    }
+    if (liveOn && req.url === '/live') {
+      res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' });
+      const live = { players: accepted, rooms: roomCount, peakPlayers: stats.peakSockets, peakRooms: stats.peakRooms, since: stats.since };
+      return res.end(`${JSON.stringify(live)}\n`);
     }
     const ok = req.url === '/healthz';
     res.writeHead(ok ? 200 : 426, { 'content-type': 'text/plain' });
@@ -408,6 +416,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     logData: env.RELAY_LOG_DATA === '1',
     origins: (env.RELAY_ORIGINS || '').split(',').map((o) => o.trim()).filter(Boolean),
     stats: env.RELAY_STATS === '1',
+    live: env.RELAY_LIVE === '1',
     maxSockets: envInt('RELAY_MAX_SOCKETS', 0),
     maxRooms: envInt('RELAY_MAX_ROOMS', 0),
     ipMax: envInt('RELAY_IP_MAX', 0),
