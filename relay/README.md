@@ -15,8 +15,9 @@ address** and its **key**. Players type both once in **Settings › Multiplayer 
 uses the same), or get them inside your invite links : a room link made on a page with your
 relay set carries them (`relay=` and `rk=` after the `#`).
 
-**1. Any box with Docker — one line.** The image is published by this repository
-([.github/workflows/relay-image.yml](../.github/workflows/relay-image.yml)), for amd64 and arm64 :
+**1. Any box with Docker — one line.** The image is published by the bare edition's repository,
+ctr-web ([its workflow](https://github.com/meitogi/ctr-web/blob/web/main/.github/workflows/relay-image.yml)),
+for amd64 and arm64 :
 
 ```
 key=$(openssl rand -base64 24); echo "relay key : $key"

@@ -18,6 +18,8 @@ What the project is and how to run it : [README.md](README.md).
   `web/<name>`, fast-forwarded into `web/main` once done.
 - Commits are authored as `meitogi` (the repo's local identity). Commit and tag locally ; pushing
   `web/main` and the tags is the maintainer's step.
+- The relay's image (`ghcr.io/meitogi/ctr-relay`) is published by ctr-web only : this repository
+  has no relay-image workflow, so a relay change is made in ctr-web and merged here.
 
 ## Build and run
 
